@@ -25,4 +25,16 @@ final class WindowPickerTests: XCTestCase {
     func testFrontmostWindowOwnedByUnknownPIDReturnsNil() {
         XCTAssertNil(WindowPicker.frontmostWindow(ownedBy: 999, in: windows))
     }
+
+    /// `onScreenWindows()` filters at the source so no caller can ever resolve a hover/click to one
+    /// of Clipr's own windows (the full-screen capture overlay above all else) or to system chrome
+    /// living above the normal window layer. Vacuously true if the list comes back empty, which is
+    /// fine - the point is that a violation can never appear.
+    func testOnScreenWindowsExcludesOwnProcessAndNonNormalLayers() {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        for window in WindowPicker.onScreenWindows() {
+            XCTAssertNotEqual(window.ownerPID, ownPID, "Clipr's own windows must never be selectable targets")
+            XCTAssertEqual(window.layer, 0, "only normal-layer application windows are selectable targets")
+        }
+    }
 }
