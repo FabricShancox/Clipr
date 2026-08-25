@@ -137,11 +137,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openPreferences() {
-        let controller = PreferencesWindowController(settings: settings, onHotkeysChanged: { [weak self] in
-            self?.hotkeyManager.unregister(id: HotkeyID.capture.rawValue)
-            self?.hotkeyManager.unregister(id: HotkeyID.advancedMode.rawValue)
-            self?.registerHotkeys()
-        })
+        let controller = PreferencesWindowController(
+            settings: settings,
+            onHotkeysChanged: { [weak self] in
+                self?.hotkeyManager.unregister(id: HotkeyID.capture.rawValue)
+                self?.hotkeyManager.unregister(id: HotkeyID.advancedMode.rawValue)
+                self?.registerHotkeys()
+            },
+            // `storage` is a long-lived object created once at launch from the then-current save
+            // folder, and CaptureManager/ClickCaptureManager/the editors all hold a reference to
+            // that same instance. Re-pointing its `baseFolder` (rather than rebuilding it) makes a
+            // save-folder change in Preferences apply to the very next capture for every one of
+            // them, instead of silently doing nothing until the next relaunch.
+            onSaveFolderChanged: { [weak self] in
+                guard let self else { return }
+                self.storage.baseFolder = self.settings.saveFolder
+            }
+        )
         preferencesWindowController = controller
         controller.showWindow(nil)
     }

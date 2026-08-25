@@ -2,7 +2,11 @@ import Cocoa
 import SwiftUI
 
 final class PreferencesWindowController: NSWindowController {
-    init(settings: SettingsStore, onHotkeysChanged: @escaping () -> Void) {
+    init(
+        settings: SettingsStore,
+        onHotkeysChanged: @escaping () -> Void,
+        onSaveFolderChanged: @escaping () -> Void
+    ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
             styleMask: [.titled, .closable],
@@ -11,7 +15,11 @@ final class PreferencesWindowController: NSWindowController {
         )
         window.title = "Clipr Preferences"
         super.init(window: window)
-        window.contentView = NSHostingView(rootView: PreferencesView(settings: settings, onHotkeysChanged: onHotkeysChanged))
+        window.contentView = NSHostingView(rootView: PreferencesView(
+            settings: settings,
+            onHotkeysChanged: onHotkeysChanged,
+            onSaveFolderChanged: onSaveFolderChanged
+        ))
         window.center()
     }
 

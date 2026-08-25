@@ -76,4 +76,18 @@ final class StorageManagerTests: XCTestCase {
         XCTAssertGreaterThan(data1.count, 0)
         XCTAssertGreaterThan(data2.count, 0)
     }
+
+    /// A save-folder change in Preferences re-points the existing (long-lived) StorageManager rather
+    /// than rebuilding it, so writes must follow the new folder immediately.
+    func testReassigningBaseFolderRedirectsSubsequentWrites() throws {
+        let newFolder = tempDir.appendingPathComponent("Relocated")
+        manager.baseFolder = newFolder
+
+        let url = try manager.saveRawCapture(makeTestImage(), date: Date())
+        XCTAssertEqual(url.deletingLastPathComponent().path, newFolder.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+
+        let sessionFolder = try manager.createSessionFolder(date: Date())
+        XCTAssertEqual(sessionFolder.deletingLastPathComponent().path, newFolder.path)
+    }
 }
