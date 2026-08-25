@@ -87,7 +87,7 @@ final class CaptureManager {
         return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
     }
 
-    private static func captureWindow(_ windowInfo: WindowInfo) async throws -> NSImage {
+    static func captureWindow(_ windowInfo: WindowInfo) async throws -> NSImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let scWindow = content.windows.first(where: { $0.windowID == windowInfo.windowID }) else {
             throw CaptureError.windowNotFound
