@@ -53,8 +53,17 @@ final class CaptureManager {
         }
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
-        config.width = display.width
-        config.height = display.height
+        // `SCDisplay.width`/`.height` are documented (ScreenCaptureKit/SCShareableContent.h) as the
+        // display's width/height in POINTS, whereas `SCStreamConfiguration.width`/`.height`
+        // (ScreenCaptureKit/SCStream.h) are the output width/height in PIXELS. Assigning the former
+        // straight into the latter would request a point-sized pixel buffer - i.e. a half-resolution
+        // capture on any 2x Retina display - and would also leave the returned `CGImage` smaller
+        // than `captureArea` below assumes when it scales its crop rect into pixel space. Convert
+        // points -> pixels explicitly with the screen's backing scale factor, matching what
+        // `captureWindow` already does for its (also points-based) `kCGWindowBounds` size.
+        let scale = screen.backingScaleFactor
+        config.width = Int((CGFloat(display.width) * scale).rounded())
+        config.height = Int((CGFloat(display.height) * scale).rounded())
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
@@ -67,8 +76,10 @@ final class CaptureManager {
         // `rect` arrives from CaptureOverlayView in the overlay's VIEW-LOCAL POINTS space (the
         // overlay view fills `screen.frame`, which is in points, and the rect comes straight from
         // a SwiftUI DragGesture). `cgImage` above, however, was captured at the display's native
-        // PIXEL resolution: `captureFullScreen` sets `SCStreamConfiguration.width`/`.height` to
-        // `display.width`/`display.height` from `SCDisplay`, which are pixel dimensions. On any
+        // PIXEL resolution: `SCDisplay.width`/`.height` are themselves in points, so
+        // `captureFullScreen` explicitly multiplies them by `screen.backingScaleFactor` before
+        // assigning them to `SCStreamConfiguration.width`/`.height` (which are documented in
+        // pixels) - meaning the `CGImage` handed back here genuinely is pixel-sized. On any
         // Retina display (backingScaleFactor > 1) those two spaces differ, so the points-space rect
         // must be scaled up to pixel space before it can be used to crop the pixel-space image, or
         // the crop comes out the wrong size and in the wrong position. Example: on a 2x Retina
