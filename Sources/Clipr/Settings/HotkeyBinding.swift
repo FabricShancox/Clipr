@@ -2,10 +2,10 @@ import Foundation
 
 struct HotkeyBinding: Codable, Equatable {
     enum Modifier: UInt32 {
-        case command = 1
-        case shift = 2
-        case option = 4
-        case control = 8
+        case command = 256  // Carbon cmdKey (bit 8)
+        case shift = 512    // Carbon shiftKey (bit 9)
+        case option = 2048  // Carbon optionKey (bit 11)
+        case control = 4096 // Carbon controlKey (bit 12)
     }
 
     let keyCode: UInt32
