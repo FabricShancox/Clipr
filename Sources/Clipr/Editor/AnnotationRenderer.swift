@@ -52,8 +52,10 @@ struct AnnotationRenderer {
         switch annotation.kind {
         case .rectangle:
             context.stroke(annotation.frame)
-        case .arrow:
-            drawArrow(annotation.frame, in: context)
+        case .ellipse:
+            context.strokeEllipse(in: annotation.frame)
+        case .arrow(let start, let end):
+            drawArrow(from: start, to: end, strokeWidth: annotation.strokeWidth, in: context)
         case .freehand(let points):
             drawFreehand(points, in: context)
         case .highlighter:
@@ -64,8 +66,8 @@ struct AnnotationRenderer {
             // (Full pixel-sampling blur is a possible future enhancement; out of scope for v1.)
             context.setFillColor(CGColor(gray: 0.5, alpha: 0.9))
             context.fill(annotation.frame)
-        case .text(let string):
-            drawText(string, in: annotation.frame, color: annotation.color, context: context)
+        case .text(let string, let style):
+            drawText(string, style: style, in: annotation.frame, color: annotation.color, context: context)
         case .stamp(let kind):
             drawStamp(kind, in: annotation.frame, color: annotation.color, context: context)
         }
@@ -73,15 +75,17 @@ struct AnnotationRenderer {
         context.restoreGState()
     }
 
-    private static func drawArrow(_ frame: CGRect, in context: CGContext) {
-        let start = CGPoint(x: frame.minX, y: frame.minY)
-        let end = CGPoint(x: frame.maxX, y: frame.maxY)
+    private static func drawArrow(from start: CGPoint, to end: CGPoint, strokeWidth: CGFloat, in context: CGContext) {
         context.move(to: start)
         context.addLine(to: end)
         context.strokePath()
 
         let angle = atan2(end.y - start.y, end.x - start.x)
-        let headLength: CGFloat = 10
+        // A fixed head length reads fine on a thin line but gets visually swallowed by a thick
+        // one — the two head strokes end up almost entirely inside the shaft's own width near the
+        // tip, so the arrow looks like it just stops rather than coming to a point. Scaling with
+        // `strokeWidth` keeps the head clearly visible at every stroke size.
+        let headLength = arrowHeadLength(for: strokeWidth)
         let p1 = CGPoint(x: end.x - headLength * cos(angle - .pi / 6), y: end.y - headLength * sin(angle - .pi / 6))
         let p2 = CGPoint(x: end.x - headLength * cos(angle + .pi / 6), y: end.y - headLength * sin(angle + .pi / 6))
         context.move(to: end)
@@ -100,11 +104,11 @@ struct AnnotationRenderer {
         context.strokePath()
     }
 
-    private static func drawText(_ string: String, in frame: CGRect, color: RGBAColor, context: CGContext) {
+    private static func drawText(_ string: String, style: TextStyle, in frame: CGRect, color: RGBAColor, context: CGContext) {
         let nsColor = NSColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
         let attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: nsColor,
-            .font: NSFont.systemFont(ofSize: max(frame.height * 0.7, 10))
+            .font: styledFont(style)
         ]
         let attributed = NSAttributedString(string: string, attributes: attributes)
         NSGraphicsContext.saveGraphicsState()
@@ -122,6 +126,26 @@ struct AnnotationRenderer {
         tinted.draw(in: frame)
         NSGraphicsContext.restoreGraphicsState()
     }
+}
+
+/// Shared by `AnnotationRenderer.drawArrow` (the final flattened render) and
+/// `AnnotationCanvasView.arrowPath` (the live editor preview) so both scale the arrowhead
+/// identically — a head sized only for the thinnest stroke preset gets visually swallowed by a
+/// thick one, reading as a line that just stops rather than a clear arrow.
+func arrowHeadLength(for strokeWidth: CGFloat) -> CGFloat {
+    max(14, strokeWidth * 3.5)
+}
+
+/// Bold/italic composed via `NSFontManager` symbolic traits on top of the system font, rather
+/// than hardcoding a specific bold/italic font name — keeps this in sync with whatever the
+/// regular-weight system font actually is.
+func styledFont(_ style: TextStyle) -> NSFont {
+    let base = NSFont.systemFont(ofSize: max(style.fontSize, 6))
+    var traits: NSFontTraitMask = []
+    if style.bold { traits.insert(.boldFontMask) }
+    if style.italic { traits.insert(.italicFontMask) }
+    guard traits != [] else { return base }
+    return NSFontManager.shared.convert(base, toHaveTrait: traits)
 }
 
 private extension NSImage {

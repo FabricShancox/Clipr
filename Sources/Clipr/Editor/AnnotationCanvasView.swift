@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AnnotationTool: Equatable {
-    case select, rectangle, arrow, freehand, text, highlighter, blur, stamp(StampKind)
+    case select, rectangle, ellipse, arrow, freehand, text, highlighter, blur, crop, stamp(StampKind)
 }
 
 /// Interactive canvas that lets the user drag out annotations on top of the captured image.
@@ -12,26 +12,59 @@ enum AnnotationTool: Equatable {
 /// in CoreGraphics' native convention instead — origin at the bottom-left, y increasing upward
 /// (see `AnnotationRenderer`'s `flipped: false` NSGraphicsContext, which matches CGContext's
 /// bottom-left-origin default). Every `AnnotationObject` this view constructs must therefore have
-/// its frame (and, for freehand, its points) converted from SwiftUI space into that renderer
-/// space before being stored in `annotations` — and converted back when reading a stored
-/// annotation's frame (or points) for on-screen SwiftUI display (e.g. the live preview and the
-/// selection outline). Both conversions use the same formula, `y' = canvasHeight - y - height`
-/// for rects (or `y' = canvasHeight - y` for bare points), because that formula is its own
-/// inverse.
+/// its frame (and, for freehand/arrow, its points) converted from SwiftUI space into that
+/// renderer space before being stored in `annotations` — and converted back when reading a
+/// stored annotation's frame (or points) for on-screen SwiftUI display (e.g. the selection
+/// outline). Both conversions use the same formula, `y' = canvasHeight - y - height` for rects
+/// (or `y' = canvasHeight - y` for bare points), because that formula is its own inverse.
+///
+/// The in-progress live preview (while a drag is still active, before it commits into
+/// `annotations`) is drawn directly in raw SwiftUI-space coordinates — it's never stored, so no
+/// flip conversion applies to it.
 struct AnnotationCanvasView: View {
     let image: NSImage
     @Binding var annotations: [AnnotationObject]
     @Binding var selectedTool: AnnotationTool
     @Binding var currentColor: RGBAColor
     @Binding var currentStrokeWidth: CGFloat
+    @Binding var currentTextStyle: TextStyle
+    /// Fired once, synchronously, right after a new annotation is appended — e.g. so a caller
+    /// can auto-advance a numbered-stamp counter. Deliberately a direct callback at the exact
+    /// moment of commit rather than something inferred later (like watching `annotations.count`
+    /// change), so there's no dependency on view-update timing/ordering.
+    var onAnnotationCommitted: ((AnnotationObject) -> Void)?
+    /// Fired when a Crop drag completes, with the crop rect in renderer space. Cropping the
+    /// actual base image is handled by the caller (it isn't an `AnnotationObject` — it changes
+    /// `image` itself, which this view doesn't own).
+    var onCropRequested: ((CGRect) -> Void)?
 
     @State private var dragStart: CGPoint?
+    @State private var dragCurrentLocation: CGPoint?
     @State private var freehandPoints: [CGPoint] = []
     @State private var selectedID: UUID?
+    @State private var movingID: UUID?
+    @State private var moveOffset: CGSize = .zero
+    @State private var editingTextID: UUID?
+    @FocusState private var textFieldFocused: Bool
 
     /// The canvas fills `image` at 1:1, so the image's point height is also the canvas height —
     /// the value needed to flip between SwiftUI's y-down space and the renderer's y-up space.
     private var canvasHeight: CGFloat { image.size.height }
+
+    private var displayColor: Color {
+        Color(red: Double(currentColor.red), green: Double(currentColor.green), blue: Double(currentColor.blue), opacity: Double(currentColor.alpha))
+    }
+
+    /// Stamps and text place on a single click; every other tool needs an actual drag to size
+    /// what it's drawing. SwiftUI's `DragGesture` never fires `onEnded` for a true zero-movement
+    /// click when `minimumDistance` is 1, which is why stamps/text used to feel like they
+    /// required a tiny drag even though nothing was meant to be sized.
+    private var dragMinimumDistance: CGFloat {
+        switch selectedTool {
+        case .stamp, .text: return 0
+        default: return 1
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -40,13 +73,21 @@ struct AnnotationCanvasView: View {
                 .aspectRatio(contentMode: .fit)
 
             ForEach(annotations) { annotation in
-                AnnotationOverlayShape(
-                    annotation: annotation,
-                    displayFrame: swiftUIFrame(fromRendererFrame: annotation.frame),
-                    displayPoints: displayPoints(for: annotation),
-                    isSelected: annotation.id == selectedID
-                )
+                // The annotation currently being typed into is represented by the live
+                // `TextField` overlay below instead, so it isn't drawn twice.
+                if annotation.id != editingTextID {
+                    AnnotationOverlayShape(
+                        annotation: annotation,
+                        displayFrame: swiftUIFrame(fromRendererFrame: annotation.frame),
+                        displayPoints: displayPoints(for: annotation),
+                        isSelected: annotation.id == selectedID,
+                        liveOffset: annotation.id == movingID ? moveOffset : .zero
+                    )
+                }
             }
+
+            livePreview
+            textEditingOverlay
         }
         // Every y-flip in this view is only correct if the canvas actually renders at the
         // image's native point size. Pin it explicitly rather than trusting a parent view
@@ -55,49 +96,192 @@ struct AnnotationCanvasView: View {
         // view's real on-screen size and break every coordinate conversion above.
         .frame(width: image.size.width, height: image.size.height)
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: dragMinimumDistance)
                 .onChanged { value in handleDragChanged(value) }
                 .onEnded { value in handleDragEnded(value) }
         )
     }
 
+    /// What the user is actively drawing right now, before it commits into `annotations` on
+    /// drag-end. Drawn in raw SwiftUI-space coordinates (never stored, so no flip needed).
+    @ViewBuilder
+    private var livePreview: some View {
+        switch selectedTool {
+        case .freehand:
+            if !freehandPoints.isEmpty {
+                livePath(freehandPoints)
+                    .stroke(displayColor, style: StrokeStyle(lineWidth: currentStrokeWidth, lineCap: .round, lineJoin: .round))
+            }
+        case .arrow:
+            if let start = dragStart, let current = dragCurrentLocation {
+                arrowPath(from: start, to: current, strokeWidth: currentStrokeWidth)
+                    .stroke(displayColor, lineWidth: currentStrokeWidth)
+            }
+        case .rectangle, .ellipse, .highlighter, .blur:
+            if let start = dragStart, let current = dragCurrentLocation {
+                liveShapePreview(for: selectedTool, in: rectBetween(start, current))
+            }
+        case .crop:
+            if let start = dragStart, let current = dragCurrentLocation {
+                Rectangle()
+                    .strokeBorder(Color.white, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                    .background(Color.black.opacity(0.15))
+                    .frame(width: rectBetween(start, current).width, height: rectBetween(start, current).height)
+                    .position(x: rectBetween(start, current).midX, y: rectBetween(start, current).midY)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func rectBetween(_ start: CGPoint, _ current: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, current.x), y: min(start.y, current.y),
+            width: abs(current.x - start.x), height: abs(current.y - start.y)
+        )
+    }
+
+    @ViewBuilder
+    private func liveShapePreview(for tool: AnnotationTool, in rect: CGRect) -> some View {
+        switch tool {
+        case .rectangle:
+            Rectangle().stroke(displayColor, lineWidth: currentStrokeWidth)
+                .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
+        case .ellipse:
+            Ellipse().stroke(displayColor, lineWidth: currentStrokeWidth)
+                .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
+        case .highlighter:
+            Rectangle().fill(displayColor.opacity(0.35))
+                .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
+        case .blur:
+            Rectangle().fill(Color(white: 0.5, opacity: 0.9))
+                .frame(width: rect.width, height: rect.height).position(x: rect.midX, y: rect.midY)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func livePath(_ points: [CGPoint]) -> Path {
+        Path { path in
+            guard let first = points.first else { return }
+            path.move(to: first)
+            for point in points.dropFirst() { path.addLine(to: point) }
+        }
+    }
+
+    /// While `editingTextID` is set, a real `TextField` sits directly over that annotation's
+    /// frame so the user can type. Bound straight through to the stored `.text` payload (via
+    /// `editingTextBinding`) rather than a separate local buffer, so every keystroke is already
+    /// "saved" into `annotations` — closing the editor (Return, or starting any other gesture)
+    /// never needs a separate commit step.
+    @ViewBuilder
+    private var textEditingOverlay: some View {
+        if let id = editingTextID, let annotation = annotations.first(where: { $0.id == id }),
+           case .text(_, let style) = annotation.kind {
+            let frame = swiftUIFrame(fromRendererFrame: annotation.frame)
+            TextField("", text: editingTextBinding)
+                .textFieldStyle(.plain)
+                .font(styledSwiftUIFont(style))
+                .foregroundColor(displayColor(for: annotation))
+                .frame(width: max(frame.width, 80), height: frame.height, alignment: .leading)
+                .position(x: max(frame.width, 80) / 2 + frame.minX, y: frame.midY)
+                .focused($textFieldFocused)
+                .onSubmit { editingTextID = nil }
+                .onAppear { textFieldFocused = true }
+        }
+    }
+
+    private func displayColor(for annotation: AnnotationObject) -> Color {
+        Color(
+            red: Double(annotation.color.red), green: Double(annotation.color.green),
+            blue: Double(annotation.color.blue), opacity: Double(annotation.color.alpha)
+        )
+    }
+
+    private var editingTextBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let id = editingTextID, let annotation = annotations.first(where: { $0.id == id }),
+                      case .text(let string, _) = annotation.kind else { return "" }
+                return string
+            },
+            set: { newValue in
+                guard let id = editingTextID, let index = annotations.firstIndex(where: { $0.id == id }),
+                      case .text(_, let style) = annotations[index].kind else { return }
+                annotations[index].kind = .text(newValue, style)
+            }
+        )
+    }
+
     private func handleDragChanged(_ value: DragGesture.Value) {
+        // Starting any new gesture — anywhere, with any tool — closes whatever text field was
+        // open. Its content is already live-written via `editingTextBinding`, so this never
+        // loses anything; it just returns the canvas to its normal (non-editing) state.
+        if editingTextID != nil { editingTextID = nil }
+
         switch selectedTool {
         case .freehand:
             freehandPoints.append(value.location)
         case .select:
-            break
+            if dragStart == nil {
+                // Decide once, at the start of this drag, whether we're moving the already-
+                // selected annotation (the drag started on top of it) or just about to tap
+                // somewhere to change the selection.
+                let rendererPoint = rendererPoint(fromSwiftUIPoint: value.startLocation)
+                if let selectedID, let selected = annotations.first(where: { $0.id == selectedID }),
+                   selected.contains(rendererPoint) {
+                    movingID = selectedID
+                }
+                dragStart = value.startLocation
+            }
+            if movingID != nil {
+                moveOffset = CGSize(width: value.location.x - value.startLocation.x, height: value.location.y - value.startLocation.y)
+            }
         default:
             if dragStart == nil { dragStart = value.startLocation }
+            dragCurrentLocation = value.location
         }
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
         switch selectedTool {
         case .select:
-            let rendererPoint = rendererPoint(fromSwiftUIPoint: value.location)
-            selectedID = annotations.last { $0.contains(rendererPoint) }?.id
+            if let movingID, let index = annotations.firstIndex(where: { $0.id == movingID }) {
+                // SwiftUI's drag delta is in y-down space; the stored geometry is in the
+                // renderer's y-up space, so the y component of the delta flips sign too.
+                let rendererDelta = CGPoint(x: moveOffset.width, y: -moveOffset.height)
+                annotations[index] = translated(annotations[index], byRendererDelta: rendererDelta)
+            } else {
+                let rendererPoint = rendererPoint(fromSwiftUIPoint: value.location)
+                selectedID = annotations.last { $0.contains(rendererPoint) }?.id
+            }
+            movingID = nil
+            moveOffset = .zero
+            dragStart = nil
         case .freehand:
             guard !freehandPoints.isEmpty else { return }
             let rendererPoints = freehandPoints.map { rendererPoint(fromSwiftUIPoint: $0) }
-            annotations.append(AnnotationObject(
+            commit(AnnotationObject(
                 id: UUID(), kind: .freehand(rendererPoints),
                 frame: boundingBox(of: rendererPoints),
                 color: currentColor, strokeWidth: currentStrokeWidth
             ))
             freehandPoints = []
         case .text:
-            guard let start = dragStart else { return }
-            let swiftUIFrame = CGRect(x: start.x, y: start.y, width: 120, height: 24)
-            annotations.append(AnnotationObject(
-                id: UUID(), kind: .text("Text"),
+            let start = dragStart ?? value.location
+            let swiftUIFrame = CGRect(x: start.x, y: start.y, width: 160, height: currentTextStyle.fontSize + 10)
+            let newAnnotation = AnnotationObject(
+                id: UUID(), kind: .text("", currentTextStyle),
                 frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame),
                 color: currentColor, strokeWidth: currentStrokeWidth
-            ))
+            )
+            commit(newAnnotation)
+            editingTextID = newAnnotation.id
             dragStart = nil
+            dragCurrentLocation = nil
         case .stamp(let kind):
             let swiftUIFrame = CGRect(x: value.location.x - 16, y: value.location.y - 16, width: 32, height: 32)
-            annotations.append(AnnotationObject(
+            commit(AnnotationObject(
                 id: UUID(), kind: .stamp(kind),
                 frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame),
                 color: currentColor, strokeWidth: currentStrokeWidth
@@ -108,21 +292,71 @@ struct AnnotationCanvasView: View {
             // stamp would corrupt the START POINT of the next rectangle/arrow/text/highlighter/
             // blur drag.
             dragStart = nil
+            dragCurrentLocation = nil
+        case .arrow:
+            guard let start = dragStart else { return }
+            let rendererStart = rendererPoint(fromSwiftUIPoint: start)
+            let rendererEnd = rendererPoint(fromSwiftUIPoint: value.location)
+            dragStart = nil
+            dragCurrentLocation = nil
+            guard hypot(value.location.x - start.x, value.location.y - start.y) > 2 else { return }
+            commit(AnnotationObject(
+                id: UUID(), kind: .arrow(rendererStart, rendererEnd),
+                frame: boundingBox(of: [rendererStart, rendererEnd]),
+                color: currentColor, strokeWidth: currentStrokeWidth
+            ))
+        case .crop:
+            guard let start = dragStart else { return }
+            let swiftUIFrame = rectBetween(start, value.location)
+            dragStart = nil
+            dragCurrentLocation = nil
+            guard swiftUIFrame.width > 4, swiftUIFrame.height > 4 else { return }
+            onCropRequested?(rendererFrame(fromSwiftUIFrame: swiftUIFrame))
         default:
             guard let start = dragStart else { return }
-            let swiftUIFrame = CGRect(
-                x: min(start.x, value.location.x), y: min(start.y, value.location.y),
-                width: abs(value.location.x - start.x), height: abs(value.location.y - start.y)
-            )
+            let swiftUIFrame = rectBetween(start, value.location)
             dragStart = nil
+            dragCurrentLocation = nil
             guard swiftUIFrame.width > 2, swiftUIFrame.height > 2 else { return }
-            let kind: AnnotationKind = selectedTool == .arrow ? .arrow : (selectedTool == .highlighter ? .highlighter : (selectedTool == .blur ? .blur : .rectangle))
-            annotations.append(AnnotationObject(
+            let kind: AnnotationKind
+            switch selectedTool {
+            case .ellipse: kind = .ellipse
+            case .highlighter: kind = .highlighter
+            case .blur: kind = .blur
+            default: kind = .rectangle
+            }
+            commit(AnnotationObject(
                 id: UUID(), kind: kind,
                 frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame),
                 color: currentColor, strokeWidth: currentStrokeWidth
             ))
         }
+    }
+
+    private func commit(_ annotation: AnnotationObject) {
+        annotations.append(annotation)
+        onAnnotationCommitted?(annotation)
+    }
+
+    /// Moves an annotation by a delta already expressed in renderer space, translating whichever
+    /// point data that annotation kind actually stores (not just `frame`, which is only a
+    /// bounding box for `.freehand`/`.arrow` — moving those without also translating their real
+    /// points would leave the stroke behind while the (invisible) frame moved).
+    private func translated(_ annotation: AnnotationObject, byRendererDelta delta: CGPoint) -> AnnotationObject {
+        var copy = annotation
+        copy.frame = annotation.frame.offsetBy(dx: delta.x, dy: delta.y)
+        switch annotation.kind {
+        case .freehand(let points):
+            copy.kind = .freehand(points.map { CGPoint(x: $0.x + delta.x, y: $0.y + delta.y) })
+        case .arrow(let start, let end):
+            copy.kind = .arrow(
+                CGPoint(x: start.x + delta.x, y: start.y + delta.y),
+                CGPoint(x: end.x + delta.x, y: end.y + delta.y)
+            )
+        default:
+            break // frame move alone is enough for rectangle/ellipse/highlighter/blur/text/stamp
+        }
+        return copy
     }
 
     private func boundingBox(of points: [CGPoint]) -> CGRect {
@@ -138,18 +372,15 @@ struct AnnotationCanvasView: View {
     /// Per-annotation-kind points needed by `AnnotationOverlayShape` for live rendering, already
     /// converted into SwiftUI display space:
     /// - `.freehand`: every stored (renderer-space) point, converted for the stroke path.
-    /// - `.arrow`: the two renderer-space corners `AnnotationRenderer.drawArrow` itself draws
-    ///   between (`(frame.minX, frame.minY)` -> `(frame.maxX, frame.maxY)`), converted so the
-    ///   live preview's arrow direction matches what the final flattened render will show.
+    /// - `.arrow`: the two explicit renderer-space endpoints, converted, so the displayed arrow
+    ///   points the same direction the user actually dragged (see `AnnotationKind.arrow`'s doc).
     /// - everything else: unused by the shape, so empty.
     private func displayPoints(for annotation: AnnotationObject) -> [CGPoint] {
         switch annotation.kind {
         case .freehand(let points):
             return points.map { swiftUIPoint(fromRendererPoint: $0) }
-        case .arrow:
-            let rendererStart = CGPoint(x: annotation.frame.minX, y: annotation.frame.minY)
-            let rendererEnd = CGPoint(x: annotation.frame.maxX, y: annotation.frame.maxY)
-            return [swiftUIPoint(fromRendererPoint: rendererStart), swiftUIPoint(fromRendererPoint: rendererEnd)]
+        case .arrow(let start, let end):
+            return [swiftUIPoint(fromRendererPoint: start), swiftUIPoint(fromRendererPoint: end)]
         default:
             return []
         }
@@ -193,6 +424,34 @@ struct AnnotationCanvasView: View {
     }
 }
 
+/// Shared by the live (in-progress) arrow preview and the committed `AnnotationOverlayShape`
+/// arrow rendering, so both draw the exact same head geometry.
+func arrowPath(from start: CGPoint, to end: CGPoint, strokeWidth: CGFloat) -> Path {
+    Path { path in
+        path.move(to: start)
+        path.addLine(to: end)
+
+        let angle = atan2(end.y - start.y, end.x - start.x)
+        let headLength = arrowHeadLength(for: strokeWidth)
+        let p1 = CGPoint(x: end.x - headLength * cos(angle - .pi / 6), y: end.y - headLength * sin(angle - .pi / 6))
+        let p2 = CGPoint(x: end.x - headLength * cos(angle + .pi / 6), y: end.y - headLength * sin(angle + .pi / 6))
+        path.move(to: end)
+        path.addLine(to: p1)
+        path.move(to: end)
+        path.addLine(to: p2)
+    }
+}
+
+/// `TextStyle` -> SwiftUI `Font`, matching `styledFont(_:)`'s AppKit `NSFont` construction used
+/// by `AnnotationRenderer` and the live `TextField` overlay, so what you see while typing matches
+/// what gets flattened into the saved image.
+func styledSwiftUIFont(_ style: TextStyle) -> Font {
+    var font = Font.system(size: style.fontSize)
+    if style.bold { font = font.bold() }
+    if style.italic { font = font.italic() }
+    return font
+}
+
 /// Renders one annotation's live, in-progress appearance on the canvas (so the user sees what
 /// they're drawing immediately, without waiting for `AnnotationRenderer.flatten` to run), plus
 /// its selection outline on top. This is a lightweight SwiftUI approximation of what
@@ -207,6 +466,9 @@ private struct AnnotationOverlayShape: View {
     /// that don't need it.
     let displayPoints: [CGPoint]
     let isSelected: Bool
+    /// Live drag offset while this specific annotation is being moved (Select tool); `.zero`
+    /// otherwise. Applied as a plain view-space translation on top of the normal position.
+    var liveOffset: CGSize = .zero
 
     private var color: Color {
         Color(
@@ -222,6 +484,7 @@ private struct AnnotationOverlayShape: View {
             content
             selectionOutline
         }
+        .offset(liveOffset)
     }
 
     @ViewBuilder
@@ -232,17 +495,22 @@ private struct AnnotationOverlayShape: View {
                 .stroke(color, lineWidth: annotation.strokeWidth)
                 .frame(width: displayFrame.width, height: displayFrame.height)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
+        case .ellipse:
+            Ellipse()
+                .stroke(color, lineWidth: annotation.strokeWidth)
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
         case .arrow:
             if displayPoints.count == 2 {
-                arrowPath(from: displayPoints[0], to: displayPoints[1])
+                arrowPath(from: displayPoints[0], to: displayPoints[1], strokeWidth: annotation.strokeWidth)
                     .stroke(color, lineWidth: annotation.strokeWidth)
             }
         case .freehand:
             freehandPath
                 .stroke(color, style: StrokeStyle(lineWidth: annotation.strokeWidth, lineCap: .round, lineJoin: .round))
-        case .text(let string):
+        case .text(let string, let style):
             Text(string)
-                .font(.system(size: max(displayFrame.height * 0.7, 10)))
+                .font(styledSwiftUIFont(style))
                 .foregroundColor(color)
                 .frame(width: displayFrame.width, height: displayFrame.height, alignment: .leading)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
@@ -282,22 +550,6 @@ private struct AnnotationOverlayShape: View {
             for point in displayPoints.dropFirst() {
                 path.addLine(to: point)
             }
-        }
-    }
-
-    private func arrowPath(from start: CGPoint, to end: CGPoint) -> Path {
-        Path { path in
-            path.move(to: start)
-            path.addLine(to: end)
-
-            let angle = atan2(end.y - start.y, end.x - start.x)
-            let headLength: CGFloat = 10
-            let p1 = CGPoint(x: end.x - headLength * cos(angle - .pi / 6), y: end.y - headLength * sin(angle - .pi / 6))
-            let p2 = CGPoint(x: end.x - headLength * cos(angle + .pi / 6), y: end.y - headLength * sin(angle + .pi / 6))
-            path.move(to: end)
-            path.addLine(to: p1)
-            path.move(to: end)
-            path.addLine(to: p2)
         }
     }
 }

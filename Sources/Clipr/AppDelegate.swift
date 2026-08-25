@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        applyCaptureCursorSetting()
+
         captureManager.onCaptureFinished = { [weak self] rawURL, image in
             guard let self else { return }
             let editor = EditorWindowController(image: image, rawURL: rawURL, storage: self.storage)
@@ -152,10 +154,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onSaveFolderChanged: { [weak self] in
                 guard let self else { return }
                 self.storage.baseFolder = self.settings.saveFolder
-            }
+            },
+            onCaptureCursorChanged: { [weak self] in self?.applyCaptureCursorSetting() }
         )
         preferencesWindowController = controller
         controller.showWindow(nil)
+    }
+
+    /// `CaptureManager`/`ClickCaptureManager` each hold their own `captureCursor` copy rather
+    /// than reading `SettingsStore` live, so both need re-syncing here — at launch, and again
+    /// whenever the Preferences toggle changes.
+    private func applyCaptureCursorSetting() {
+        captureManager.captureCursor = settings.captureCursor
+        clickCaptureManager.captureCursor = settings.captureCursor
     }
 
     private func showPermissionAlert(pane: PrivacyPane, message: String) {

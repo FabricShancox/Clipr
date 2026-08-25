@@ -8,24 +8,32 @@ struct PreferencesView: View {
     /// old folder at launch. This callback lets the owner re-point it, so the change applies to the
     /// very next capture instead of only after a relaunch.
     let onSaveFolderChanged: () -> Void
+    /// Mirrors `onSaveFolderChanged`: `CaptureManager`/`ClickCaptureManager` each hold their own
+    /// `captureCursor` copy (set once at launch) rather than reading `SettingsStore` live, so
+    /// this callback re-syncs both the moment the toggle changes.
+    let onCaptureCursorChanged: () -> Void
 
     @State private var captureHotkey: HotkeyBinding
     @State private var advancedModeHotkey: HotkeyBinding
     @State private var saveFolder: URL
     @State private var launchAtLogin: Bool
+    @State private var captureCursor: Bool
 
     init(
         settings: SettingsStore,
         onHotkeysChanged: @escaping () -> Void,
-        onSaveFolderChanged: @escaping () -> Void
+        onSaveFolderChanged: @escaping () -> Void,
+        onCaptureCursorChanged: @escaping () -> Void
     ) {
         self.settings = settings
         self.onHotkeysChanged = onHotkeysChanged
         self.onSaveFolderChanged = onSaveFolderChanged
+        self.onCaptureCursorChanged = onCaptureCursorChanged
         _captureHotkey = State(initialValue: settings.captureHotkey)
         _advancedModeHotkey = State(initialValue: settings.advancedModeHotkey)
         _saveFolder = State(initialValue: settings.saveFolder)
         _launchAtLogin = State(initialValue: settings.launchAtLogin)
+        _captureCursor = State(initialValue: settings.captureCursor)
     }
 
     var body: some View {
@@ -51,6 +59,11 @@ struct PreferencesView: View {
             Toggle("Launch at Login", isOn: Binding(
                 get: { launchAtLogin },
                 set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
+            ))
+
+            Toggle("Capture Mouse Cursor", isOn: Binding(
+                get: { captureCursor },
+                set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
             ))
         }
         .padding(20)

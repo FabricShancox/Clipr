@@ -5,10 +5,11 @@ final class PreferencesWindowController: NSWindowController {
     init(
         settings: SettingsStore,
         onHotkeysChanged: @escaping () -> Void,
-        onSaveFolderChanged: @escaping () -> Void
+        onSaveFolderChanged: @escaping () -> Void,
+        onCaptureCursorChanged: @escaping () -> Void
     ) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -18,7 +19,8 @@ final class PreferencesWindowController: NSWindowController {
         window.contentView = NSHostingView(rootView: PreferencesView(
             settings: settings,
             onHotkeysChanged: onHotkeysChanged,
-            onSaveFolderChanged: onSaveFolderChanged
+            onSaveFolderChanged: onSaveFolderChanged,
+            onCaptureCursorChanged: onCaptureCursorChanged
         ))
         window.center()
     }

@@ -33,6 +33,14 @@ final class CaptureOverlayWindow: NSWindow {
             window.backgroundColor = .clear
             window.level = .screenSaver
             window.ignoresMouseEvents = false
+            // Belt-and-suspenders: on mixed-DPI multi-monitor setups (e.g. a 2x main display
+            // alongside 1x externals), the `contentRect`/`screen:` given to this initializer has
+            // been observed to leave borderless windows mispositioned/mis-sized on non-main
+            // displays (verified live on a 3-monitor 2x+1x+1x rig: correct on the main screen,
+            // partially or fully off-screen on the others). Forcing the frame explicitly after
+            // construction is the standard, more reliable way to pin a window to a specific
+            // screen's exact bounds regardless of that initial placement quirk.
+            window.setFrame(screen.frame, display: true)
             window.onResult = onResult
             window.contentView = NSHostingView(rootView: CaptureOverlayView(screen: screen, onResult: { result in
                 dismissAll()

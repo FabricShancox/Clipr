@@ -11,6 +11,9 @@ final class ClickCaptureManager {
 
     var ownWindowIDs: Set<CGWindowID> = []
     var isActive: Bool { sessionFolder != nil }
+    /// Mirrors `CaptureManager.captureCursor` / `SettingsStore.captureCursor` for the per-click
+    /// window captures this manager takes — kept in sync by `AppDelegate`.
+    var captureCursor = false
 
     init(storage: StorageManager) {
         self.storage = storage
@@ -76,7 +79,7 @@ final class ClickCaptureManager {
 
         Task {
             do {
-                let image = try await CaptureManager.captureWindow(topWindow)
+                let image = try await CaptureManager.captureWindow(topWindow, showsCursor: self.captureCursor)
                 // Hop onto the main actor for the index-read + increment + save + append
                 // sequence so two overlapping captures (e.g. two clicks whose 200ms debounce
                 // gap is shorter than the ScreenCaptureKit capture + PNG encode above) can

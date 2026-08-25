@@ -10,6 +10,7 @@ final class SettingsStore {
         static let advancedModeHotkey = "advancedModeHotkey"
         static let saveFolder = "saveFolder"
         static let launchAtLogin = "launchAtLogin"
+        static let captureCursor = "captureCursor"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -50,6 +51,13 @@ final class SettingsStore {
                 NSLog("Clipr: failed to update login item registration: \(error)")
             }
         }
+    }
+
+    /// Whether the mouse cursor should be included in captures. Off by default — most users
+    /// taking a screenshot want a clean shot of the content, not their pointer frozen mid-frame.
+    var captureCursor: Bool {
+        get { defaults.bool(forKey: Key.captureCursor) }
+        set { defaults.set(newValue, forKey: Key.captureCursor) }
     }
 
     private func decoded<T: Decodable>(_ key: String) -> T? {

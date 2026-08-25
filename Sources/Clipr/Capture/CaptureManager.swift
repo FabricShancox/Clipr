@@ -4,6 +4,10 @@ import ScreenCaptureKit
 final class CaptureManager {
     private let storage: StorageManager
     var onCaptureFinished: ((URL, NSImage) -> Void)?
+    /// Whether the mouse cursor should be baked into captured images. Off by default (see
+    /// `SettingsStore.captureCursor`) — `AppDelegate` keeps this in sync with the user's
+    /// preference at launch and whenever it changes in Preferences.
+    var captureCursor = false
 
     init(storage: StorageManager) {
         self.storage = storage
@@ -25,11 +29,11 @@ final class CaptureManager {
                 let image: NSImage?
                 switch result {
                 case .area(let rect, let screen):
-                    image = try await Self.captureArea(rect, on: screen)
+                    image = try await Self.captureArea(rect, on: screen, showsCursor: captureCursor)
                 case .fullScreen(let screen):
-                    image = try await Self.captureFullScreen(screen)
+                    image = try await Self.captureFullScreen(screen, showsCursor: captureCursor)
                 case .window(let windowInfo):
-                    image = try await Self.captureWindow(windowInfo)
+                    image = try await Self.captureWindow(windowInfo, showsCursor: captureCursor)
                 case .cancelled:
                     image = nil
                 }
@@ -46,13 +50,14 @@ final class CaptureManager {
         }
     }
 
-    private static func captureFullScreen(_ screen: NSScreen) async throws -> NSImage {
+    private static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
             throw CaptureError.displayNotFound
         }
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
+        config.showsCursor = showsCursor
         // `SCDisplay.width`/`.height` are documented (ScreenCaptureKit/SCShareableContent.h) as the
         // display's width/height in POINTS, whereas `SCStreamConfiguration.width`/`.height`
         // (ScreenCaptureKit/SCStream.h) are the output width/height in PIXELS. Assigning the former
@@ -68,8 +73,8 @@ final class CaptureManager {
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
-    private static func captureArea(_ rect: CGRect, on screen: NSScreen) async throws -> NSImage {
-        let fullImage = try await captureFullScreen(screen)
+    private static func captureArea(_ rect: CGRect, on screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
+        let fullImage = try await captureFullScreen(screen, showsCursor: showsCursor)
         guard let cgImage = fullImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw CaptureError.cropFailed
         }
@@ -98,13 +103,14 @@ final class CaptureManager {
         return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
     }
 
-    static func captureWindow(_ windowInfo: WindowInfo) async throws -> NSImage {
+    static func captureWindow(_ windowInfo: WindowInfo, showsCursor: Bool) async throws -> NSImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let scWindow = content.windows.first(where: { $0.windowID == windowInfo.windowID }) else {
             throw CaptureError.windowNotFound
         }
         let filter = SCContentFilter(desktopIndependentWindow: scWindow)
         let config = SCStreamConfiguration()
+        config.showsCursor = showsCursor
         // `windowInfo.bounds` (from `kCGWindowBounds`, via `WindowPicker.onScreenWindows()`) is in
         // points, not native pixels. Using it directly for `SCStreamConfiguration.width`/`.height`
         // would request ScreenCaptureKit output at a lower-than-native resolution on any Retina
