@@ -1,4 +1,6 @@
+import Cocoa
 import Foundation
+import ServiceManagement
 
 final class SettingsStore {
     private let defaults: UserDefaults
@@ -36,7 +38,18 @@ final class SettingsStore {
 
     var launchAtLogin: Bool {
         get { defaults.bool(forKey: Key.launchAtLogin) }
-        set { defaults.set(newValue, forKey: Key.launchAtLogin) }
+        set {
+            defaults.set(newValue, forKey: Key.launchAtLogin)
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                NSLog("Clipr: failed to update login item registration: \(error)")
+            }
+        }
     }
 
     private func decoded<T: Decodable>(_ key: String) -> T? {
