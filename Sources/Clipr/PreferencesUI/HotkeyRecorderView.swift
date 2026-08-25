@@ -46,5 +46,6 @@ private final class KeyCatcherNSView: NSView {
         if event.modifierFlags.contains(.option) { modifiers |= HotkeyBinding.Modifier.option.rawValue }
         if event.modifierFlags.contains(.control) { modifiers |= HotkeyBinding.Modifier.control.rawValue }
         onKeyDown?(UInt32(event.keyCode), modifiers)
+        window?.makeFirstResponder(nil)
     }
 }
