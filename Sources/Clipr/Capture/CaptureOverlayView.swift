@@ -39,10 +39,15 @@ struct CaptureOverlayView: View {
             }
 
             if mode == .window, let hovered = hoveredWindow {
+                // hovered.bounds is in CGWindowBounds' global-display space; convert back to this
+                // view's local space before using it to position SwiftUI content (see the note on
+                // globalDisplayPoint below - this is that conversion's inverse).
+                let localOrigin = CaptureOverlayView.viewLocalPoint(forGlobalDisplayPoint: hovered.bounds.origin, on: screen)
+                let localRect = CGRect(origin: localOrigin, size: hovered.bounds.size)
                 Rectangle()
                     .stroke(Color.accentColor, lineWidth: 3)
-                    .frame(width: hovered.bounds.width, height: hovered.bounds.height)
-                    .position(x: hovered.bounds.midX, y: hovered.bounds.midY)
+                    .frame(width: localRect.width, height: localRect.height)
+                    .position(x: localRect.midX, y: localRect.midY)
             }
 
             HStack(spacing: 12) {
@@ -116,6 +121,18 @@ struct CaptureOverlayView: View {
         return CGPoint(
             x: screen.frame.origin.x + location.x,
             y: screenTopLeftY + location.y
+        )
+    }
+
+    /// Inverse of `globalDisplayPoint(forViewLocalPoint:on:)`: converts a point already in the
+    /// CG "global display" space (e.g. a `WindowInfo.bounds` origin from `WindowPicker`) back into
+    /// this view's local coordinate space, so it can be used with SwiftUI positioning modifiers.
+    static func viewLocalPoint(forGlobalDisplayPoint point: CGPoint, on screen: NSScreen) -> CGPoint {
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        let screenTopLeftY = mainScreenHeight - screen.frame.maxY
+        return CGPoint(
+            x: point.x - screen.frame.origin.x,
+            y: point.y - screenTopLeftY
         )
     }
 }
