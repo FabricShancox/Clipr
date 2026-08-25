@@ -3,6 +3,11 @@ import SwiftUI
 
 final class ReviewWindowController: NSWindowController {
     private let storage: StorageManager
+    // Keeps each opened EditorWindowController alive until it finishes; without this,
+    // the local `editor` in openEditor(for:) would be deallocated as soon as that
+    // function returns, silently breaking its Done/Discard closures (which capture
+    // `[weak self]` on the editor controller).
+    private var openEditors: [EditorWindowController] = []
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
     init(stepURLs: [URL], storage: StorageManager) {
@@ -30,6 +35,11 @@ final class ReviewWindowController: NSWindowController {
     private func openEditor(for url: URL) {
         guard let image = NSImage(contentsOf: url) else { return }
         let editor = EditorWindowController(image: image, rawURL: url, storage: storage)
+        openEditors.append(editor)
+        editor.onFinished = { [weak self, weak editor] in
+            guard let self, let editor else { return }
+            self.openEditors.removeAll { $0 === editor }
+        }
         editor.showWindow(nil)
     }
 }
