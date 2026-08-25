@@ -94,10 +94,37 @@ final class CaptureManager {
         }
         let filter = SCContentFilter(desktopIndependentWindow: scWindow)
         let config = SCStreamConfiguration()
-        config.width = Int(windowInfo.bounds.width)
-        config.height = Int(windowInfo.bounds.height)
+        // `windowInfo.bounds` (from `kCGWindowBounds`, via `WindowPicker.onScreenWindows()`) is in
+        // points, not native pixels. Using it directly for `SCStreamConfiguration.width`/`.height`
+        // would request ScreenCaptureKit output at a lower-than-native resolution on any Retina
+        // display (backingScaleFactor > 1) - the whole window still gets captured, just blurrier
+        // than native. Scale by the backing scale factor of whichever screen actually contains the
+        // window, so the requested output resolution matches the window's real pixel density.
+        let scale = screenScaleFactor(containing: windowInfo.bounds.origin)
+        config.width = Int((windowInfo.bounds.width * scale).rounded())
+        config.height = Int((windowInfo.bounds.height * scale).rounded())
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
+    /// `windowInfo.bounds` lives in the CG "global display" points space that
+    /// `CaptureOverlayView.globalDisplayPoint`/`viewLocalPoint` document and convert to/from
+    /// (origin at the top-left of the main display, y increasing downward) - the same space
+    /// `kCGWindowBounds` uses. To find the `backingScaleFactor` of the screen a window is actually
+    /// on, each candidate `NSScreen`'s frame is converted into that same space (by reusing
+    /// `CaptureOverlayView.globalDisplayPoint` on that screen's own local origin, `.zero`, which
+    /// yields the screen's top-left corner in global-display coordinates) and tested for
+    /// containment against the window's origin, rather than comparing `windowInfo.bounds` directly
+    /// against `NSScreen.frame` (a different, Cocoa-native, bottom-left-origin/y-up space).
+    private static func screenScaleFactor(containing globalDisplayPoint: CGPoint) -> CGFloat {
+        for screen in NSScreen.screens {
+            let topLeft = CaptureOverlayView.globalDisplayPoint(forViewLocalPoint: .zero, on: screen)
+            let screenRectInGlobalDisplaySpace = CGRect(origin: topLeft, size: screen.frame.size)
+            if screenRectInGlobalDisplaySpace.contains(globalDisplayPoint) {
+                return screen.backingScaleFactor
+            }
+        }
+        return NSScreen.main?.backingScaleFactor ?? 1.0
     }
 }
 
