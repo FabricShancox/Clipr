@@ -21,7 +21,6 @@ final class AnnotationObjectTests: XCTestCase {
         let obj = AnnotationObject(id: UUID(), kind: .text("hello"), frame: CGRect(x: 0, y: 0, width: 40, height: 20), color: .init(red: 0, green: 0, blue: 0, alpha: 1), strokeWidth: 1)
         let data = try JSONEncoder().encode(obj)
         let decoded = try JSONDecoder().decode(AnnotationObject.self, from: data)
-        XCTAssertEqual(decoded.id, obj.id)
-        XCTAssertEqual(decoded.frame, obj.frame)
+        XCTAssertEqual(decoded, obj)
     }
 }
