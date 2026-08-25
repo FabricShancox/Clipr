@@ -61,6 +61,15 @@ final class ClickCaptureManager {
 
     private func captureFrontmostWindow() {
         guard let sessionFolder, let frontmostApp = NSWorkspace.shared.frontmostApplication else { return }
+        // `ownWindowIDs` is a start-time snapshot of Clipr's own on-screen window IDs, but
+        // NSMenu windows (e.g. the status-bar menu) are created on-demand only when actually
+        // opened, so they're never in that snapshot. The most common way to stop an Advanced
+        // Mode session is clicking the menu-bar icon and choosing "Stop Advanced Mode" - that
+        // icon click itself schedules a debounced capture before the "Stop" item click
+        // registers, and by then Clipr's own menu is frontmost. Guard on process identity too
+        // (this subsumes `ownWindowIDs` whenever Clipr itself is frontmost, but `ownWindowIDs`
+        // still matters for windows that are visible-but-not-frontmost, so keep both checks).
+        guard frontmostApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
         let windows = WindowPicker.onScreenWindows()
         guard let topWindow = WindowPicker.frontmostWindow(ownedBy: frontmostApp.processIdentifier, in: windows),
               !ownWindowIDs.contains(topWindow.windowID) else { return }
