@@ -14,9 +14,10 @@ enum AnnotationTool: Equatable {
 /// bottom-left-origin default). Every `AnnotationObject` this view constructs must therefore have
 /// its frame (and, for freehand, its points) converted from SwiftUI space into that renderer
 /// space before being stored in `annotations` — and converted back when reading a stored
-/// annotation's frame for on-screen SwiftUI display (e.g. the selection outline). Both
-/// conversions use the same formula, `y' = canvasHeight - y - height` for rects (or
-/// `y' = canvasHeight - y` for bare points), because that formula is its own inverse.
+/// annotation's frame (or points) for on-screen SwiftUI display (e.g. the live preview and the
+/// selection outline). Both conversions use the same formula, `y' = canvasHeight - y - height`
+/// for rects (or `y' = canvasHeight - y` for bare points), because that formula is its own
+/// inverse.
 struct AnnotationCanvasView: View {
     let image: NSImage
     @Binding var annotations: [AnnotationObject]
@@ -40,11 +41,19 @@ struct AnnotationCanvasView: View {
 
             ForEach(annotations) { annotation in
                 AnnotationOverlayShape(
+                    annotation: annotation,
                     displayFrame: swiftUIFrame(fromRendererFrame: annotation.frame),
+                    displayPoints: displayPoints(for: annotation),
                     isSelected: annotation.id == selectedID
                 )
             }
         }
+        // Every y-flip in this view is only correct if the canvas actually renders at the
+        // image's native point size. Pin it explicitly rather than trusting a parent view
+        // (e.g. EditorView, Task 14) to lay this out at exactly that size — a window resize
+        // or a different container could otherwise silently desync canvasHeight from the
+        // view's real on-screen size and break every coordinate conversion above.
+        .frame(width: image.size.width, height: image.size.height)
         .gesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { value in handleDragChanged(value) }
@@ -93,6 +102,12 @@ struct AnnotationCanvasView: View {
                 frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame),
                 color: currentColor, strokeWidth: currentStrokeWidth
             ))
+            // handleDragChanged's `default:` branch sets `dragStart` for any tool it doesn't
+            // explicitly case (which includes .stamp, since a stamp is placed on drag-end, not
+            // dragged out like a rect). Without this reset, a stale dragStart from placing a
+            // stamp would corrupt the START POINT of the next rectangle/arrow/text/highlighter/
+            // blur drag.
+            dragStart = nil
         default:
             guard let start = dragStart else { return }
             let swiftUIFrame = CGRect(
@@ -118,6 +133,26 @@ struct AnnotationCanvasView: View {
             maxX = max(maxX, p.x); maxY = max(maxY, p.y)
         }
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// Per-annotation-kind points needed by `AnnotationOverlayShape` for live rendering, already
+    /// converted into SwiftUI display space:
+    /// - `.freehand`: every stored (renderer-space) point, converted for the stroke path.
+    /// - `.arrow`: the two renderer-space corners `AnnotationRenderer.drawArrow` itself draws
+    ///   between (`(frame.minX, frame.minY)` -> `(frame.maxX, frame.maxY)`), converted so the
+    ///   live preview's arrow direction matches what the final flattened render will show.
+    /// - everything else: unused by the shape, so empty.
+    private func displayPoints(for annotation: AnnotationObject) -> [CGPoint] {
+        switch annotation.kind {
+        case .freehand(let points):
+            return points.map { swiftUIPoint(fromRendererPoint: $0) }
+        case .arrow:
+            let rendererStart = CGPoint(x: annotation.frame.minX, y: annotation.frame.minY)
+            let rendererEnd = CGPoint(x: annotation.frame.maxX, y: annotation.frame.maxY)
+            return [swiftUIPoint(fromRendererPoint: rendererStart), swiftUIPoint(fromRendererPoint: rendererEnd)]
+        default:
+            return []
+        }
     }
 
     // MARK: - Coordinate space conversion (SwiftUI y-down <-> renderer y-up)
@@ -150,17 +185,119 @@ struct AnnotationCanvasView: View {
     private func rendererPoint(fromSwiftUIPoint point: CGPoint) -> CGPoint {
         CGPoint(x: point.x, y: canvasHeight - point.y)
     }
+
+    /// Converts a single point from renderer y-up space back into SwiftUI's y-down display
+    /// space. Symmetric to (and the same formula as) `rendererPoint(fromSwiftUIPoint:)`.
+    private func swiftUIPoint(fromRendererPoint point: CGPoint) -> CGPoint {
+        CGPoint(x: point.x, y: canvasHeight - point.y)
+    }
 }
 
+/// Renders one annotation's live, in-progress appearance on the canvas (so the user sees what
+/// they're drawing immediately, without waiting for `AnnotationRenderer.flatten` to run), plus
+/// its selection outline on top. This is a lightweight SwiftUI approximation of what
+/// `AnnotationRenderer` will eventually flatten onto the image — it does not need to be
+/// pixel-identical to that final render, only visibly represent each annotation kind.
 private struct AnnotationOverlayShape: View {
-    /// Already converted into SwiftUI's y-down display space by the caller.
+    let annotation: AnnotationObject
+    /// `annotation.frame` already converted into SwiftUI's y-down display space.
     let displayFrame: CGRect
+    /// Extra points needed for `.freehand` (the full stroke, converted) and `.arrow` (the two
+    /// endpoints, converted) — see `AnnotationCanvasView.displayPoints(for:)`. Empty for kinds
+    /// that don't need it.
+    let displayPoints: [CGPoint]
     let isSelected: Bool
 
+    private var color: Color {
+        Color(
+            red: Double(annotation.color.red),
+            green: Double(annotation.color.green),
+            blue: Double(annotation.color.blue),
+            opacity: Double(annotation.color.alpha)
+        )
+    }
+
     var body: some View {
+        ZStack {
+            content
+            selectionOutline
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch annotation.kind {
+        case .rectangle:
+            Rectangle()
+                .stroke(color, lineWidth: annotation.strokeWidth)
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        case .arrow:
+            if displayPoints.count == 2 {
+                arrowPath(from: displayPoints[0], to: displayPoints[1])
+                    .stroke(color, lineWidth: annotation.strokeWidth)
+            }
+        case .freehand:
+            freehandPath
+                .stroke(color, style: StrokeStyle(lineWidth: annotation.strokeWidth, lineCap: .round, lineJoin: .round))
+        case .text(let string):
+            Text(string)
+                .font(.system(size: max(displayFrame.height * 0.7, 10)))
+                .foregroundColor(color)
+                .frame(width: displayFrame.width, height: displayFrame.height, alignment: .leading)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        case .highlighter:
+            Rectangle()
+                .fill(color.opacity(0.35))
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        case .blur:
+            // Matches AnnotationRenderer's own v1 approximation: a flat translucent gray box
+            // rather than a real pixel-sampling blur.
+            Rectangle()
+                .fill(Color(white: 0.5, opacity: 0.9))
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        case .stamp(let kind):
+            Image(systemName: kind.symbolName)
+                .resizable()
+                .scaledToFit()
+                .foregroundColor(color)
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        }
+    }
+
+    private var selectionOutline: some View {
         Rectangle()
             .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
             .frame(width: displayFrame.width, height: displayFrame.height)
             .position(x: displayFrame.midX, y: displayFrame.midY)
+    }
+
+    private var freehandPath: Path {
+        Path { path in
+            guard let first = displayPoints.first else { return }
+            path.move(to: first)
+            for point in displayPoints.dropFirst() {
+                path.addLine(to: point)
+            }
+        }
+    }
+
+    private func arrowPath(from start: CGPoint, to end: CGPoint) -> Path {
+        Path { path in
+            path.move(to: start)
+            path.addLine(to: end)
+
+            let angle = atan2(end.y - start.y, end.x - start.x)
+            let headLength: CGFloat = 10
+            let p1 = CGPoint(x: end.x - headLength * cos(angle - .pi / 6), y: end.y - headLength * sin(angle - .pi / 6))
+            let p2 = CGPoint(x: end.x - headLength * cos(angle + .pi / 6), y: end.y - headLength * sin(angle + .pi / 6))
+            path.move(to: end)
+            path.addLine(to: p1)
+            path.move(to: end)
+            path.addLine(to: p2)
+        }
     }
 }
