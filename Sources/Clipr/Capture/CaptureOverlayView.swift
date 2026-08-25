@@ -1,18 +1,5 @@
 import SwiftUI
 
-enum CaptureMode: String, CaseIterable {
-    case area = "Area"
-    case fullScreen = "Full Screen"
-    case window = "Window"
-}
-
-enum CaptureResult {
-    case area(CGRect, NSScreen)
-    case fullScreen(NSScreen)
-    case window(WindowInfo)
-    case cancelled
-}
-
 struct CaptureOverlayView: View {
     let screen: NSScreen
     let onResult: (CaptureResult) -> Void

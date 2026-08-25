@@ -1,12 +1,5 @@
 import Cocoa
 
-struct WindowInfo: Equatable {
-    let windowID: CGWindowID
-    let ownerPID: pid_t
-    let bounds: CGRect
-    let layer: Int
-}
-
 struct WindowPicker {
     /// CGWindowListCopyWindowInfo already returns windows front-to-back;
     /// both pure lookups below rely on that ordering rather than re-sorting by layer,

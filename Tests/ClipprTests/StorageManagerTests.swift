@@ -40,6 +40,44 @@ final class StorageManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: editedURL.path))
     }
 
+    func testSaveEditedCaptureOverwritesOnRepeatedSave() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let firstURL = try manager.saveEditedCapture(makeTestImage(), rawURL: rawURL)
+        let secondURL = try manager.saveEditedCapture(makeTestImage(), rawURL: rawURL)
+        XCTAssertEqual(firstURL, secondURL)
+        let siblingCount = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.contains("_edited") }
+            .count
+        XCTAssertEqual(siblingCount, 1)
+    }
+
+    func testLoadAnnotationsReturnsEmptyWhenNeverSaved() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        XCTAssertEqual(manager.loadAnnotations(rawURL: rawURL), [])
+    }
+
+    func testSaveAnnotationsRoundTripsThroughLoad() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let annotation = AnnotationObject(
+            id: UUID(), kind: .text("hello", .default),
+            frame: CGRect(x: 1, y: 2, width: 3, height: 4),
+            color: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1), strokeWidth: 2
+        )
+        try manager.saveAnnotations([annotation], rawURL: rawURL)
+        XCTAssertEqual(manager.loadAnnotations(rawURL: rawURL), [annotation])
+    }
+
+    func testDeleteAnnotationsRemovesSidecar() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let annotation = AnnotationObject(
+            id: UUID(), kind: .rectangle, frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+            color: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1), strokeWidth: 1
+        )
+        try manager.saveAnnotations([annotation], rawURL: rawURL)
+        manager.deleteAnnotations(rawURL: rawURL)
+        XCTAssertEqual(manager.loadAnnotations(rawURL: rawURL), [])
+    }
+
     func testCreateSessionFolderAndSaveStep() throws {
         let sessionFolder = try manager.createSessionFolder(date: Date())
         var isDir: ObjCBool = false

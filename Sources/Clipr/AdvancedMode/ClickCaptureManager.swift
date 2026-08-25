@@ -14,6 +14,10 @@ final class ClickCaptureManager {
     /// Mirrors `CaptureManager.captureCursor` / `SettingsStore.captureCursor` for the per-click
     /// window captures this manager takes — kept in sync by `AppDelegate`.
     var captureCursor = false
+    /// Fired on the main actor after each successful step capture, with the running count —
+    /// Advanced Mode has no on-screen overlay of its own, so this is the only way `AppDelegate`
+    /// can show the user it's actually doing something (see `StatusItemController.setAdvancedModeStepCount`).
+    var onStepCaptured: ((Int) -> Void)?
 
     init(storage: StorageManager) {
         self.storage = storage
@@ -93,6 +97,7 @@ final class ClickCaptureManager {
                     do {
                         let url = try self.storage.saveStep(image, index: index, in: sessionFolder)
                         self.stepURLs.append(url)
+                        self.onStepCaptured?(self.stepURLs.count)
                     } catch {
                         NSLog("Clipr: advanced mode step capture failed: \(error)")
                     }
@@ -102,8 +107,4 @@ final class ClickCaptureManager {
             }
         }
     }
-}
-
-enum ClickCaptureError: Error {
-    case accessibilityNotGranted
 }

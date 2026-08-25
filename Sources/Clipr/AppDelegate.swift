@@ -1,26 +1,21 @@
 import Cocoa
+import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let statusItemController = StatusItemController()
     let settings = SettingsStore()
-    // HotkeyManager installs a process-wide Carbon event handler in its init and has no
-    // teardown logic, so it must live for the entire process lifetime as a plain stored
-    // property (never optional, never replaced).
+    // Installs a process-wide Carbon event handler in its init with no teardown logic, so it
+    // must live for the whole process lifetime as a plain stored property.
     let hotkeyManager = HotkeyManager()
     lazy var storage = StorageManager(baseFolder: settings.saveFolder)
     lazy var captureManager = CaptureManager(storage: storage)
-    lazy var clickCaptureManager = ClickCaptureManager(storage: storage)
+    lazy var advancedMode = AdvancedModeCoordinator(storage: storage)
     var preferencesWindowController: PreferencesWindowController?
 
-    // NSWindow does NOT retain its NSWindowController, so any window controller created as a
-    // local `let`/`var` and merely shown would be deallocated the moment the enclosing function
-    // returns, silently breaking its close/finish callbacks. Both of the window controllers this
-    // delegate opens directly (EditorWindowController from a top-level capture, and
-    // ReviewWindowController from stopping Advanced Mode) are therefore kept alive in an array
-    // until they signal they're done, mirroring the same pattern ReviewWindowController itself
-    // already uses internally for the editors it opens.
+    // NSWindow does NOT retain its NSWindowController, so a locally-created one merely shown
+    // would be deallocated immediately. Kept alive here until it signals it's done;
+    // `AdvancedModeCoordinator` does the same internally for its Review windows.
     private var openEditors: [EditorWindowController] = []
-    private var openReviewWindows: [ReviewWindowController] = []
 
     private enum HotkeyID: UInt32 {
         case capture = 1
@@ -33,21 +28,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyCaptureCursorSetting()
 
         captureManager.onCaptureFinished = { [weak self] rawURL, image in
-            guard let self else { return }
-            let editor = EditorWindowController(image: image, rawURL: rawURL, storage: self.storage)
-            self.openEditors.append(editor)
-            editor.onFinished = { [weak self, weak editor] in
-                guard let self, let editor else { return }
-                self.openEditors.removeAll { $0 === editor }
-            }
-            editor.showWindow(nil)
+            self?.openEditor(image: image, rawURL: rawURL)
+        }
+        advancedMode.onStepCaptured = { [weak self] count in
+            self?.statusItemController.setAdvancedModeStepCount(count)
         }
 
         statusItemController.onCaptureNow = { [weak self] in self?.performCapture() }
+        statusItemController.onOpenImage = { [weak self] in self?.openImage() }
         statusItemController.onToggleAdvancedMode = { [weak self] in self?.toggleAdvancedMode() }
         statusItemController.onOpenPreferences = { [weak self] in self?.openPreferences() }
 
         registerHotkeys()
+    }
+
+    private func openEditor(image: NSImage, rawURL: URL) {
+        let editor = EditorWindowController(image: image, rawURL: rawURL, storage: storage)
+        openEditors.append(editor)
+        editor.onFinished = { [weak self, weak editor] in
+            guard let self, let editor else { return }
+            self.openEditors.removeAll { $0 === editor }
+        }
+        editor.showWindow(nil)
+    }
+
+    /// Opens the editor on an existing image file instead of a fresh capture. The picked file
+    /// becomes this editor's "raw" file directly, so auto-save writes its `_edited` companion
+    /// right next to wherever the user chose to open it from.
+    private func openImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .bmp, .gif, .heic]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.title = "Open Image in Clipr"
+        guard panel.runModal() == .OK, let url = panel.url, let image = NSImage(contentsOf: url) else { return }
+        openEditor(image: image, rawURL: url)
     }
 
     private func registerHotkeys() {
@@ -59,83 +74,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Both the capture hotkey and the "Capture Now" menu item route through here rather than
-    /// calling `captureManager.beginCapture()` directly. `beginCapture()` silently no-ops when
-    /// Screen Recording access isn't granted (it only fires the OS's one-time-ever
-    /// `CGRequestScreenCaptureAccess()` prompt) - once a user has denied that prompt once, every
-    /// later capture attempt would otherwise do nothing with zero feedback and no way to recover.
-    /// This wraps that with the same System-Settings-fallback alert already used for Accessibility
-    /// denial, so a permanently-denied Screen Recording permission is discoverable and fixable
-    /// instead of a silent dead end.
+    /// Routes both the capture hotkey and "Capture Now" through here rather than calling
+    /// `captureManager.beginCapture()` directly — a permanently-denied Screen Recording
+    /// permission otherwise silently does nothing, with no way to recover.
     private func performCapture() {
         if PermissionsManager.hasScreenRecordingPermission() {
             captureManager.beginCapture()
             return
         }
-        // Not yet granted: fire the OS prompt (a no-op if already permanently denied - it only
-        // ever prompts once per app). `CGRequestScreenCaptureAccess()` has no completion
-        // callback, so after giving it a moment to resolve (the user answering the system sheet,
-        // or the OS immediately reporting the existing denial), re-check and either proceed or
-        // fall back to our own alert with a working "Open System Settings" link.
+        // Not yet granted: fire the OS prompt (a no-op if already permanently denied). It has no
+        // completion callback, so re-check shortly after and fall back to our own alert.
         PermissionsManager.requestScreenRecordingPermission()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self else { return }
             if PermissionsManager.hasScreenRecordingPermission() {
                 self.captureManager.beginCapture()
             } else {
-                self.showPermissionAlert(pane: .screenRecording, message: "Clipr needs Screen Recording access to capture screenshots.")
+                showPermissionAlert(pane: .screenRecording, message: "Clipr needs Screen Recording access to capture screenshots.")
             }
         }
     }
 
     private func toggleAdvancedMode() {
-        if clickCaptureManager.isActive {
-            let stepURLs = clickCaptureManager.stop()
+        switch advancedMode.toggle(ownWindowIDs: currentOwnWindowIDs()) {
+        case .started:
+            statusItemController.setAdvancedModeActive(true)
+        case .accessibilityNotGranted:
+            showPermissionAlert(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
+        case .startFailed(let error):
+            NSLog("Clipr: failed to start advanced mode: \(error)")
+        case .stoppedNoSteps:
             statusItemController.setAdvancedModeActive(false)
-
-            let review = ReviewWindowController(stepURLs: stepURLs, storage: storage)
-            openReviewWindows.append(review)
-            // ReviewWindowController has no onFinished-style closure (unlike
-            // EditorWindowController), so its close is observed externally via
-            // NSWindow.willCloseNotification instead of touching that file.
-            if let window = review.window {
-                NotificationCenter.default.addObserver(
-                    forName: NSWindow.willCloseNotification,
-                    object: window,
-                    queue: .main
-                ) { [weak self, weak review] _ in
-                    guard let self, let review else { return }
-                    self.openReviewWindows.removeAll { $0 === review }
-                }
-            }
+            showNoStepsCapturedAlert()
+        case .stopped(let review):
+            statusItemController.setAdvancedModeActive(false)
             review.showWindow(nil)
-        } else {
-            // Self-exclusion: keep Clipr's own on-screen windows (the menu bar status item,
-            // an open Preferences window, any in-progress editor windows) from being captured
-            // as if they were a step the user clicked through.
-            clickCaptureManager.ownWindowIDs = currentOwnWindowIDs()
-            do {
-                _ = try clickCaptureManager.start()
-                statusItemController.setAdvancedModeActive(true)
-            } catch ClickCaptureError.accessibilityNotGranted {
-                showPermissionAlert(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
-            } catch {
-                NSLog("Clipr: failed to start advanced mode: \(error)")
-            }
         }
     }
 
     private func currentOwnWindowIDs() -> Set<CGWindowID> {
-        var ids: Set<CGWindowID> = []
-        let windows: [NSWindow?] = [statusItemController.statusItem.button?.window, preferencesWindowController?.window]
+        windowIDs(of: [statusItemController.statusItem.button?.window, preferencesWindowController?.window]
             + openEditors.map { $0.window }
-            + openReviewWindows.map { $0.window }
-        for window in windows {
-            if let number = window?.windowNumber, let id = CGWindowID(exactly: number) {
-                ids.insert(id)
-            }
-        }
-        return ids
+            + advancedMode.reviewWindows)
     }
 
     private func openPreferences() {
@@ -147,10 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.registerHotkeys()
             },
             // `storage` is a long-lived object created once at launch from the then-current save
-            // folder, and CaptureManager/ClickCaptureManager/the editors all hold a reference to
-            // that same instance. Re-pointing its `baseFolder` (rather than rebuilding it) makes a
-            // save-folder change in Preferences apply to the very next capture for every one of
-            // them, instead of silently doing nothing until the next relaunch.
+            // folder, and CaptureManager/AdvancedModeCoordinator/the editors all hold a reference
+            // to that same instance. Re-pointing its `baseFolder` (rather than rebuilding it)
+            // makes a save-folder change in Preferences apply immediately for all of them.
             onSaveFolderChanged: { [weak self] in
                 guard let self else { return }
                 self.storage.baseFolder = self.settings.saveFolder
@@ -161,22 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.showWindow(nil)
     }
 
-    /// `CaptureManager`/`ClickCaptureManager` each hold their own `captureCursor` copy rather
+    /// `CaptureManager`/`AdvancedModeCoordinator` each hold their own `captureCursor` copy rather
     /// than reading `SettingsStore` live, so both need re-syncing here — at launch, and again
     /// whenever the Preferences toggle changes.
     private func applyCaptureCursorSetting() {
         captureManager.captureCursor = settings.captureCursor
-        clickCaptureManager.captureCursor = settings.captureCursor
-    }
-
-    private func showPermissionAlert(pane: PrivacyPane, message: String) {
-        let alert = NSAlert()
-        alert.messageText = "Permission Required"
-        alert.informativeText = message
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            PermissionsManager.openSystemSettingsPrivacyPane(pane)
-        }
+        advancedMode.captureCursor = settings.captureCursor
     }
 }
