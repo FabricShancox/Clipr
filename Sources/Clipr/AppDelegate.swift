@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             editor.showWindow(nil)
         }
 
-        statusItemController.onCaptureNow = { [weak self] in self?.captureManager.beginCapture() }
+        statusItemController.onCaptureNow = { [weak self] in self?.performCapture() }
         statusItemController.onToggleAdvancedMode = { [weak self] in self?.toggleAdvancedMode() }
         statusItemController.onOpenPreferences = { [weak self] in self?.openPreferences() }
 
@@ -50,10 +50,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func registerHotkeys() {
         hotkeyManager.register(settings.captureHotkey, id: HotkeyID.capture.rawValue) { [weak self] in
-            self?.captureManager.beginCapture()
+            self?.performCapture()
         }
         hotkeyManager.register(settings.advancedModeHotkey, id: HotkeyID.advancedMode.rawValue) { [weak self] in
             self?.toggleAdvancedMode()
+        }
+    }
+
+    /// Both the capture hotkey and the "Capture Now" menu item route through here rather than
+    /// calling `captureManager.beginCapture()` directly. `beginCapture()` silently no-ops when
+    /// Screen Recording access isn't granted (it only fires the OS's one-time-ever
+    /// `CGRequestScreenCaptureAccess()` prompt) - once a user has denied that prompt once, every
+    /// later capture attempt would otherwise do nothing with zero feedback and no way to recover.
+    /// This wraps that with the same System-Settings-fallback alert already used for Accessibility
+    /// denial, so a permanently-denied Screen Recording permission is discoverable and fixable
+    /// instead of a silent dead end.
+    private func performCapture() {
+        if PermissionsManager.hasScreenRecordingPermission() {
+            captureManager.beginCapture()
+            return
+        }
+        // Not yet granted: fire the OS prompt (a no-op if already permanently denied - it only
+        // ever prompts once per app). `CGRequestScreenCaptureAccess()` has no completion
+        // callback, so after giving it a moment to resolve (the user answering the system sheet,
+        // or the OS immediately reporting the existing denial), re-check and either proceed or
+        // fall back to our own alert with a working "Open System Settings" link.
+        PermissionsManager.requestScreenRecordingPermission()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            if PermissionsManager.hasScreenRecordingPermission() {
+                self.captureManager.beginCapture()
+            } else {
+                self.showPermissionAlert(pane: .screenRecording, message: "Clipr needs Screen Recording access to capture screenshots.")
+            }
         }
     }
 
