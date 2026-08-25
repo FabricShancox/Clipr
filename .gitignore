@@ -1,0 +1,4 @@
+.build/
+Clipr.app/
+*.xcodeproj
+.DS_Store

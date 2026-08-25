@@ -50,4 +50,30 @@ final class StorageManagerTests: XCTestCase {
         XCTAssertEqual(stepURL.lastPathComponent, "Step_01.png")
         XCTAssertTrue(FileManager.default.fileExists(atPath: stepURL.path))
     }
+
+    func testCollisionHandlingRenamesOnFilesystemClash() throws {
+        // Save two images with the same timestamp to force a collision
+        let sameDate = Date()
+        let url1 = try manager.saveRawCapture(makeTestImage(), date: sameDate)
+        let url2 = try manager.saveRawCapture(makeTestImage(), date: sameDate)
+
+        // Both files should exist
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url1.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url2.path))
+
+        // They should have different names
+        XCTAssertNotEqual(url1.lastPathComponent, url2.lastPathComponent)
+
+        // First file should have no suffix (original name from FilenameGenerator)
+        XCTAssertFalse(url1.lastPathComponent.contains("_1.png"))
+
+        // Second file should have _1 suffix
+        XCTAssertTrue(url2.lastPathComponent.contains("_1.png"))
+
+        // Both files should be readable and non-empty
+        let data1 = try Data(contentsOf: url1)
+        let data2 = try Data(contentsOf: url2)
+        XCTAssertGreaterThan(data1.count, 0)
+        XCTAssertGreaterThan(data2.count, 0)
+    }
 }

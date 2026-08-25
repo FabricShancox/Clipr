@@ -51,7 +51,31 @@ final class StorageManager {
             throw StorageError.pngEncodingFailed
         }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try pngData.write(to: url)
-        return url
+
+        // Resolve filename collisions by appending numeric suffix if needed
+        let finalURL = uniqueURL(for: url)
+        try pngData.write(to: finalURL)
+        return finalURL
+    }
+
+    private func uniqueURL(for url: URL) -> URL {
+        // If the file doesn't exist, use the URL as-is
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return url
+        }
+
+        // File exists; append numeric suffix before extension
+        let pathWithoutExtension = url.deletingPathExtension().path
+        let ext = url.pathExtension.isEmpty ? "" : ".\(url.pathExtension)"
+        var suffix = 1
+
+        while true {
+            let candidatePath = "\(pathWithoutExtension)_\(suffix)\(ext)"
+            let candidateURL = URL(fileURLWithPath: candidatePath)
+            if !FileManager.default.fileExists(atPath: candidateURL.path) {
+                return candidateURL
+            }
+            suffix += 1
+        }
     }
 }
