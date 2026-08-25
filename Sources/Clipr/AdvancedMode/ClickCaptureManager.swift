@@ -68,10 +68,23 @@ final class ClickCaptureManager {
         Task {
             do {
                 let image = try await CaptureManager.captureWindow(topWindow)
-                let index = nextStepIndex
-                nextStepIndex += 1
-                let url = try storage.saveStep(image, index: index, in: sessionFolder)
-                stepURLs.append(url)
+                // Hop onto the main actor for the index-read + increment + save + append
+                // sequence so two overlapping captures (e.g. two clicks whose 200ms debounce
+                // gap is shorter than the ScreenCaptureKit capture + PNG encode above) can
+                // never interleave their mutation of `nextStepIndex`/`stepURLs`. Without this,
+                // each `Task` above could resume around the same time on different threads and
+                // race on a plain `Int` and `Array`, which is a real data race (possible
+                // corruption/crash), not merely a step-ordering quirk.
+                await MainActor.run {
+                    let index = self.nextStepIndex
+                    self.nextStepIndex += 1
+                    do {
+                        let url = try self.storage.saveStep(image, index: index, in: sessionFolder)
+                        self.stepURLs.append(url)
+                    } catch {
+                        NSLog("Clipr: advanced mode step capture failed: \(error)")
+                    }
+                }
             } catch {
                 NSLog("Clipr: advanced mode step capture failed: \(error)")
             }
