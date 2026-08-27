@@ -15,6 +15,10 @@ struct AnnotationOverlayShape: View {
     /// that don't need it.
     let displayPoints: [CGPoint]
     let isSelected: Bool
+    /// True while the mouse hovers this annotation with a non-Select drawing tool active — see
+    /// `AnnotationCanvasView+Hover.swift`. Shown as a distinct (dashed, not solid) outline from
+    /// `isSelected`'s, so "this is selectable" and "this is selected" read as different states.
+    var isHovered: Bool = false
     /// Live drag offset while this specific annotation is being moved (Select tool); `.zero`
     /// otherwise. Applied as a plain view-space translation on top of the normal position.
     var liveOffset: CGSize = .zero
@@ -31,6 +35,7 @@ struct AnnotationOverlayShape: View {
     var body: some View {
         ZStack {
             content
+            hoverOutline
             selectionOutline
         }
         .offset(liveOffset)
@@ -92,6 +97,16 @@ struct AnnotationOverlayShape: View {
     private var selectionOutline: some View {
         Rectangle()
             .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+            .frame(width: displayFrame.width, height: displayFrame.height)
+            .position(x: displayFrame.midX, y: displayFrame.midY)
+    }
+
+    private var hoverOutline: some View {
+        Rectangle()
+            .stroke(
+                isHovered && !isSelected ? Color.white.opacity(0.8) : Color.clear,
+                style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
+            )
             .frame(width: displayFrame.width, height: displayFrame.height)
             .position(x: displayFrame.midX, y: displayFrame.midY)
     }

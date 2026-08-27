@@ -1,4 +1,5 @@
 import SwiftUI
+import Cocoa
 
 /// Interactive canvas that lets the user drag out annotations on top of the captured image.
 ///
@@ -62,6 +63,24 @@ struct AnnotationCanvasView: View {
     /// The resizing annotation's live frame in SwiftUI display space, updated continuously while
     /// dragging a corner handle; committed back into `annotations` (in renderer space) on release.
     @State var liveResizeFrame: CGRect?
+    /// The resize handle's own on-screen position at the moment its drag began, captured once
+    /// and reused for the whole gesture. See `AnnotationCanvasView+ResizeHandles.swift`'s doc
+    /// comment on `handleResizeChanged` for why re-reading the handle's (moving) current
+    /// position every frame instead of this fixed anchor caused runaway, "far too sensitive"
+    /// resizing.
+    @State var resizeHandleAnchor: CGPoint?
+    /// Set on the first gesture event that closes an actively-open text edit while the Text tool
+    /// is still selected, so THIS SAME click doesn't also place a brand new text box — Snagit-
+    /// style, clicking away from an edit just finishes it; placing a new one takes a separate,
+    /// later click. See `AnnotationCanvasView+Gestures.swift`.
+    @State var suppressTextPlacementForThisGesture = false
+    /// The annotation currently under the mouse while a non-Select tool is active — shown with a
+    /// hover highlight and a pointing-hand cursor so it's clear that clicking here selects the
+    /// existing element instead of drawing a new one on top of it. `nil` while nothing is
+    /// hovered, or while `.select`/`.crop`/`.freehand` are active (they don't need this prompt:
+    /// Select's own selection UI already communicates it, and Crop/Freehand always act on
+    /// whatever's under the whole gesture, not a specific existing element).
+    @State var hoveredID: UUID?
     @FocusState var textFieldFocused: Bool
 
     /// The canvas fills `image` at 1:1, so the image's point height is also the canvas height —
@@ -101,6 +120,7 @@ struct AnnotationCanvasView: View {
                             : swiftUIFrame(fromRendererFrame: annotation.frame, canvasHeight: canvasHeight),
                         displayPoints: displayPoints(for: annotation),
                         isSelected: annotation.id == selectedID,
+                        isHovered: annotation.id == hoveredID,
                         liveOffset: annotation.id == movingID ? moveOffset : .zero
                     )
                 }
@@ -125,22 +145,6 @@ struct AnnotationCanvasView: View {
                 .onChanged { value in handleDragChanged(value) }
                 .onEnded { value in handleDragEnded(value) }
         )
-    }
-
-    /// Resize handles only make sense for annotations whose geometry is a plain rectangular
-    /// frame — `.freehand`/`.arrow` store their own explicit point lists, so resizing "the
-    /// frame" wouldn't resize the actual stroke.
-    func resizeHandlesApply(to annotation: AnnotationObject) -> Bool {
-        switch annotation.kind {
-        case .freehand, .arrow: return false
-        default: return true
-        }
-    }
-
-    func rectBetween(_ start: CGPoint, _ current: CGPoint) -> CGRect {
-        CGRect(
-            x: min(start.x, current.x), y: min(start.y, current.y),
-            width: abs(current.x - start.x), height: abs(current.y - start.y)
-        )
+        .onContinuousHover { phase in handleHover(phase) }
     }
 }
