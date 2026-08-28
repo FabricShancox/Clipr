@@ -62,10 +62,7 @@ struct AnnotationRenderer {
             context.setAlpha(0.35)
             context.fill(annotation.frame)
         case .blur:
-            // Pixelation approximation: fill with an averaged translucent box.
-            // (Full pixel-sampling blur is a possible future enhancement; out of scope for v1.)
-            context.setFillColor(CGColor(gray: 0.5, alpha: 0.9))
-            context.fill(annotation.frame)
+            drawRedaction(over: annotation.frame, in: context, canvasSize: canvasSize)
         case .text(let string, let style):
             drawAnnotationText(string, style: style, in: annotation.frame, color: annotation.color, context: context)
         case .stamp(let kind):
@@ -73,6 +70,28 @@ struct AnnotationRenderer {
         }
 
         context.restoreGState()
+    }
+
+    /// Replaces `frame` with a pixelated copy of whatever has been drawn under it.
+    ///
+    /// Sampled from a snapshot of the context rather than the base image, so a redaction placed
+    /// over an earlier annotation covers that too — annotations are drawn in order, so everything
+    /// beneath is already in the context.
+    ///
+    /// The snapshot is a `CGImage` (rows top-down) while `frame` is in the context's own
+    /// bottom-left/y-up space, hence the flip to locate the region; drawing the result back at
+    /// `frame` lands it upright again. Fully opaque by construction — the previous flat box was
+    /// 90% opaque and let a tenth of the original pixels through into the export.
+    private static func drawRedaction(over frame: CGRect, in context: CGContext, canvasSize: CGSize) {
+        guard let snapshot = context.makeImage() else { return }
+        let topDown = CGRect(
+            x: frame.origin.x,
+            y: canvasSize.height - frame.origin.y - frame.height,
+            width: frame.width,
+            height: frame.height
+        )
+        guard let pixelated = Pixelation.pixelatedRegion(of: snapshot, in: topDown) else { return }
+        context.draw(pixelated, in: frame)
     }
 
     private static func drawArrow(from start: CGPoint, to end: CGPoint, strokeWidth: CGFloat, in context: CGContext) {

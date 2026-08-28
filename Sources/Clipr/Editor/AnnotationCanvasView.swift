@@ -115,6 +115,7 @@ struct AnnotationCanvasView: View {
                 if annotation.id != editingTextID {
                     AnnotationOverlayShape(
                         annotation: annotation,
+                        baseImage: image,
                         displayFrame: annotation.id == resizingID
                             ? (liveResizeFrame ?? swiftUIFrame(fromRendererFrame: annotation.frame, canvasHeight: canvasHeight))
                             : swiftUIFrame(fromRendererFrame: annotation.frame, canvasHeight: canvasHeight),

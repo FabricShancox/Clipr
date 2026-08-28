@@ -7,6 +7,10 @@ import SwiftUI
 /// pixel-identical to that final render, only visibly represent each annotation kind.
 struct AnnotationOverlayShape: View {
     let annotation: AnnotationObject
+    /// The capture being annotated. Needed only by `.blur`, which shows the actual pixelated
+    /// pixels rather than a placeholder — for a redaction tool the preview has to be the truth,
+    /// since the user decides from it whether something is really covered.
+    let baseImage: NSImage
     /// `annotation.frame` already converted into SwiftUI's y-down display space (or, while a
     /// resize drag is live, the in-progress resized frame — see the `ForEach` call site).
     let displayFrame: CGRect
@@ -80,12 +84,7 @@ struct AnnotationOverlayShape: View {
                 .frame(width: displayFrame.width, height: displayFrame.height)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
         case .blur:
-            // Matches AnnotationRenderer's own v1 approximation: a flat translucent gray box
-            // rather than a real pixel-sampling blur.
-            Rectangle()
-                .fill(Color(white: 0.5, opacity: 0.9))
-                .frame(width: displayFrame.width, height: displayFrame.height)
-                .position(x: displayFrame.midX, y: displayFrame.midY)
+            redactionPreview
         case .stamp(let kind):
             if let number = kind.number {
                 numberStamp(number)
@@ -114,6 +113,30 @@ struct AnnotationOverlayShape: View {
         }
         .frame(width: side, height: side)
         .position(x: displayFrame.midX, y: displayFrame.midY)
+    }
+
+    /// The redacted region as it will actually be exported: the underlying pixels, pixelated.
+    ///
+    /// `displayFrame` is already in the image's own point space with a top-left origin — the
+    /// canvas draws the capture 1:1 and applies zoom outside it — which is the convention
+    /// `Pixelation` expects, so it needs no conversion. Falls back to an opaque box if the region
+    /// can't be sampled; opaque rather than the old 90% so a failure can never leak the content
+    /// it was meant to hide.
+    @ViewBuilder
+    private var redactionPreview: some View {
+        if let cg = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
+           let pixelated = Pixelation.pixelatedRegion(of: cg, in: displayFrame) {
+            Image(decorative: pixelated, scale: 1)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        } else {
+            Rectangle()
+                .fill(Color(white: 0.5))
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        }
     }
 
     private var selectionOutline: some View {
