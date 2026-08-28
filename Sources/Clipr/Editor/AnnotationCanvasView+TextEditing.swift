@@ -34,9 +34,26 @@ extension AnnotationCanvasView {
                 )
                 .position(x: max(frame.width, 80) / 2 + frame.minX, y: frame.midY)
                 .focused($textFieldFocused)
-                .onExitCommand { editingTextID = nil }
+                .onExitCommand { finishTextEditing() }
                 .onAppear { textFieldFocused = true }
         }
+    }
+
+    /// Ends the current text edit, discarding the annotation if nothing was typed.
+    ///
+    /// `commitText` creates the annotation up front so the editor has something to bind to, so
+    /// abandoning a text box — click the canvas with the Text tool, then press Escape — used to
+    /// leave a permanent invisible one behind. It still hit-tests (with `contains`'s 10pt
+    /// tolerance on top), so later clicks in that area selected the invisible box instead of
+    /// drawing, and it was written to the sidecar and restored on every reopen.
+    func finishTextEditing() {
+        defer { editingTextID = nil }
+        guard let id = editingTextID,
+              let annotation = annotations.first(where: { $0.id == id }),
+              case .text(let string, _) = annotation.kind,
+              string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        annotations.removeAll { $0.id == id }
+        if selectedID == id { selectedID = nil }
     }
 
     func displayColor(for annotation: AnnotationObject) -> Color {

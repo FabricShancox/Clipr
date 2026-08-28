@@ -7,7 +7,8 @@ import SwiftUI
 extension AnnotationCanvasView {
     func handleDragChanged(_ value: DragGesture.Value) {
         if editingTextID != nil {
-            editingTextID = nil
+            // Drops the annotation entirely if the user typed nothing — see `finishTextEditing`.
+            finishTextEditing()
             // Snagit-style: clicking away from an actively-open text edit just finishes it —
             // its content is already live-written via `editingTextBinding`, so nothing is lost.
             // If the Text tool is still selected, this SAME click must not also place a brand
