@@ -177,12 +177,36 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             width: rendererRect.width,
             height: rendererRect.height
         )
-        guard let cropped = CaptureGeometry.cropped(image, to: topLeftRect) else { return }
+        // `rect` is the crop that actually happened, which differs from the requested one when the
+        // drag ran past the canvas edge — the delta and new canvas size must come from it.
+        guard let (cropped, rect) = CaptureGeometry.cropped(image, to: topLeftRect) else { return }
+        guard writeBaseImage(cropped, operation: "crop") else { return }
         image = cropped
-        let delta = CaptureGeometry.rendererDelta(oldHeight: oldHeight, newTopLeftOrigin: topLeftRect.origin, newSize: topLeftRect.size)
-        let remapped = CaptureGeometry.remapAnnotations(annotations, delta: delta, newSize: topLeftRect.size)
+        let delta = CaptureGeometry.rendererDelta(oldHeight: oldHeight, newTopLeftOrigin: rect.origin, newSize: rect.size)
+        let remapped = CaptureGeometry.remapAnnotations(annotations, delta: delta, newSize: rect.size)
         persist(remapped)
         window?.contentView = makeContentView(initialAnnotations: remapped)
+    }
+
+    /// Writes a new base image over the raw capture, reporting whether it stuck.
+    ///
+    /// Crop and canvas-resize replace the capture's own pixels, so the raw file has to change too
+    /// or reopening would restore the original. The write goes FIRST and the caller bails out on
+    /// failure, leaving the in-memory image untouched — a half-applied operation, where the screen
+    /// shows a cropped image that disk disagrees with, is worse than one that visibly did nothing.
+    private func writeBaseImage(_ newImage: NSImage, operation: String) -> Bool {
+        do {
+            try storage.overwriteRawCapture(newImage, rawURL: rawURL)
+            return true
+        } catch {
+            NSLog("Clipr: \(operation) failed to write \(rawURL.lastPathComponent): \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Couldn't \(operation) this capture"
+            alert.informativeText = "\(rawURL.lastPathComponent) could not be written, so it was left unchanged.\n\n\(error.localizedDescription)"
+            alert.alertStyle = .warning
+            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+            return false
+        }
     }
 
     /// `topLeftRect` is in top-left/y-down space (matching the corner handles in
@@ -193,6 +217,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let oldHeight = image.size.height
         let delta = CaptureGeometry.rendererDelta(oldHeight: oldHeight, newTopLeftOrigin: topLeftRect.origin, newSize: topLeftRect.size)
         guard let resized = CaptureGeometry.resizedCanvas(image, to: topLeftRect, delta: delta) else { return }
+        guard writeBaseImage(resized, operation: "resize") else { return }
         image = resized
         let remapped = CaptureGeometry.remapAnnotations(annotations, delta: delta, newSize: topLeftRect.size)
         persist(remapped)

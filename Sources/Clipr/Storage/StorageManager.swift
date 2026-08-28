@@ -28,6 +28,17 @@ final class StorageManager {
         return try write(image, to: editedURL, overwrite: true)
     }
 
+    /// Replaces the raw capture's own pixels — used by crop and canvas-resize, which change the
+    /// base image itself rather than adding an annotation on top of it.
+    ///
+    /// Without this the crop lived only in memory: `_edited.png` and the sidecar were written with
+    /// the new geometry while `rawURL` kept the original pixels, so reopening the capture loaded
+    /// the uncropped image and positioned annotations that had been remapped for the cropped one
+    /// — the crop silently undone and every annotation misplaced.
+    func overwriteRawCapture(_ image: NSImage, rawURL: URL) throws {
+        _ = try write(image, to: rawURL, overwrite: true)
+    }
+
     /// Persists the live, editable annotation objects for a capture as a JSON sidecar, so
     /// reopening it from Recents (or relaunching Clipr entirely) restores actual editable
     /// annotations rather than only a flattened preview image. Called alongside

@@ -31,10 +31,23 @@ struct CaptureGeometry {
     /// rect after `EditorWindowController` flips it) — `CGImage.cropping(to:)` expects that same
     /// convention (verified empirically; not the same as the renderer's own bottom-left/y-up
     /// space `AnnotationObject.frame` uses).
-    static func cropped(_ image: NSImage, to topLeftRect: CGRect) -> NSImage? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let cropped = cgImage.cropping(to: topLeftRect) else { return nil }
-        return NSImage(cgImage: cropped, size: topLeftRect.size)
+    ///
+    /// Returns the cropped image together with the rect actually used, which is not always the one
+    /// asked for: a crop drag can carry on past the canvas edge (SwiftUI keeps reporting locations
+    /// outside the view once a drag begins), and `cropping(to:)` quietly clamps such a rect to the
+    /// image and integralizes it. Sizing the `NSImage` by the requested rect instead of the real
+    /// bitmap stretched those pixels to fill it, and every annotation remapped against the
+    /// requested size then landed off by the same factor. Callers must derive their delta and new
+    /// canvas size from the returned rect.
+    static func cropped(_ image: NSImage, to topLeftRect: CGRect) -> (image: NSImage, rect: CGRect)? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        // Clamped against `image.size`, not the CGImage's pixel dimensions: `topLeftRect` is in
+        // the image's point space, which is what the rest of the crop path works in. The two
+        // coincide for real captures (`CaptureManager` builds its NSImages 1:1 with pixels).
+        let effective = topLeftRect.integral.intersection(CGRect(origin: .zero, size: image.size))
+        guard !effective.isNull, effective.width >= 1, effective.height >= 1,
+              let cropped = cgImage.cropping(to: effective) else { return nil }
+        return (NSImage(cgImage: cropped, size: effective.size), effective)
     }
 
     /// Composites `image` into a new, otherwise-transparent canvas of `topLeftRect.size`, offset

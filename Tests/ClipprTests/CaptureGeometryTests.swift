@@ -62,7 +62,34 @@ final class CaptureGeometryTests: XCTestCase {
     func testCroppedProducesAnImageOfTheRequestedSize() {
         let image = makeTestImage(width: 20, height: 20, color: .red)
         let cropped = CaptureGeometry.cropped(image, to: CGRect(x: 5, y: 5, width: 10, height: 10))
-        XCTAssertEqual(cropped?.size, NSSize(width: 10, height: 10))
+        XCTAssertEqual(cropped?.image.size, NSSize(width: 10, height: 10))
+        XCTAssertEqual(cropped?.rect, CGRect(x: 5, y: 5, width: 10, height: 10))
+    }
+
+    /// A crop drag can carry on past the canvas edge. The returned image must match the pixels
+    /// that actually exist rather than being stretched to the requested size, and the reported
+    /// rect must be the clamped one so the caller remaps annotations against the real canvas.
+    func testCroppedClampsARectThatRunsPastTheImageEdge() {
+        let image = makeTestImage(width: 20, height: 20, color: .red)
+        let cropped = CaptureGeometry.cropped(image, to: CGRect(x: 10, y: 10, width: 40, height: 40))
+
+        XCTAssertEqual(cropped?.rect, CGRect(x: 10, y: 10, width: 10, height: 10))
+        XCTAssertEqual(cropped?.image.size, NSSize(width: 10, height: 10), "must not stretch to the requested 40x40")
+    }
+
+    func testCroppedIntegralizesAFractionalRect() {
+        let image = makeTestImage(width: 20, height: 20, color: .red)
+        let cropped = CaptureGeometry.cropped(image, to: CGRect(x: 4.3, y: 4.6, width: 10.2, height: 10.4))
+
+        let rect = try? XCTUnwrap(cropped?.rect)
+        XCTAssertEqual(rect?.width, rect.map { CGFloat(Int($0.width)) }, "rect should be whole pixels")
+        XCTAssertEqual(cropped?.image.size.width, cropped?.rect.width, "image and rect must agree")
+        XCTAssertEqual(cropped?.image.size.height, cropped?.rect.height)
+    }
+
+    func testCroppedReturnsNilForARectFullyOutsideTheImage() {
+        let image = makeTestImage(width: 20, height: 20, color: .red)
+        XCTAssertNil(CaptureGeometry.cropped(image, to: CGRect(x: 50, y: 50, width: 10, height: 10)))
     }
 
     // MARK: - resizedCanvas
