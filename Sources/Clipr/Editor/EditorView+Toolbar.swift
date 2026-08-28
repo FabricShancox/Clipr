@@ -6,16 +6,19 @@ extension EditorView {
     var toolbar: some View {
         HStack(spacing: 10) {
             HStack(spacing: 2) {
+                // All three are `.disabled` while a text field is active, which also disables their
+                // keyboard shortcuts — otherwise Backspace deletes the selected annotation instead
+                // of a character, and ⌘Z undoes an annotation instead of the typing.
                 Button { undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .disabled(undoStack.isEmpty)
+                    .disabled(undoStack.isEmpty || isTextEntryActive)
                     .keyboardShortcut("z", modifiers: .command)
                     .help("Undo")
                 Button { redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .disabled(redoStack.isEmpty)
+                    .disabled(redoStack.isEmpty || isTextEntryActive)
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .help("Redo")
                 Button { deleteSelected() } label: { Image(systemName: "trash").frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .disabled(selectedAnnotationID == nil)
+                    .disabled(selectedAnnotationID == nil || isTextEntryActive)
                     .keyboardShortcut(.delete, modifiers: [])
                     .help("Delete selected annotation")
             }

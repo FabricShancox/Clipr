@@ -92,6 +92,12 @@ struct EditorView: View {
         RGBAColor(red: 0xF4 / 255.0, green: 0x43 / 255.0, blue: 0x36 / 255.0, alpha: 1),
     ]
 
+    /// True while the user is typing into a text field — either a text annotation or the header's
+    /// rename field. Every bare-key shortcut (the 1-0 tool keys, Delete, ⌘Z) must be disabled
+    /// while this holds, or it fires instead of reaching the field: Backspace would delete the
+    /// selected annotation rather than a character, and a digit would switch tools mid-word.
+    var isTextEntryActive: Bool { editingTextID != nil || isRenaming }
+
     var numberTool: AnnotationTool { .stamp(stampKind(for: nextStampNumber)) }
     var visibleRecents: [URL] { recentCaptures.filter { !deletedRecentURLs.contains($0) } }
 

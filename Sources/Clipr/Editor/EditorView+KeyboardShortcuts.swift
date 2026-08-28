@@ -5,11 +5,12 @@ import SwiftUI
 extension EditorView {
     /// Zero-size, invisible buttons whose sole purpose is registering a `.keyboardShortcut` —
     /// SwiftUI has no lower-ceremony way to bind a bare key to an action outside a visible
-    /// control. Each is `.disabled` while a text field is being edited (`editingTextID != nil`),
-    /// which also disables its keyboard shortcut, so typing "1"-"9" into a text annotation types
-    /// those characters instead of switching tools out from under the user.
+    /// control. Each is `.disabled` while any text field is being edited (`isTextEntryActive`
+    /// covers both a text annotation and the header's rename field), which also disables its
+    /// keyboard shortcut, so typing "1"-"9" types those characters instead of switching tools out
+    /// from under the user.
     var toolShortcuts: some View {
-        let editing = editingTextID != nil
+        let editing = isTextEntryActive
         return Group {
             shortcutButton("1", tool: .select, editing: editing)
             shortcutButton("2", tool: .rectangle, editing: editing)
