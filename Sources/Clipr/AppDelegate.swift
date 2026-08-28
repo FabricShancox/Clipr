@@ -106,7 +106,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .accessibilityNotGranted:
             showPermissionAlert(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
         case .startFailed(let error):
+            // Surfaced, not just logged: the user asked for this and nothing visible would
+            // happen otherwise — the menu would simply stay on "Start Advanced Mode".
             NSLog("Clipr: failed to start advanced mode: \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Couldn't start Advanced Mode"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
         case .stoppedNoSteps:
             statusItemController.setAdvancedModeActive(false)
             showNoStepsCapturedAlert()

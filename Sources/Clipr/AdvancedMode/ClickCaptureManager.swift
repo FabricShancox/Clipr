@@ -5,6 +5,10 @@ final class ClickCaptureManager {
     private let storage: StorageManager
     private let debouncer = Debouncer(delay: 0.2)
     private var eventTap: CFMachPort?
+    /// Kept so `stop()` can take the tap back out of the run loop. Dropping only the `CFMachPort`
+    /// reference left the source attached and the port alive, so every start/stop cycle leaked one
+    /// of each for the life of the process.
+    private var runLoopSource: CFRunLoopSource?
     private var sessionFolder: URL?
     private var stepURLs: [URL] = []
     private var nextStepIndex = 1
@@ -29,41 +33,75 @@ final class ClickCaptureManager {
             throw ClickCaptureError.accessibilityNotGranted
         }
         let folder = try storage.createSessionFolder(date: Date())
-        sessionFolder = folder
         stepURLs = []
         nextStepIndex = 1
-        installEventTap()
+        // Before `sessionFolder` is set, so a failure can't leave `isActive` true with no tap
+        // installed — the session would report as running while recording nothing.
+        try installEventTap()
+        sessionFolder = folder
         return folder
     }
 
     func stop() -> [URL] {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            eventTap = nil
-        }
+        teardownEventTap()
         sessionFolder = nil
         return stepURLs
     }
 
-    private func installEventTap() {
+    deinit {
+        teardownEventTap()
+    }
+
+    private func installEventTap() throws {
         let mask: CGEventMask = 1 << CGEventType.leftMouseDown.rawValue
-        eventTap = CGEvent.tapCreate(
+        let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
             eventsOfInterest: mask,
-            callback: { _, _, event, userInfo in
+            callback: { _, type, event, userInfo in
                 guard let userInfo else { return Unmanaged.passUnretained(event) }
                 let manager = Unmanaged<ClickCaptureManager>.fromOpaque(userInfo).takeUnretainedValue()
+                // The system disables a tap that takes too long to respond, which any blocking
+                // main-thread work will trigger (an open panel, a modal alert, a slow capture).
+                // Left unhandled the session stays "active" while silently recording nothing, so
+                // re-arm instead of dropping every subsequent click on the floor.
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    manager.reenableEventTap()
+                    return Unmanaged.passUnretained(event)
+                }
                 manager.debouncer.call { manager.captureFrontmostWindow() }
                 return Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         )
+        guard let tap else { throw ClickCaptureError.eventTapCreationFailed }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        eventTap = tap
+        runLoopSource = source
+    }
+
+    private func reenableEventTap() {
         guard let eventTap else { return }
-        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
+        NSLog("Clipr: advanced mode event tap was disabled by the system; re-enabled")
+    }
+
+    /// Fully unwinds `installEventTap`. Disabling the tap alone leaves the run-loop source
+    /// attached and the Mach port alive.
+    private func teardownEventTap() {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+            if let runLoopSource {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+            }
+            CFMachPortInvalidate(eventTap)
+        }
+        eventTap = nil
+        runLoopSource = nil
     }
 
     private func captureFrontmostWindow() {
