@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureManager.onCaptureFinished = { [weak self] rawURL, image in
             self?.openEditor(image: image, rawURL: rawURL)
         }
+        captureManager.onCaptureFailed = { [weak self] error in
+            self?.showCaptureFailure(error)
+        }
         advancedMode.onStepCaptured = { [weak self] count in
             self?.statusItemController.setAdvancedModeStepCount(count)
         }
@@ -70,12 +73,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerHotkeys() {
-        hotkeyManager.register(settings.captureHotkey, id: HotkeyID.capture.rawValue) { [weak self] in
+        var rejected: [String] = []
+        if !hotkeyManager.register(settings.captureHotkey, id: HotkeyID.capture.rawValue, handler: { [weak self] in
             self?.performCapture()
+        }) {
+            rejected.append("\(settings.captureHotkey.displayString) (Capture)")
         }
-        hotkeyManager.register(settings.advancedModeHotkey, id: HotkeyID.advancedMode.rawValue) { [weak self] in
+        if !hotkeyManager.register(settings.advancedModeHotkey, id: HotkeyID.advancedMode.rawValue, handler: { [weak self] in
             self?.toggleAdvancedMode()
+        }) {
+            rejected.append("\(settings.advancedModeHotkey.displayString) (Advanced Mode)")
         }
+        guard !rejected.isEmpty else { return }
+
+        // The registration that failed has already dropped whatever was bound before, so staying
+        // quiet would leave the user with a hotkey that simply stopped working and no clue why.
+        let alert = NSAlert()
+        alert.messageText = rejected.count == 1 ? "A shortcut couldn't be registered" : "Some shortcuts couldn't be registered"
+        alert.informativeText = """
+            \(rejected.joined(separator: "\n"))
+
+            Another app or macOS is probably already using \(rejected.count == 1 ? "it" : "them"). \
+            Pick a different combination in Preferences.
+            """
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    /// Tells the user a capture failed, pointing at Screen Recording when that's the likely cause.
+    ///
+    /// `hasScreenRecordingPermission` is checked before the overlay appears, but the answer is
+    /// cached for the process: revoking access in System Settings mid-session still passes that
+    /// check, so the failure only shows up here, once ScreenCaptureKit refuses.
+    private func showCaptureFailure(_ error: Error) {
+        // ScreenCaptureKit reports its own failures under this domain; the string constant avoids
+        // importing ScreenCaptureKit here just for it.
+        let isPermissionProblem = (error as NSError).domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain"
+        if isPermissionProblem {
+            showPermissionAlert(
+                pane: .screenRecording,
+                message: "Clipr couldn't capture the screen. If you've recently changed Screen Recording access, it may need to be re-granted — and Clipr restarted."
+            )
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Capture failed"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     /// Routes both the capture hotkey and "Capture Now" through here rather than calling

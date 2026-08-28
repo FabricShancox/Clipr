@@ -4,6 +4,12 @@ import ScreenCaptureKit
 final class CaptureManager {
     private let storage: StorageManager
     var onCaptureFinished: ((URL, NSImage) -> Void)?
+    /// Fired on the main actor when a capture the user asked for didn't produce anything.
+    ///
+    /// Failures used to be logged and nothing else, so the most visible case — Screen Recording
+    /// revoked in System Settings after launch, where the cached permission check still passes and
+    /// the overlay still appears — ended with the drag completing and simply nothing happening.
+    var onCaptureFailed: ((Error) -> Void)?
     /// Whether the mouse cursor should be baked into captured images. Off by default (see
     /// `SettingsStore.captureCursor`) — `AppDelegate` keeps this in sync with the user's
     /// preference at launch and whenever it changes in Preferences.
@@ -46,6 +52,9 @@ final class CaptureManager {
                 }
             } catch {
                 NSLog("Clipr capture failed: \(error)")
+                await MainActor.run {
+                    onCaptureFailed?(error)
+                }
             }
         }
     }

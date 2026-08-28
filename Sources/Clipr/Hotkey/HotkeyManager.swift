@@ -10,9 +10,15 @@ final class HotkeyManager {
         installEventHandler()
     }
 
-    func register(_ binding: HotkeyBinding, id: UInt32, handler: @escaping () -> Void) {
+    /// Registers a global hotkey, reporting whether the system accepted it.
+    ///
+    /// Returns false when the combination is already owned by macOS or another app (or by this
+    /// app's other binding). The result matters: registration drops the previous binding first, so
+    /// a silently-failed register used to leave the user with the old hotkey gone, no new one
+    /// working, and nothing said about it. Callers should tell the user and offer another combo.
+    @discardableResult
+    func register(_ binding: HotkeyBinding, id: UInt32, handler: @escaping () -> Void) -> Bool {
         unregister(id: id)
-        handlers[id] = handler
 
         var hotKeyRef: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x434C_5052), id: id) // "CLPR"
@@ -24,9 +30,15 @@ final class HotkeyManager {
             0,
             &hotKeyRef
         )
-        if status == noErr, let ref = hotKeyRef {
-            hotKeyRefs[id] = ref
+        guard status == noErr, let ref = hotKeyRef else {
+            NSLog("Clipr: could not register hotkey \(binding.displayString) (status \(status))")
+            return false
         }
+        hotKeyRefs[id] = ref
+        // Only after the system accepted it, so a dead binding can't leave a handler that will
+        // never fire looking registered.
+        handlers[id] = handler
+        return true
     }
 
     func unregister(id: UInt32) {
