@@ -23,7 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // `.regular`, not `.accessory`: Clipr is a regular app with a Dock icon and an app-switcher
+        // entry, not a menu-bar-only utility. The status item stays as a second way in. This also
+        // means the app owns the menu bar when frontmost, so it has to supply one.
+        NSApp.setActivationPolicy(.regular)
+        installMainMenu()
 
         applyCaptureCursorSetting()
 
@@ -116,6 +120,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowIDs(of: [statusItemController.statusItem.button?.window, preferencesWindowController?.window]
             + openEditors.map { $0.window }
             + advancedMode.reviewWindows)
+    }
+
+    /// Target for the main menu's Preferences item — see `MainMenu.swift`. A menu item needs an
+    /// `@objc` selector, which `openPreferences` (private, non-`@objc`) can't be.
+    @objc func showPreferencesFromMenu() {
+        openPreferences()
     }
 
     private func openPreferences() {
