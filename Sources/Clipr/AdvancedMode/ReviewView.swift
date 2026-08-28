@@ -12,12 +12,11 @@ struct ReviewView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(stepURLs, id: \.self) { url in
                     VStack {
-                        if let image = NSImage(contentsOf: url) {
-                            Image(nsImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 100)
-                        }
+                        // `ThumbnailView` rather than `NSImage(contentsOf:)` inline: that read and
+                        // fully decoded every step from disk on each body evaluation — including
+                        // after every Delete — on the main thread.
+                        ThumbnailView(url: url)
+                            .frame(height: 100)
                         Text(url.lastPathComponent).font(.caption)
                         HStack {
                             Button("Edit") { onOpenEditor(url) }

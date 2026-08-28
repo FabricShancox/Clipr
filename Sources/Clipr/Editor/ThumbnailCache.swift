@@ -7,10 +7,47 @@ import Cocoa
 /// those content-view rebuilds. A cache that outlives any single `EditorView` instance is what
 /// actually stops that: `ThumbnailView.init` seeds its `@State` from here synchronously, so an
 /// already-seen URL never shows the placeholder at all.
+///
+/// Backed by `NSCache` with a cost limit rather than a plain dictionary. The entries used to be
+/// full-resolution decodes held for the whole session — twenty 6000x4000 captures is well over a
+/// gigabyte of resident memory to draw twenty 80x56 tiles — with no eviction. Entries are now
+/// downsampled at decode time and the cache can drop them under memory pressure.
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
-    private var images: [URL: NSImage] = [:]
 
-    func image(for url: URL) -> NSImage? { images[url] }
-    func store(_ image: NSImage, for url: URL) { images[url] = image }
+    /// Longest edge to decode to. Comfortably covers the 80x56 tile at 2x, with headroom so the
+    /// tiles stay sharp if the sidebar ever grows.
+    static let maxPixelSize = 320
+
+    private let cache: NSCache<NSURL, NSImage> = {
+        let cache = NSCache<NSURL, NSImage>()
+        // ~32MB: hundreds of thumbnails at this size, but bounded.
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
+
+    func image(for url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
+
+    func store(_ image: NSImage, for url: URL) {
+        let cost = Int(image.size.width * image.size.height * 4)
+        cache.setObject(image, forKey: url as NSURL, cost: cost)
+    }
+
+    /// Decodes `url` downsampled, without ever materialising the full-size image.
+    ///
+    /// `CGImageSourceCreateThumbnailAtIndex` does the subsampling during decode, so a 24-megapixel
+    /// capture never costs 96MB just to produce a tile. Deliberately not `@MainActor` — callers
+    /// run it off the main thread, since the previous full decode happened on it.
+    static func decodeThumbnail(at url: URL) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
 }

@@ -19,7 +19,13 @@ struct ThumbnailView: View {
         }
         .task(id: url) {
             guard image == nil else { return }
-            guard let loaded = NSImage(contentsOf: url) else { return }
+            // Detached so the decode doesn't run on the main actor, which `.task` would otherwise
+            // inherit — this used to be a full-resolution decode blocking the UI per tile.
+            let url = url
+            let loaded = await Task.detached(priority: .userInitiated) {
+                ThumbnailCache.decodeThumbnail(at: url)
+            }.value
+            guard let loaded else { return }
             image = loaded
             ThumbnailCache.shared.store(loaded, for: url)
         }
