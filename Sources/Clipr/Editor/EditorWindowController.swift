@@ -7,6 +7,19 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let storage: StorageManager
     var onFinished: (() -> Void)?
 
+    /// The live annotations of the currently-shown content view, updated synchronously on every
+    /// change. `flushPendingSave` writes these when the window closes or the app quits, which is
+    /// when the 800ms debounce would otherwise be abandoned unwritten.
+    private var latestAnnotations: [AnnotationObject] = []
+
+    /// Bumped on every content-view swap (crop, canvas-resize, rename, opening another capture).
+    /// A debounced save carries the generation it was scheduled under, so one left in flight from
+    /// a view that has since been replaced can be told apart from a current one. Comparing URLs
+    /// alone is not enough: crop and canvas-resize keep the same `rawURL`, so a pre-crop debounce
+    /// would otherwise pass the URL check and overwrite the correctly-remapped save with
+    /// annotations still in pre-crop coordinates.
+    private var generation = 0
+
     init(image: NSImage, rawURL: URL, storage: StorageManager) {
         self.image = image
         self.rawURL = rawURL
@@ -41,7 +54,20 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError("not supported") }
 
     func windowWillClose(_ notification: Notification) {
+        // Before `onFinished` — that releases this controller, and with it any in-flight debounce.
+        flushPendingSave()
         onFinished?()
+    }
+
+    /// Writes the current annotations immediately, bypassing the debounce.
+    ///
+    /// Without this, editing and then closing the window (or quitting) inside the 800ms debounce
+    /// lost the edit outright: the pending `Task` holds the view weakly and the controller is
+    /// released the moment `onFinished` runs, so the scheduled write simply never happened, with
+    /// nothing shown to the user. Called from `windowWillClose` and from
+    /// `AppDelegate.applicationShouldTerminate`.
+    func flushPendingSave() {
+        persist(latestAnnotations)
     }
 
     /// `initialAnnotations`, when omitted, loads whatever was last saved for `rawURL` from its
@@ -50,13 +76,26 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// an explicit (already-remapped) array instead, since loading from disk there would fetch
     /// the pre-crop/resize geometry.
     private func makeContentView(initialAnnotations: [AnnotationObject]? = nil) -> NSHostingView<EditorView> {
-        NSHostingView(rootView: EditorView(
+        generation += 1
+        let generation = self.generation
+        // Seeded here rather than left over from the previous view: closing straight after
+        // switching captures would otherwise flush the OLD capture's annotations onto the new one.
+        let resolved = initialAnnotations ?? storage.loadAnnotations(rawURL: rawURL)
+        latestAnnotations = resolved
+
+        return NSHostingView(rootView: EditorView(
             image: image,
             currentURL: rawURL,
             recentCaptures: recentCaptures(in: storage.baseFolder),
-            annotations: initialAnnotations ?? storage.loadAnnotations(rawURL: rawURL),
+            annotations: resolved,
             onOpenCapture: { [weak self] url, currentAnnotations in self?.loadCapture(url, previousAnnotations: currentAnnotations) },
-            onAutoSave: { [weak self] forURL, annotations in self?.autoSave(for: forURL, annotations: annotations) },
+            onAutoSave: { [weak self] forURL, annotations in
+                self?.autoSave(for: forURL, annotations: annotations, generation: generation)
+            },
+            onAnnotationsChanged: { [weak self] annotations in
+                guard let self, generation == self.generation else { return }
+                self.latestAnnotations = annotations
+            },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
             onShare: { [weak self] annotations in self?.share(annotations: annotations) },
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
@@ -75,7 +114,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// Unlike auto-save this is a direct user action, so a failure is surfaced rather than logged.
     private func rename(_ url: URL, to newName: String, annotations: [AnnotationObject]) {
         guard url == rawURL else { return }
-        autoSave(for: rawURL, annotations: annotations)
+        persist(annotations)
         do {
             rawURL = try storage.renameCapture(rawURL: rawURL, toBaseName: newName)
             window?.contentView = makeContentView(initialAnnotations: annotations)
@@ -89,18 +128,28 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// Fired ~800ms after the last edit settles (see `EditorView.scheduleAutoSave`). `forURL` is
-    /// the URL that debounce was scheduled against — since that `Task` isn't cancelled by a
-    /// content-view swap (`loadCapture`/`applyCrop`/`applyCanvasResize`), a debounce left over
-    /// from a since-abandoned capture must not overwrite whatever `rawURL` has since moved on to;
-    /// comparing against the current `rawURL` makes a stale request a harmless no-op. Failures
-    /// are logged, not alerted, since this can fire often.
-    private func autoSave(for forURL: URL, annotations: [AnnotationObject]) {
-        guard forURL == rawURL else { return }
+    /// Fired ~800ms after the last edit settles (see `EditorView.scheduleAutoSave`). That `Task`
+    /// isn't cancelled by a content-view swap, so a debounce left over from a since-abandoned view
+    /// must not overwrite what the window has moved on to. `forURL` catches a switch to a
+    /// different capture; `generation` catches crop and canvas-resize, which keep the same URL but
+    /// remap every annotation, so a stale save would write pre-crop geometry over the good one.
+    private func autoSave(for forURL: URL, annotations: [AnnotationObject], generation: Int) {
+        guard generation == self.generation, forURL == rawURL else { return }
+        persist(annotations)
+    }
+
+    /// Writes the flattened preview and the annotations sidecar for the CURRENT capture. Callers
+    /// inside this class use it directly — they only ever run for the live view, so they need no
+    /// staleness check. Failures are logged, not alerted, since this can fire often.
+    private func persist(_ annotations: [AnnotationObject]) {
         let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
         do {
             _ = try storage.saveEditedCapture(flattened, rawURL: rawURL)
-            storage.copyToClipboard(flattened)
+            // Deliberately does NOT touch the pasteboard. Auto-save used to copy here too, which
+            // meant every settled edit silently replaced whatever the user had copied — annotate
+            // for a minute and anything you'd put on the clipboard was gone. Copying is an
+            // explicit action; it belongs in `copy(annotations:)` alone.
+            //
             // Persists the actual editable annotation objects (not just the flattened preview)
             // so reopening this capture later — from Recents, or after relaunching Clipr —
             // restores them instead of showing a plain, no-longer-editable image. This is what
@@ -132,7 +181,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         image = cropped
         let delta = CaptureGeometry.rendererDelta(oldHeight: oldHeight, newTopLeftOrigin: topLeftRect.origin, newSize: topLeftRect.size)
         let remapped = CaptureGeometry.remapAnnotations(annotations, delta: delta, newSize: topLeftRect.size)
-        autoSave(for: rawURL, annotations: remapped)
+        persist(remapped)
         window?.contentView = makeContentView(initialAnnotations: remapped)
     }
 
@@ -146,7 +195,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         guard let resized = CaptureGeometry.resizedCanvas(image, to: topLeftRect, delta: delta) else { return }
         image = resized
         let remapped = CaptureGeometry.remapAnnotations(annotations, delta: delta, newSize: topLeftRect.size)
-        autoSave(for: rawURL, annotations: remapped)
+        persist(remapped)
         window?.contentView = makeContentView(initialAnnotations: remapped)
     }
 
@@ -164,7 +213,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// current annotations — are flushed synchronously against the OLD `rawURL` first, before
     /// it's reassigned, so a very recent edit that hadn't reached its debounce yet isn't lost.
     private func loadCapture(_ url: URL, previousAnnotations: [AnnotationObject]) {
-        autoSave(for: rawURL, annotations: previousAnnotations)
+        persist(previousAnnotations)
         guard let newImage = NSImage(contentsOf: url) else { return }
         image = newImage
         rawURL = url

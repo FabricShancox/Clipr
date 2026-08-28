@@ -66,6 +66,10 @@ struct EditorView: View {
     /// that matters (a switched-away-from capture's late-firing debounce must not write over
     /// whatever the window has since moved on to).
     let onAutoSave: (URL, [AnnotationObject]) -> Void
+    /// Fired synchronously on every annotation change, unlike `onAutoSave`'s 800ms debounce, so
+    /// `EditorWindowController` always holds the current state and can flush it when the window
+    /// closes or the app quits — at which point the pending debounce will never fire.
+    let onAnnotationsChanged: ([AnnotationObject]) -> Void
     let onCopy: ([AnnotationObject]) -> Void
     let onShare: ([AnnotationObject]) -> Void
     /// Crop rect in renderer space (the same y-up-from-bottom space `AnnotationObject.frame`

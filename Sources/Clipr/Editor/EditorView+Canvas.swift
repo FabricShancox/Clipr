@@ -106,7 +106,11 @@ extension EditorView {
                 if !userSetZoom { zoomToFit() }
             }
         }
-        .onChange(of: annotations) { _, _ in
+        .onChange(of: annotations) { _, newValue in
+            // Report the new state immediately, then debounce the actual write. The controller
+            // needs the current annotations the moment they change so it can still save them if
+            // the window closes before the debounce elapses.
+            onAnnotationsChanged(newValue)
             scheduleAutoSave()
         }
     }

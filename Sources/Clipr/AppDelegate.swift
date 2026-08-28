@@ -122,6 +122,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + advancedMode.reviewWindows)
     }
 
+    /// Quitting abandons every editor's pending 800ms auto-save debounce, so the last edit in each
+    /// open window would be lost silently. Flushing here writes them synchronously first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        for editor in openEditors {
+            editor.flushPendingSave()
+        }
+        return .terminateNow
+    }
+
     /// Target for the main menu's Preferences item — see `MainMenu.swift`. A menu item needs an
     /// `@objc` selector, which `openPreferences` (private, non-`@objc`) can't be.
     @objc func showPreferencesFromMenu() {
