@@ -43,6 +43,12 @@ struct EditorView: View {
     @State var showSavedConfirmation = false
     @State var deletedRecentURLs: Set<URL> = []
     @State var pendingCanvasResize: CGRect?
+    /// Header filename rename (see `EditorView+Header.swift`). These reset whenever the content
+    /// view is rebuilt — after a rename it is, so the field correctly reverts to plain text
+    /// showing the new name.
+    @State var isRenaming = false
+    @State var draftName = ""
+    @FocusState var renameFieldFocused: Bool
     /// Debounces auto-save so every single keystroke/drag doesn't hit disk — only the trailing
     /// edit in a burst does. Cancelling and replacing this on every `annotations` change is what
     /// gives the debounce its "wait for a pause" behavior.
@@ -72,6 +78,10 @@ struct EditorView: View {
     /// current annotations, for the same remap-not-discard treatment as crop.
     let onCanvasResize: (CGRect, [AnnotationObject]) -> Void
     let onDeleteCapture: (URL) -> Void
+    /// Rename requested from the header: the capture being renamed, the new base name (no
+    /// extension, unsanitised as typed), and the current annotations so the controller can flush
+    /// them against the OLD name before any file moves — same reasoning as `onOpenCapture`.
+    let onRename: (URL, String, [AnnotationObject]) -> Void
 
     static let swatchColors: [RGBAColor] = [
         RGBAColor(red: 1, green: 1, blue: 1, alpha: 1),

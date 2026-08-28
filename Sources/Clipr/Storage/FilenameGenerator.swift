@@ -21,6 +21,31 @@ struct FilenameGenerator {
         return "\(base)_annotations.json"
     }
 
+    /// Cleans a user-typed capture name into something safe to write to disk, or `nil` if nothing
+    /// usable survives. Used by the editor's click-the-filename rename.
+    ///
+    /// Path separators and `:` are folded to `-` rather than rejected, so an ordinary name like
+    /// "Login 3/4" still works instead of erroring; the point is that a typed name can never
+    /// traverse out of its folder. A leading `.` is dropped so a rename can't hide the capture,
+    /// and a typed `.png` is stripped so the extension the caller appends isn't doubled up.
+    static func sanitizedBaseName(_ input: String) -> String? {
+        var name = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.lowercased().hasSuffix(".png") {
+            name = String(name.dropLast(4))
+        }
+        name = String(name.map { character in
+            character == "/" || character == ":" || character == "\\" ? "-" : character
+        })
+        name.removeAll { $0.isNewline || $0.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) } }
+        while name.hasPrefix(".") { name.removeFirst() }
+        name = name.trimmingCharacters(in: .whitespaces)
+
+        // 200 leaves room for the `_annotations.json` suffix the sidecar adds within the 255-byte
+        // limit almost every filesystem imposes on a single path component.
+        guard !name.isEmpty, name.count <= 200 else { return nil }
+        return name
+    }
+
     static func sessionFolderName(date: Date, timeZone: TimeZone = .current) -> String {
         "Session_\(timestamp(date: date, timeZone: timeZone))"
     }

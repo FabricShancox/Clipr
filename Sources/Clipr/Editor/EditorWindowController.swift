@@ -61,8 +61,32 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onShare: { [weak self] annotations in self?.share(annotations: annotations) },
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
-            onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) }
+            onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) },
+            onRename: { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) }
         ))
+    }
+
+    /// Renames the open capture from the header field. `annotations` are flushed synchronously
+    /// against the OLD `rawURL` first — the same reason `loadCapture` does it — so an edit that
+    /// hadn't reached its debounce yet is written before the files move, rather than firing
+    /// afterwards against a path that no longer exists and being dropped by `autoSave`'s guard.
+    ///
+    /// Rebuilding the content view re-reads Recents, so the sidebar picks up the new name too.
+    /// Unlike auto-save this is a direct user action, so a failure is surfaced rather than logged.
+    private func rename(_ url: URL, to newName: String, annotations: [AnnotationObject]) {
+        guard url == rawURL else { return }
+        autoSave(for: rawURL, annotations: annotations)
+        do {
+            rawURL = try storage.renameCapture(rawURL: rawURL, toBaseName: newName)
+            window?.contentView = makeContentView(initialAnnotations: annotations)
+        } catch {
+            NSLog("Clipr: rename failed: \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Couldn't rename this capture"
+            alert.informativeText = "\(url.lastPathComponent) was left unchanged.\n\n\(error.localizedDescription)"
+            alert.alertStyle = .warning
+            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+        }
     }
 
     /// Fired ~800ms after the last edit settles (see `EditorView.scheduleAutoSave`). `forURL` is
