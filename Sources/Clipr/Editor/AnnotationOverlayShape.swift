@@ -23,12 +23,14 @@ struct AnnotationOverlayShape: View {
     /// otherwise. Applied as a plain view-space translation on top of the normal position.
     var liveOffset: CGSize = .zero
 
-    private var color: Color {
+    private var color: Color { swiftUIColor(annotation.color) }
+
+    private func swiftUIColor(_ rgba: RGBAColor) -> Color {
         Color(
-            red: Double(annotation.color.red),
-            green: Double(annotation.color.green),
-            blue: Double(annotation.color.blue),
-            opacity: Double(annotation.color.alpha)
+            red: Double(rgba.red),
+            green: Double(rgba.green),
+            blue: Double(rgba.blue),
+            opacity: Double(rgba.alpha)
         )
     }
 
@@ -85,13 +87,33 @@ struct AnnotationOverlayShape: View {
                 .frame(width: displayFrame.width, height: displayFrame.height)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
         case .stamp(let kind):
-            Image(systemName: kind.symbolName)
-                .resizable()
-                .scaledToFit()
-                .foregroundColor(color)
-                .frame(width: displayFrame.width, height: displayFrame.height)
-                .position(x: displayFrame.midX, y: displayFrame.midY)
+            if let number = kind.number {
+                numberStamp(number)
+            } else {
+                Image(systemName: kind.symbolName)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundColor(color)
+                    .frame(width: displayFrame.width, height: displayFrame.height)
+                    .position(x: displayFrame.midX, y: displayFrame.midY)
+            }
         }
+    }
+
+    /// A solid disc with the digit drawn on top in a contrasting colour, rather than the
+    /// `"N.circle.fill"` SF Symbol whose digit is a transparent cutout through the disc. `min`
+    /// keeps the disc circular in a non-square frame, matching how `scaledToFit` centred the
+    /// symbol for the other stamp kinds.
+    private func numberStamp(_ number: Int) -> some View {
+        let side = min(displayFrame.width, displayFrame.height)
+        return ZStack {
+            Circle().fill(color)
+            Text("\(number)")
+                .font(.system(size: side * StampKind.digitScale, weight: .bold, design: .rounded))
+                .foregroundColor(swiftUIColor(annotation.color.contrastingForeground))
+        }
+        .frame(width: side, height: side)
+        .position(x: displayFrame.midX, y: displayFrame.midY)
     }
 
     private var selectionOutline: some View {

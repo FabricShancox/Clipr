@@ -20,7 +20,7 @@ extension EditorView {
     /// placement, rather than inferring it later from an `annotations.count` change, is what
     /// makes the numbered-stamp counter reliably advance 1 -> 2 -> 3... on every placement.
     func handleAnnotationCommitted(_ annotation: AnnotationObject) {
-        guard case .stamp(let kind) = annotation.kind, kind.rawValue.hasPrefix("number") else { return }
+        guard case .stamp(let kind) = annotation.kind, kind.number != nil else { return }
         nextStampNumber = min(nextStampNumber + 1, 9)
         selectedTool = .stamp(stampKind(for: nextStampNumber))
     }

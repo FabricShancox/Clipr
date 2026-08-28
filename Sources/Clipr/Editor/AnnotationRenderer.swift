@@ -103,12 +103,46 @@ struct AnnotationRenderer {
     }
 
     private static func drawStamp(_ kind: StampKind, in frame: CGRect, color: RGBAColor, context: CGContext) {
+        if let number = kind.number {
+            drawNumberStamp(number, in: frame, color: color, context: context)
+            return
+        }
         let nsColor = NSColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
         guard let symbolImage = NSImage(systemSymbolName: kind.symbolName, accessibilityDescription: nil) else { return }
         let tinted = symbolImage.tinted(with: nsColor)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         tinted.draw(in: frame)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// Solid disc plus the digit in a contrasting colour — the flattened counterpart of
+    /// `AnnotationOverlayShape.numberStamp`, kept in step with it via `StampKind.digitScale` so
+    /// the exported image matches what the editor showed.
+    private static func drawNumberStamp(_ number: Int, in frame: CGRect, color: RGBAColor, context: CGContext) {
+        let side = min(frame.width, frame.height)
+        let disc = CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
+
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: disc)
+
+        let pointSize = side * StampKind.digitScale
+        let base = NSFont.systemFont(ofSize: pointSize, weight: .bold)
+        // `.rounded` to match the SwiftUI side's `design: .rounded`; the descriptor falls back to
+        // the plain system font on any OS that can't supply the rounded design.
+        let font = NSFont(descriptor: base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor, size: pointSize) ?? base
+        let fg = color.contrastingForeground
+        let attributed = NSAttributedString(string: "\(number)", attributes: [
+            .foregroundColor: NSColor(red: fg.red, green: fg.green, blue: fg.blue, alpha: fg.alpha),
+            .font: font
+        ])
+
+        // Centring the text's own line box (rather than its cap height) is what SwiftUI's `Text`
+        // does inside the `ZStack` above, so both renderers land the digit in the same spot.
+        let textSize = attributed.size()
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        attributed.draw(at: CGPoint(x: disc.midX - textSize.width / 2, y: disc.midY - textSize.height / 2))
         NSGraphicsContext.restoreGraphicsState()
     }
 }

@@ -1,8 +1,36 @@
+import CoreGraphics
 import Foundation
 
 enum StampKind: String, CaseIterable, Codable {
     case check, cross, star
     case number1, number2, number3, number4, number5, number6, number7, number8, number9
+
+    /// The digit a numbered stamp shows, or `nil` for the non-numeric stamps.
+    ///
+    /// Numbered stamps are drawn as a solid disc with the digit painted on top, so they need the
+    /// value itself rather than a symbol name: the `"N.circle.fill"` SF Symbols knock the digit
+    /// out of the disc as a transparent hole, which lets the underlying screenshot show through
+    /// and makes the number hard to read over busy captures. `symbolName` still covers the
+    /// non-numeric stamps, whose symbols have no such cutout.
+    var number: Int? {
+        switch self {
+        case .check, .cross, .star: return nil
+        case .number1: return 1
+        case .number2: return 2
+        case .number3: return 3
+        case .number4: return 4
+        case .number5: return 5
+        case .number6: return 6
+        case .number7: return 7
+        case .number8: return 8
+        case .number9: return 9
+        }
+    }
+
+    /// Digit font size as a fraction of the disc's diameter. Shared by the on-screen
+    /// (`AnnotationOverlayShape`) and flattened (`AnnotationRenderer`) renderers so a stamp looks
+    /// the same in the editor as it does in the exported image.
+    static let digitScale: CGFloat = 0.6
 
     var symbolName: String {
         switch self {
