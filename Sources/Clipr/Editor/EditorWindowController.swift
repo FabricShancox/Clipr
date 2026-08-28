@@ -80,7 +80,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let generation = self.generation
         // Seeded here rather than left over from the previous view: closing straight after
         // switching captures would otherwise flush the OLD capture's annotations onto the new one.
-        let resolved = initialAnnotations ?? storage.loadAnnotations(rawURL: rawURL)
+        let resolved = initialAnnotations ?? loadAnnotationsPreservingCorrupt()
         latestAnnotations = resolved
 
         return NSHostingView(rootView: EditorView(
@@ -103,6 +103,41 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) },
             onRename: { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) }
         ))
+    }
+
+    /// Loads the capture's saved annotations, handling the case where the sidecar exists but won't
+    /// decode — a build that changed the annotation format, or a truncated file.
+    ///
+    /// Such a capture used to open looking empty, and the first edit then auto-saved over the
+    /// sidecar, destroying whatever it held. The file is moved aside first so nothing is lost, and
+    /// the user is told rather than left to discover it.
+    private func loadAnnotationsPreservingCorrupt() -> [AnnotationObject] {
+        switch storage.readAnnotations(rawURL: rawURL) {
+        case .missing:
+            return []
+        case .loaded(let annotations):
+            return annotations
+        case .corrupt(let error):
+            let name = rawURL.lastPathComponent
+            let backup = storage.quarantineAnnotations(rawURL: rawURL)
+            NSLog("Clipr: unreadable annotations for \(name): \(error)")
+            // Deferred: this runs from `makeContentView`, which is called during `init` before the
+            // window is on screen, and a sheet can't be presented on a window that isn't showing.
+            DispatchQueue.main.async { [weak self] in
+                let alert = NSAlert()
+                alert.messageText = "Saved annotations for this capture couldn't be read"
+                alert.informativeText = backup.map {
+                    "\(name) has opened without them. The unreadable file was kept as \($0.lastPathComponent) in case it can be recovered."
+                } ?? "\(name) has opened without them."
+                alert.alertStyle = .warning
+                if let window = self?.window, window.isVisible {
+                    alert.beginSheetModal(for: window)
+                } else {
+                    alert.runModal()
+                }
+            }
+            return []
+        }
     }
 
     /// Renames the open capture from the header field. `annotations` are flushed synchronously

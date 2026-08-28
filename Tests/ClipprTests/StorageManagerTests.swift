@@ -67,6 +67,64 @@ final class StorageManagerTests: XCTestCase {
         XCTAssertEqual(manager.loadAnnotations(rawURL: rawURL), [annotation])
     }
 
+    // MARK: - readAnnotations: missing vs corrupt
+
+    func testReadAnnotationsReportsMissingWhenNeverSaved() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        guard case .missing = manager.readAnnotations(rawURL: rawURL) else {
+            return XCTFail("expected .missing")
+        }
+    }
+
+    func testReadAnnotationsReportsCorruptRatherThanEmpty() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let sidecar = tempDir.appendingPathComponent(
+            FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent)
+        )
+        try Data("{ this is not the array we expect".utf8).write(to: sidecar)
+
+        guard case .corrupt = manager.readAnnotations(rawURL: rawURL) else {
+            return XCTFail("a sidecar that exists but won't decode must not look like a fresh capture")
+        }
+    }
+
+    /// The safety property: an unreadable sidecar is moved aside, never dropped, so the next
+    /// auto-save writes a new file instead of overwriting recoverable data.
+    func testQuarantineMovesTheUnreadableSidecarAsideWithoutLosingIt() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let sidecar = tempDir.appendingPathComponent(
+            FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent)
+        )
+        let original = "irreplaceable but unreadable"
+        try Data(original.utf8).write(to: sidecar)
+
+        let backup = try XCTUnwrap(manager.quarantineAnnotations(rawURL: rawURL))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path), "original path must be free")
+        XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), original, "contents preserved")
+        XCTAssertTrue(backup.lastPathComponent.hasSuffix(".bak"))
+    }
+
+    func testQuarantineIsANoOpWhenThereIsNoSidecar() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        XCTAssertNil(manager.quarantineAnnotations(rawURL: rawURL))
+    }
+
+    func testQuarantineTwiceKeepsBothBackups() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let sidecar = tempDir.appendingPathComponent(
+            FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent)
+        )
+        try Data("first".utf8).write(to: sidecar)
+        let first = try XCTUnwrap(manager.quarantineAnnotations(rawURL: rawURL))
+        try Data("second".utf8).write(to: sidecar)
+        let second = try XCTUnwrap(manager.quarantineAnnotations(rawURL: rawURL))
+
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "first")
+        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "second")
+    }
+
     func testDeleteAnnotationsRemovesSidecar() throws {
         let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
         let annotation = AnnotationObject(

@@ -50,12 +50,52 @@ final class StorageManager {
         try data.write(to: url, options: .atomic)
     }
 
-    /// Returns `[]` if there's no sidecar yet (a fresh, never-edited capture) or if it fails to
-    /// decode — reopening should never hard-fail just because a saved annotation set is missing
-    /// or unreadable.
+    /// Outcome of reading a capture's annotation sidecar. `missing` and `corrupt` are deliberately
+    /// distinct: collapsing both to "no annotations" meant an unreadable sidecar looked like a
+    /// never-edited capture, and the next auto-save then overwrote it — destroying the user's
+    /// annotations permanently, with nothing shown to them.
+    enum AnnotationsLoad {
+        /// No sidecar yet — a fresh, never-edited capture.
+        case missing
+        case loaded([AnnotationObject])
+        /// The sidecar exists but could not be decoded. The caller must not let it be overwritten.
+        case corrupt(Error)
+    }
+
+    func readAnnotations(rawURL: URL) -> AnnotationsLoad {
+        let url = annotationsURL(forRaw: rawURL)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
+        do {
+            return .loaded(try JSONDecoder().decode([AnnotationObject].self, from: Data(contentsOf: url)))
+        } catch {
+            return .corrupt(error)
+        }
+    }
+
+    /// Moves an unreadable sidecar aside, returning where it went.
+    ///
+    /// Called before the editor opens a capture whose sidecar won't decode, so the next auto-save
+    /// writes a fresh file instead of overwriting one whose contents might still be recoverable by
+    /// hand. Never deletes anything.
+    @discardableResult
+    func quarantineAnnotations(rawURL: URL) -> URL? {
+        let url = annotationsURL(forRaw: rawURL)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let backup = uniqueURL(for: url.appendingPathExtension("bak"))
+        do {
+            try FileManager.default.moveItem(at: url, to: backup)
+            return backup
+        } catch {
+            NSLog("Clipr: could not set aside unreadable annotations for \(rawURL.lastPathComponent): \(error)")
+            return nil
+        }
+    }
+
+    /// Convenience for callers that only care about the annotations themselves; treats a missing
+    /// and an unreadable sidecar alike. Prefer `readAnnotations` where the difference matters.
     func loadAnnotations(rawURL: URL) -> [AnnotationObject] {
-        guard let data = try? Data(contentsOf: annotationsURL(forRaw: rawURL)) else { return [] }
-        return (try? JSONDecoder().decode([AnnotationObject].self, from: data)) ?? []
+        if case .loaded(let annotations) = readAnnotations(rawURL: rawURL) { return annotations }
+        return []
     }
 
     /// Removes a capture's annotation sidecar, if any — called alongside deleting the raw and
