@@ -20,6 +20,15 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// annotations still in pre-crop coordinates.
     private var generation = 0
 
+    /// Whether `_edited.png` no longer reflects the current annotations, so a write is worth doing.
+    private var flattenedIsStale = false
+    private var lastFlattenedWrite = Date.distantPast
+    /// Minimum gap between flattened writes while the user is actively editing. Re-encoding a
+    /// full-screen Retina capture costs ~250ms on the main thread (measured: 11ms at 1280x800,
+    /// 77ms at 3420x2146, 248ms at 6000x4000) and the debounce fires every 800ms, so writing it on
+    /// every settled edit made the editor hitch continuously on large captures.
+    private static let flattenedWriteInterval: TimeInterval = 3
+
     init(image: NSImage, rawURL: URL, storage: StorageManager) {
         self.image = image
         self.rawURL = rawURL
@@ -59,6 +68,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         onFinished?()
     }
 
+    /// Switching away from the editor is the point at which the user is most likely to go and use
+    /// the exported file, so bring it up to date now rather than leaving it a few seconds behind.
+    /// No-ops when nothing has changed since the last write.
+    func windowDidResignKey(_ notification: Notification) {
+        flushPendingSave()
+    }
+
     /// Writes the current annotations immediately, bypassing the debounce.
     ///
     /// Without this, editing and then closing the window (or quitting) inside the 800ms debounce
@@ -95,6 +111,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onAnnotationsChanged: { [weak self] annotations in
                 guard let self, generation == self.generation else { return }
                 self.latestAnnotations = annotations
+                self.flattenedIsStale = true
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
             onShare: { [weak self] annotations in self?.share(annotations: annotations) },
@@ -170,16 +187,39 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// remap every annotation, so a stale save would write pre-crop geometry over the good one.
     private func autoSave(for forURL: URL, annotations: [AnnotationObject], generation: Int) {
         guard generation == self.generation, forURL == rawURL else { return }
-        persist(annotations)
+        persist(annotations, flattened: .throttled)
+    }
+
+    /// How eagerly `persist` rewrites the flattened `_edited.png`.
+    private enum FlattenedWrite {
+        /// Write it now if anything has changed — for the moments where the file on disk has to be
+        /// current: closing, quitting, switching capture, or changing the base image.
+        case now
+        /// Skip it if one was written in the last few seconds. Used by the debounced auto-save,
+        /// which fires far too often to re-encode a large capture every time.
+        case throttled
     }
 
     /// Writes the flattened preview and the annotations sidecar for the CURRENT capture. Callers
     /// inside this class use it directly — they only ever run for the live view, so they need no
     /// staleness check. Failures are logged, not alerted, since this can fire often.
-    private func persist(_ annotations: [AnnotationObject]) {
-        let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
+    private func persist(_ annotations: [AnnotationObject], flattened: FlattenedWrite = .now) {
         do {
-            _ = try storage.saveEditedCapture(flattened, rawURL: rawURL)
+            // The sidecar is what actually preserves the user's work — it restores editable
+            // annotations on reopen and costs well under a millisecond — so it is written every
+            // time. `_edited.png` is a derived export and may lag by a few seconds during active
+            // editing; it is brought up to date whenever it matters (see `FlattenedWrite.now`),
+            // and a stale one is regenerated from the sidecar anyway.
+            try storage.saveAnnotations(annotations, rawURL: rawURL)
+
+            let dueForWrite = flattened == .now
+                || Date().timeIntervalSince(lastFlattenedWrite) >= Self.flattenedWriteInterval
+            guard flattenedIsStale, dueForWrite else { return }
+
+            let rendered = AnnotationRenderer.flatten(base: image, annotations: annotations)
+            _ = try storage.saveEditedCapture(rendered, rawURL: rawURL)
+            flattenedIsStale = false
+            lastFlattenedWrite = Date()
             // Deliberately does NOT touch the pasteboard. Auto-save used to copy here too, which
             // meant every settled edit silently replaced whatever the user had copied — annotate
             // for a minute and anything you'd put on the clipboard was gone. Copying is an
@@ -232,6 +272,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private func writeBaseImage(_ newImage: NSImage, operation: String) -> Bool {
         do {
             try storage.overwriteRawCapture(newImage, rawURL: rawURL)
+            // The base image changed, so the flattened export is out of date even if no annotation
+            // did — crop and canvas-resize both land here.
+            flattenedIsStale = true
             return true
         } catch {
             NSLog("Clipr: \(operation) failed to write \(rawURL.lastPathComponent): \(error)")
