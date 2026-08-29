@@ -134,5 +134,6 @@ struct EditorView: View {
         .frame(minWidth: 900, minHeight: 620)
         .background(EditorColors.s0)
         .background(toolShortcuts)
+        .background(annotationEditingShortcuts)
     }
 }
