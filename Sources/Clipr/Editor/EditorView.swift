@@ -71,6 +71,10 @@ struct EditorView: View {
     /// closes or the app quits — at which point the pending debounce will never fire.
     let onAnnotationsChanged: ([AnnotationObject]) -> Void
     let onCopy: ([AnnotationObject]) -> Void
+    /// Export a copy elsewhere, in a format the user picks — distinct from auto-save, which keeps
+    /// the capture itself up to date in the save folder.
+    let onSaveAs: ([AnnotationObject]) -> Void
+    let onRevealInFinder: (URL) -> Void
     let onShare: ([AnnotationObject]) -> Void
     /// Crop rect in renderer space (the same y-up-from-bottom space `AnnotationObject.frame`
     /// uses), plus the annotations at the moment the crop was requested — `EditorWindowController`

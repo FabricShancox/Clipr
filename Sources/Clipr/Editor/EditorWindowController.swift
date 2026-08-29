@@ -114,6 +114,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 self.flattenedIsStale = true
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
+            onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
+            onRevealInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },
             onShare: { [weak self] annotations in self?.share(annotations: annotations) },
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
@@ -232,6 +234,38 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             try storage.saveAnnotations(annotations, rawURL: rawURL)
         } catch {
             NSLog("Clipr: auto-save failed: \(error)")
+        }
+    }
+
+    /// Exports a flattened copy wherever the user chooses, in PNG or JPEG.
+    ///
+    /// Separate from the capture's own file: auto-save already keeps that current in the save
+    /// folder, so this is for handing a copy to someone else, in a format they can use.
+    private func saveAs(annotations: [AnnotationObject]) {
+        guard let window else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = ExportFormat.allCases.map(\.contentType)
+        panel.nameFieldStringValue = rawURL.deletingPathExtension().lastPathComponent
+        panel.canCreateDirectories = true
+        panel.message = "Export a copy of this capture"
+
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            // The format follows the extension the panel settled on, so picking a type in its
+            // filter or typing ".jpg" both do what the user expects.
+            let format = ExportFormat.allCases.first { $0.fileExtension == url.pathExtension.lowercased() }
+                ?? (url.pathExtension.lowercased() == "jpeg" ? .jpeg : .png)
+            let flattened = AnnotationRenderer.flatten(base: self.image, annotations: annotations)
+            do {
+                try self.storage.export(flattened, to: url, format: format)
+            } catch {
+                NSLog("Clipr: export failed: \(error)")
+                let alert = NSAlert()
+                alert.messageText = "Couldn't export the image"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.beginSheetModal(for: window)
+            }
         }
     }
 

@@ -204,6 +204,31 @@ final class StorageManager {
         pasteboard.writeObjects([image])
     }
 
+    /// Writes `image` to a user-chosen location in `format` — the "Save As…" path, as opposed to
+    /// the app's own PNG-only capture storage.
+    func export(_ image: NSImage, to url: URL, format: ExportFormat) throws {
+        // JPEG can't carry alpha: a capture whose canvas was resized outward has transparent
+        // regions that would encode as black, so flatten onto white first.
+        let source = format.needsOpaqueBackground ? Self.onWhite(image) : image
+        guard let tiff = source.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let data = bitmap.representation(using: format.bitmapType, properties: format.properties) else {
+            throw StorageError.pngEncodingFailed
+        }
+        try data.write(to: url, options: .atomic)
+    }
+
+    private static func onWhite(_ image: NSImage) -> NSImage {
+        let size = image.size
+        let result = NSImage(size: size)
+        result.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.draw(in: NSRect(origin: .zero, size: size))
+        result.unlockFocus()
+        return result
+    }
+
     private func write(_ image: NSImage, to url: URL, overwrite: Bool = false) throws -> URL {
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),

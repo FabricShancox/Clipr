@@ -13,10 +13,24 @@ extension EditorView {
                     .font(.system(size: 12, weight: .semibold))
                     .transition(.opacity)
             }
+            Button { onRevealInFinder(currentURL) } label: {
+                Label("Reveal", systemImage: "folder")
+            }
+            .help("Show this capture in the Finder")
+            Button { onSaveAs(annotations) } label: {
+                Label("Save As…", systemImage: "square.and.arrow.down")
+            }
+            // Not plain ⌘S: there's no document to "save" — auto-save already handles that — so
+            // this is explicitly an export-a-copy action.
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+            .help("Export a copy as PNG or JPEG (⇧⌘S)")
             Button { onCopy(annotations) } label: {
                 Label("Copy", systemImage: "square.on.square")
             }
-            .help("Copy the annotated image to the clipboard")
+            // ⇧⌘C, not ⌘C: plain ⌘C belongs to the Edit menu so it still copies text from a text
+            // field or the rename box.
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .help("Copy the annotated image to the clipboard (⇧⌘C)")
             Button { onShare(annotations) } label: {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
