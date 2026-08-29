@@ -78,6 +78,9 @@ struct EditorView: View {
     /// `EditorWindowController` always holds the current state and can flush it when the window
     /// closes or the app quits — at which point the pending debounce will never fire.
     let onAnnotationsChanged: ([AnnotationObject]) -> Void
+    /// Reports the undo/redo stacks alongside every annotation change, so the controller can hand
+    /// them back when it rebuilds the content view for a rename — see `EditorHistory`.
+    let onHistoryChanged: (EditorHistory) -> Void
     let onCopy: ([AnnotationObject]) -> Void
     /// Export a copy elsewhere, in a format the user picks — distinct from auto-save, which keeps
     /// the capture itself up to date in the save folder.

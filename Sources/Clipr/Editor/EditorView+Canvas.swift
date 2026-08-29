@@ -112,6 +112,10 @@ extension EditorView {
             // needs the current annotations the moment they change so it can still save them if
             // the window closes before the debounce elapses.
             onAnnotationsChanged(newValue)
+            // Read here rather than from `mutateAnnotations`: undo/redo also reshape the stacks,
+            // and every one of those paths ends in an `annotations` change, so this one place
+            // sees them all already updated.
+            onHistoryChanged(EditorHistory(undo: undoStack, redo: redoStack))
             scheduleAutoSave()
         }
     }

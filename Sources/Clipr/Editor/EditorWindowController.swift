@@ -11,6 +11,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// change. `flushPendingSave` writes these when the window closes or the app quits, which is
     /// when the 800ms debounce would otherwise be abandoned unwritten.
     private var latestAnnotations: [AnnotationObject] = []
+    /// Carried across a rename's content-view rebuild so undo history survives it. See
+    /// `EditorHistory` for why only rename gets this.
+    private var latestHistory = EditorHistory()
 
     /// Bumped on every content-view swap (crop, canvas-resize, rename, opening another capture).
     /// A debounced save carries the generation it was scheduled under, so one left in flight from
@@ -91,9 +94,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// edited, or the exact set restored for one that has. `applyCrop`/`applyCanvasResize` pass
     /// an explicit (already-remapped) array instead, since loading from disk there would fetch
     /// the pre-crop/resize geometry.
-    private func makeContentView(initialAnnotations: [AnnotationObject]? = nil) -> NSHostingView<EditorView> {
+    private func makeContentView(
+        initialAnnotations: [AnnotationObject]? = nil,
+        history: EditorHistory = EditorHistory()
+    ) -> NSHostingView<EditorView> {
         generation += 1
         let generation = self.generation
+        latestHistory = history
         // Seeded here rather than left over from the previous view: closing straight after
         // switching captures would otherwise flush the OLD capture's annotations onto the new one.
         let resolved = initialAnnotations ?? loadAnnotationsPreservingCorrupt()
@@ -104,6 +111,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             currentURL: rawURL,
             recentCaptures: recentCaptures(in: storage.baseFolder),
             annotations: resolved,
+            undoStack: history.undo,
+            redoStack: history.redo,
             onOpenCapture: { [weak self] url, currentAnnotations in self?.loadCapture(url, previousAnnotations: currentAnnotations) },
             onAutoSave: { [weak self] forURL, annotations in
                 self?.autoSave(for: forURL, annotations: annotations, generation: generation)
@@ -112,6 +121,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 guard let self, generation == self.generation else { return }
                 self.latestAnnotations = annotations
                 self.flattenedIsStale = true
+            },
+            onHistoryChanged: { [weak self] history in
+                guard let self, generation == self.generation else { return }
+                self.latestHistory = history
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
             onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
@@ -170,8 +183,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         guard url == rawURL else { return }
         persist(annotations)
         do {
+            // A rename changes nothing about the image or its annotations, so the undo history is
+            // carried across the rebuild rather than discarded.
+            let history = latestHistory
             rawURL = try storage.renameCapture(rawURL: rawURL, toBaseName: newName)
-            window?.contentView = makeContentView(initialAnnotations: annotations)
+            window?.contentView = makeContentView(initialAnnotations: annotations, history: history)
         } catch {
             NSLog("Clipr: rename failed: \(error)")
             let alert = NSAlert()
