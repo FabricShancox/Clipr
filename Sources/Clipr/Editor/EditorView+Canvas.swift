@@ -62,6 +62,7 @@ extension EditorView {
                         selectedID: $selectedAnnotationID,
                         editingTextID: $editingTextID,
                         canvasScale: renderScale,
+                        redactionStyle: redactionStyle,
                         onAnnotationCommitted: handleAnnotationCommitted,
                         onCropRequested: { rect in onCropApplied(rect, annotations) }
                     )

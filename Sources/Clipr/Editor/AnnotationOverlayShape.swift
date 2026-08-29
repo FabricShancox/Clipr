@@ -128,7 +128,12 @@ struct AnnotationOverlayShape: View {
     /// it was meant to hide.
     @ViewBuilder
     private var redactionPreview: some View {
-        if let cg = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
+        if annotation.redactionStyle == .solid {
+            Rectangle()
+                .fill(Color(white: 0.12))
+                .frame(width: displayFrame.width, height: displayFrame.height)
+                .position(x: displayFrame.midX, y: displayFrame.midY)
+        } else if let cg = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
            let pixelated = Pixelation.pixelatedRegion(of: cg, in: displayFrame) {
             Image(decorative: pixelated, scale: 1)
                 .resizable()

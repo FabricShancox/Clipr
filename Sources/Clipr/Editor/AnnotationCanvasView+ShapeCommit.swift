@@ -87,7 +87,10 @@ extension AnnotationCanvasView {
         commit(AnnotationObject(
             id: UUID(), kind: kind,
             frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame, canvasHeight: canvasHeight),
-            color: currentColor, strokeWidth: currentStrokeWidth
+            color: currentColor, strokeWidth: currentStrokeWidth,
+            // Recorded per annotation rather than read at render time, so changing the tool's
+            // style later doesn't retroactively alter redactions already placed.
+            redactionStyle: kind == .blur ? redactionStyle : nil
         ))
     }
 }

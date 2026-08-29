@@ -44,6 +44,10 @@ struct EditorView: View {
     /// numbered one. Set from the slot's pull-down — see `EditorView+Toolbar.stampToolButton`.
     @State var selectedStampKind: StampKind?
     @State var showingStampAlternatives = false
+    /// Style used for redactions placed from now on. Pixelate matches the tool's previous
+    /// behaviour, so it stays the default.
+    @State var redactionStyle: RedactionStyle = .pixelate
+    @State var showingRedactionStyles = false
     @State var showSavedConfirmation = false
     @State var deletedRecentURLs: Set<URL> = []
     @State var pendingCanvasResize: CGRect?

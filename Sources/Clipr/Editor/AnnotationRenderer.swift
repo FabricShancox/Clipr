@@ -62,7 +62,13 @@ struct AnnotationRenderer {
             context.setAlpha(0.35)
             context.fill(annotation.frame)
         case .blur:
-            drawRedaction(over: annotation.frame, in: context, canvasSize: canvasSize)
+            if annotation.redactionStyle == .solid {
+                // Nothing sampled and nothing left behind — the strongest option.
+                context.setFillColor(CGColor(gray: 0.12, alpha: 1))
+                context.fill(annotation.frame)
+            } else {
+                drawRedaction(over: annotation.frame, in: context, canvasSize: canvasSize)
+            }
         case .text(let string, let style):
             drawAnnotationText(string, style: style, in: annotation.frame, color: annotation.color, context: context)
         case .stamp(let kind):

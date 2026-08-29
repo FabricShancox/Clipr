@@ -142,4 +142,55 @@ final class RedactionTests: XCTestCase {
     func testBlockSizeHasAFloorForSmallRegions() {
         XCTAssertGreaterThanOrEqual(Pixelation.blockSize(for: CGRect(x: 0, y: 0, width: 8, height: 8)), 10)
     }
+
+    // MARK: - Redaction style
+
+    /// Solid fill leaves nothing of the original, unlike pixelation which preserves coarse
+    /// structure — this is the option to use when the content must be unrecoverable.
+    func testSolidRedactionLeavesAUniformBlock() throws {
+        let base = stripedImage(width: 100, height: 100)
+        var solid = redaction(over: CGRect(x: 20, y: 20, width: 60, height: 60))
+        solid.redactionStyle = .solid
+        let out = try bitmap(AnnotationRenderer.flatten(base: base, annotations: [solid]))
+
+        var brightnesses = Set<Int>()
+        for x in 30..<70 {
+            for y in 30..<70 {
+                if let c = out.colorAt(x: x, y: y) {
+                    brightnesses.insert(Int((c.brightnessComponent * 255).rounded()))
+                }
+            }
+        }
+        XCTAssertEqual(brightnesses.count, 1, "a solid block must be one flat colour throughout")
+    }
+
+    func testSolidRedactionIsOpaque() throws {
+        let base = stripedImage(width: 60, height: 60)
+        var solid = redaction(over: CGRect(x: 10, y: 10, width: 40, height: 40))
+        solid.redactionStyle = .solid
+        let out = try bitmap(AnnotationRenderer.flatten(base: base, annotations: [solid]))
+        let colour = try XCTUnwrap(out.colorAt(x: 30, y: 30))
+        XCTAssertEqual(colour.alphaComponent, 1.0, accuracy: 0.01)
+    }
+
+    /// A blur saved before the style existed has no `redactionStyle` key. Decoding must treat that
+    /// as pixelate rather than failing — a failure would send the whole sidecar to quarantine and
+    /// the capture would open with none of its annotations.
+    func testASidecarWrittenBeforeStylesExistedStillDecodes() throws {
+        let legacy = """
+        [{"id":"0BE3E1F5-1B3E-4E2E-9E86-3D0F2B1C4A77","kind":{"blur":{}},        "frame":[[10,10],[40,40]],        "color":{"red":0,"green":0,"blue":0,"alpha":1},"strokeWidth":1}]
+        """
+        let decoded = try JSONDecoder().decode([AnnotationObject].self, from: Data(legacy.utf8))
+
+        XCTAssertEqual(decoded.count, 1)
+        XCTAssertNil(decoded[0].redactionStyle, "a missing style means the original pixelate behaviour")
+    }
+
+    func testStyleSurvivesARoundTrip() throws {
+        var solid = redaction(over: CGRect(x: 0, y: 0, width: 10, height: 10))
+        solid.redactionStyle = .solid
+        let data = try JSONEncoder().encode([solid])
+        let decoded = try JSONDecoder().decode([AnnotationObject].self, from: data)
+        XCTAssertEqual(decoded.first?.redactionStyle, .solid)
+    }
 }

@@ -43,6 +43,9 @@ struct AnnotationCanvasView: View {
     /// view itself renders at a fixed 1:1 image-point size and its parent applies the zoom via
     /// `.scaleEffect` outside it.
     var canvasScale: CGFloat = 1
+    /// Style applied to redactions placed from now on — see the blur slot in
+    /// `EditorView+Toolbar.swift`. Existing ones keep whatever they were created with.
+    var redactionStyle: RedactionStyle = .pixelate
     /// Fired once, synchronously, right after a new annotation is appended — e.g. so a caller
     /// can auto-advance a numbered-stamp counter. Deliberately a direct callback at the exact
     /// moment of commit rather than something inferred later (like watching `annotations.count`
