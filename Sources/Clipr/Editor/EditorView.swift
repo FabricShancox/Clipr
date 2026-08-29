@@ -40,6 +40,10 @@ struct EditorView: View {
     /// final fit regardless of how many intermediate layout passes happen first.
     @State var userSetZoom = false
     @State var nextStampNumber = 1
+    /// Which stamp the toolbar's stamp slot currently offers, or `nil` for the auto-incrementing
+    /// numbered one. Set from the slot's pull-down — see `EditorView+Toolbar.stampToolButton`.
+    @State var selectedStampKind: StampKind?
+    @State var showingStampAlternatives = false
     @State var showSavedConfirmation = false
     @State var deletedRecentURLs: Set<URL> = []
     @State var pendingCanvasResize: CGRect?

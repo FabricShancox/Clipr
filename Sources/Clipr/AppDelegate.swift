@@ -190,6 +190,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openPreferences() {
+        // Reuse the open window rather than building a second one. A new controller each time left
+        // the previous window on screen with its bindings still live, so two Preferences windows
+        // could write to `SettingsStore` and re-register hotkeys independently.
+        if let existing = preferencesWindowController {
+            existing.showWindow(nil)
+            existing.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let controller = PreferencesWindowController(
             settings: settings,
             onHotkeysChanged: { [weak self] in
@@ -208,6 +217,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onCaptureCursorChanged: { [weak self] in self?.applyCaptureCursorSetting() }
         )
         preferencesWindowController = controller
+        // Cleared on close so the next Preferences request builds a fresh window rather than
+        // trying to reuse a closed one.
+        if let window = controller.window {
+            var token: NSObjectProtocol?
+            token = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                self?.preferencesWindowController = nil
+                if let token { NotificationCenter.default.removeObserver(token) }
+            }
+        }
         controller.showWindow(nil)
     }
 

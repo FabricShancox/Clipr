@@ -11,7 +11,10 @@ final class StatusItemController {
     var onOpenPreferences: (() -> Void)?
 
     init() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // `variableLength`, not `squareLength`: Advanced Mode shows its running step count as the
+        // button's title (see `setAdvancedModeStepCount`), and a square item clips that away —
+        // which hid the only feedback that mode has.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Clipr")
         }

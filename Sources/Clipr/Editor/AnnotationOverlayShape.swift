@@ -87,7 +87,12 @@ struct AnnotationOverlayShape: View {
             redactionPreview
         case .stamp(let kind):
             if let number = kind.number {
-                numberStamp(number)
+                discStamp { Text("\(number)").font(.system(size: stampSide * StampKind.digitScale, weight: .bold, design: .rounded)) }
+            } else if let glyph = kind.discGlyph {
+                discStamp {
+                    Image(systemName: glyph)
+                        .font(.system(size: stampSide * StampKind.glyphScale, weight: .bold))
+                }
             } else {
                 Image(systemName: kind.symbolName)
                     .resizable()
@@ -99,19 +104,18 @@ struct AnnotationOverlayShape: View {
         }
     }
 
-    /// A solid disc with the digit drawn on top in a contrasting colour, rather than the
-    /// `"N.circle.fill"` SF Symbol whose digit is a transparent cutout through the disc. `min`
-    /// keeps the disc circular in a non-square frame, matching how `scaledToFit` centred the
-    /// symbol for the other stamp kinds.
-    private func numberStamp(_ number: Int) -> some View {
-        let side = min(displayFrame.width, displayFrame.height)
-        return ZStack {
+    /// Disc diameter. `min` keeps it circular in a non-square frame, matching how `scaledToFit`
+    /// centred the symbol for the stamp kinds still drawn from one.
+    private var stampSide: CGFloat { min(displayFrame.width, displayFrame.height) }
+
+    /// A solid disc with `mark` drawn on top in a contrasting colour, rather than an SF Symbol
+    /// whose mark is a transparent cutout through the disc.
+    private func discStamp<Mark: View>(@ViewBuilder mark: () -> Mark) -> some View {
+        ZStack {
             Circle().fill(color)
-            Text("\(number)")
-                .font(.system(size: side * StampKind.digitScale, weight: .bold, design: .rounded))
-                .foregroundColor(swiftUIColor(annotation.color.contrastingForeground))
+            mark().foregroundColor(swiftUIColor(annotation.color.contrastingForeground))
         }
-        .frame(width: side, height: side)
+        .frame(width: stampSide, height: stampSide)
         .position(x: displayFrame.midX, y: displayFrame.midY)
     }
 

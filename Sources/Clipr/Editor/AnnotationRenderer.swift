@@ -126,6 +126,10 @@ struct AnnotationRenderer {
             drawNumberStamp(number, in: frame, color: color, context: context)
             return
         }
+        if let glyph = kind.discGlyph {
+            drawGlyphStamp(glyph, in: frame, color: color, context: context)
+            return
+        }
         let nsColor = NSColor(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
         guard let symbolImage = NSImage(systemSymbolName: kind.symbolName, accessibilityDescription: nil) else { return }
         let tinted = symbolImage.tinted(with: nsColor)
@@ -138,9 +142,41 @@ struct AnnotationRenderer {
     /// Solid disc plus the digit in a contrasting colour — the flattened counterpart of
     /// `AnnotationOverlayShape.numberStamp`, kept in step with it via `StampKind.digitScale` so
     /// the exported image matches what the editor showed.
-    private static func drawNumberStamp(_ number: Int, in frame: CGRect, color: RGBAColor, context: CGContext) {
+    /// Tick/cross: a solid disc with the bare glyph on top in a contrasting colour, matching how
+    /// the numbered stamps are drawn. The `.circle.fill` symbols knock their mark out of the disc,
+    /// so the capture showed through it.
+    private static func drawGlyphStamp(_ glyph: String, in frame: CGRect, color: RGBAColor, context: CGContext) {
+        let disc = discRect(in: frame)
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: disc)
+
+        let fg = color.contrastingForeground
+        let config = NSImage.SymbolConfiguration(
+            pointSize: disc.width * StampKind.glyphScale, weight: .bold
+        )
+        guard let symbol = NSImage(systemSymbolName: glyph, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return }
+        let tinted = symbol.tinted(with: NSColor(red: fg.red, green: fg.green, blue: fg.blue, alpha: fg.alpha))
+
+        let size = tinted.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        tinted.draw(in: CGRect(
+            x: disc.midX - size.width / 2, y: disc.midY - size.height / 2,
+            width: size.width, height: size.height
+        ))
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// The largest circle centred in `frame` — `min` keeps stamps round in a non-square frame.
+    private static func discRect(in frame: CGRect) -> CGRect {
         let side = min(frame.width, frame.height)
-        let disc = CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
+        return CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
+    }
+
+    private static func drawNumberStamp(_ number: Int, in frame: CGRect, color: RGBAColor, context: CGContext) {
+        let disc = discRect(in: frame)
+        let side = disc.width
 
         context.setFillColor(color.cgColor)
         context.fillEllipse(in: disc)

@@ -32,6 +32,25 @@ enum StampKind: String, CaseIterable, Codable {
     /// the same in the editor as it does in the exported image.
     static let digitScale: CGFloat = 0.6
 
+    /// Symbol drawn on top of a solid disc, for the stamps that are a mark inside a circle.
+    ///
+    /// The bare glyph, not the `.circle.fill` variant: those knock the mark out of the disc as a
+    /// transparent hole, exactly the problem the numbered stamps had — the capture shows through
+    /// the mark and it becomes hard to read over anything busy. `star` is not here because it is a
+    /// solid shape in its own right, with nothing cut out of it.
+    var discGlyph: String? {
+        switch self {
+        case .check: return "checkmark"
+        case .cross: return "xmark"
+        case .star: return nil
+        default: return nil
+        }
+    }
+
+    /// Glyph size as a fraction of the disc's diameter. Smaller than `digitScale` because these
+    /// marks are wider than a digit at the same nominal size.
+    static let glyphScale: CGFloat = 0.52
+
     var symbolName: String {
         switch self {
         case .check: return "checkmark.circle.fill"

@@ -18,7 +18,8 @@ extension EditorView {
             shortcutButton("4", tool: .arrow, editing: editing)
             shortcutButton("5", tool: .freehand, editing: editing)
             shortcutButton("6", tool: .text, editing: editing)
-            shortcutButton("7", tool: numberTool, editing: editing)
+            // Whichever stamp the toolbar slot is currently showing, not always the numbered one.
+            shortcutButton("7", tool: currentStampTool, editing: editing)
             shortcutButton("8", tool: .highlighter, editing: editing)
             shortcutButton("9", tool: .blur, editing: editing)
             shortcutButton("0", tool: .crop, editing: editing)
