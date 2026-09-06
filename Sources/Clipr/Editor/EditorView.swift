@@ -20,7 +20,9 @@ struct EditorView: View {
     let recentCaptures: [URL]
 
     @State var annotations: [AnnotationObject] = []
-    @State var selectedTool: AnnotationTool = .select
+    /// The box is what a capture is almost always marked up with first, so the editor opens on it
+    /// rather than on Select — which drew nothing until the user noticed and switched tool.
+    @State var selectedTool: AnnotationTool = .rectangle
     @State var currentColor = EditorView.swatchColors[5] // red
     @State var currentStrokeWidth: CGFloat = 4
     @State var currentTextStyle = TextStyle.default
