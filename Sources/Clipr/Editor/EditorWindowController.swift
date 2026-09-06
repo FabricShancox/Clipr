@@ -359,6 +359,26 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         picker.show(relativeTo: .zero, of: contentView, preferredEdge: .maxY)
     }
 
+    /// Shows an already-loaded image (a fresh capture, or a file picked via Open) in THIS window
+    /// instead of opening another one.
+    ///
+    /// `AppDelegate` routes every capture through here when an editor is already open: taking ten
+    /// screenshots used to leave ten editor windows stacked on screen, each holding its own copy
+    /// of a full-resolution image, and the newest one wasn't necessarily the one in front. The
+    /// outgoing capture's annotations are flushed against the OLD `rawURL` first — same reason as
+    /// `loadCapture` — so an edit still inside its 800ms debounce isn't dropped by the reassignment
+    /// below. Rebuilding the content view also re-reads Recents, so the capture just replaced
+    /// shows up in the sidebar.
+    func present(image newImage: NSImage, rawURL url: URL) {
+        persist(latestAnnotations)
+        image = newImage
+        rawURL = url
+        window?.contentView = makeContentView()
+        window?.deminiaturize(nil)
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
     /// Loads a different capture into THIS window (replacing image/rawURL and rebuilding the
     /// content view) rather than opening a second editor window — clicking a "Recent" thumbnail
     /// browses in place. The incoming capture's own annotations, if any, are restored from its

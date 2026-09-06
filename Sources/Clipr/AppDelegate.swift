@@ -49,7 +49,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHotkeys()
     }
 
+    /// Shows a capture in the editor, reusing an already-open window rather than adding another.
+    ///
+    /// Every capture used to build its own `EditorWindowController`, so a run of screenshots left
+    /// a stack of windows on screen — each pinned to the full visible frame and holding its own
+    /// full-resolution image — with no guarantee the newest was the one in front. Reuse matches
+    /// what clicking a Recents thumbnail already does: the capture is swapped into the window in
+    /// place. A second editor only appears if the user closed the last one.
     private func openEditor(image: NSImage, rawURL: URL) {
+        if let existing = frontmostEditor() {
+            existing.present(image: image, rawURL: rawURL)
+            return
+        }
         let editor = EditorWindowController(image: image, rawURL: rawURL, storage: storage)
         openEditors.append(editor)
         editor.onFinished = { [weak self, weak editor] in
@@ -57,6 +68,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.openEditors.removeAll { $0 === editor }
         }
         editor.showWindow(nil)
+    }
+
+    /// The open editor nearest the front, so a capture lands in the window the user was last
+    /// looking at rather than in whichever one happens to be oldest. `NSApp.orderedWindows` is
+    /// front-to-back; the fallback covers an editor that's currently miniaturized, and so absent
+    /// from that ordering.
+    private func frontmostEditor() -> EditorWindowController? {
+        for window in NSApp.orderedWindows {
+            if let editor = openEditors.first(where: { $0.window === window }) { return editor }
+        }
+        return openEditors.last
     }
 
     /// Opens the editor on an existing image file instead of a fresh capture. The picked file

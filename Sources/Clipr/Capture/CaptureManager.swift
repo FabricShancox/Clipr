@@ -43,6 +43,10 @@ final class CaptureManager {
                 case .cancelled:
                     image = nil
                 }
+                // The screenshot has been taken, so Clipr's own windows can come back — see
+                // `CaptureOverlayWindow.hideOwnWindows`. Before `guard let image`, so a cancelled
+                // capture puts them back too rather than leaving the editor hidden for good.
+                await MainActor.run { CaptureOverlayWindow.restoreHiddenWindows() }
                 guard let image else { return }
                 let date = Date()
                 let rawURL = try storage.saveRawCapture(image, date: date)
@@ -53,6 +57,7 @@ final class CaptureManager {
             } catch {
                 NSLog("Clipr capture failed: \(error)")
                 await MainActor.run {
+                    CaptureOverlayWindow.restoreHiddenWindows()
                     onCaptureFailed?(error)
                 }
             }

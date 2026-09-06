@@ -19,8 +19,19 @@ final class CaptureOverlayWindow: NSWindow {
     // case exists specifically for this, but nothing else in the flow ever produces it.
     private var onResult: ((CaptureResult) -> Void)?
 
+    // Clipr's own ordinary windows, ordered out for the duration of a capture and put back by
+    // `restoreHiddenWindows`. See `hideOwnWindows` for why.
+    private static var hiddenWindows: [NSWindow] = []
+
     static func showAll(onResult: @escaping (CaptureResult) -> Void) {
         dismissAll()
+        // The overlay that gets key (and main) status: the one on the screen the pointer is
+        // already on, since that's where the user is about to drag. Which window holds those two
+        // roles decides what activation below is allowed to raise, so it has to be settled before
+        // the app is activated rather than left to whichever screen happened to come last.
+        hideOwnWindows()
+        let mouseLocation = NSEvent.mouseLocation
+        var primary: CaptureOverlayWindow?
         for screen in NSScreen.screens {
             let window = CaptureOverlayWindow(
                 contentRect: screen.frame,
@@ -46,14 +57,59 @@ final class CaptureOverlayWindow: NSWindow {
                 dismissAll()
                 onResult(result)
             }))
-            window.makeKeyAndOrderFront(nil)
+            // Ordered front WITHOUT claiming key here: `makeKeyAndOrderFront` on every screen's
+            // overlay left the last one made key by accident, and made the key window change
+            // once per screen on the way there.
+            window.orderFrontRegardless()
             openWindows.append(window)
+            if screen.frame.contains(mouseLocation) { primary = window }
         }
-        NSApp.activate(ignoringOtherApps: true)
+        (primary ?? openWindows.first)?.makeKeyAndOrderFront(nil)
+
+        // NOT `NSApp.activate(ignoringOtherApps: true)`, which brings EVERY window of the app
+        // forward. An editor left open from an earlier capture was therefore yanked in front of
+        // whatever the user was about to shoot the moment the hotkey fired — clearly visible
+        // through the 15%-opacity overlay, taking focus, and then baked into the captured image,
+        // since the display filter in `CaptureManager` excludes nothing. It only happened
+        // "sometimes" because it needs an editor window to already be open and positioned over
+        // the area being captured.
+        //
+        // Activating through `NSRunningApplication` without `.activateAllWindows` brings only the
+        // key and main windows forward, and the overlay claimed both just above (hence
+        // `canBecomeMain` below — a borderless window refuses main status by default, which would
+        // have left the editor as main and raised it anyway). No `.activateIgnoringOtherApps`:
+        // it's deprecated as of macOS 14 (this app's minimum) and documented as having no effect.
+        NSRunningApplication.current.activate(options: [])
         if !isCrosshairPushed {
             NSCursor.crosshair.push()
             isCrosshairPushed = true
         }
+    }
+
+    /// Takes Clipr's own windows off screen before the overlay goes up.
+    ///
+    /// The editor opens at the screen's full visible frame, and a capture now reuses it rather
+    /// than stacking up new ones, so by the second screenshot it is typically the frontmost thing
+    /// on the display — meaning the hotkey put the editor, not the user's actual screen, inside
+    /// the selection. The display filter in `CaptureManager` excludes nothing, so it was captured
+    /// verbatim. Ordering these out is also what Advanced Mode already does in spirit (see
+    /// `windowIDs(of:)`): Clipr never appears in its own captures.
+    ///
+    /// Restricted to `.normal`-level windows, which leaves the status item's own window (at
+    /// `.statusBar`) alone — hiding that would blank the menu bar icon mid-capture.
+    private static func hideOwnWindows() {
+        hiddenWindows = NSApp.windows.filter { window in
+            window.isVisible && window.level == .normal && !(window is CaptureOverlayWindow)
+        }
+        hiddenWindows.forEach { $0.orderOut(nil) }
+    }
+
+    /// Puts back whatever `hideOwnWindows` took off screen. Called by `CaptureManager` once the
+    /// screenshot has actually been taken — NOT from `dismissAll`, which runs while the capture is
+    /// still pending and would let the editor back on screen in time to appear in it.
+    static func restoreHiddenWindows() {
+        hiddenWindows.forEach { $0.orderFront(nil) }
+        hiddenWindows = []
     }
 
     static func dismissAll() {
@@ -66,6 +122,10 @@ final class CaptureOverlayWindow: NSWindow {
     }
 
     override var canBecomeKey: Bool { true }
+
+    /// Borderless windows are not main-window candidates by default. Without this the app's
+    /// editor window stays `mainWindow` and activation raises it over the capture — see `showAll`.
+    override var canBecomeMain: Bool { true }
 
     override func cancelOperation(_ sender: Any?) {
         let callback = onResult
