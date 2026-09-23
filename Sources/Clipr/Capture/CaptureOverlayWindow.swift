@@ -23,7 +23,10 @@ final class CaptureOverlayWindow: NSWindow {
     // `restoreHiddenWindows`. See `hideOwnWindows` for why.
     private static var hiddenWindows: [NSWindow] = []
 
-    static func showAll(onResult: @escaping (CaptureResult) -> Void) {
+    /// `frozenScreens` are the stills `CaptureManager` took before calling this, drawn under each
+    /// overlay so the user selects from exactly what will be captured — see
+    /// `CaptureManager.frozenScreens`.
+    static func showAll(frozenScreens: [CGDirectDisplayID: NSImage], onResult: @escaping (CaptureResult) -> Void) {
         dismissAll()
         // The overlay that gets key (and main) status: the one on the screen the pointer is
         // already on, since that's where the user is about to drag. Which window holds those two
@@ -53,7 +56,7 @@ final class CaptureOverlayWindow: NSWindow {
             // screen's exact bounds regardless of that initial placement quirk.
             window.setFrame(screen.frame, display: true)
             window.onResult = onResult
-            window.contentView = NSHostingView(rootView: CaptureOverlayView(screen: screen, onResult: { result in
+            window.contentView = NSHostingView(rootView: CaptureOverlayView(screen: screen, frozenImage: frozenScreens[screen.displayID], onResult: { result in
                 dismissAll()
                 onResult(result)
             }))
@@ -70,7 +73,7 @@ final class CaptureOverlayWindow: NSWindow {
         // forward. An editor left open from an earlier capture was therefore yanked in front of
         // whatever the user was about to shoot the moment the hotkey fired — clearly visible
         // through the 15%-opacity overlay, taking focus, and then baked into the captured image,
-        // since the display filter in `CaptureManager` excludes nothing. It only happened
+        // since the display filter in `CaptureManager` excluded nothing back then. It only happened
         // "sometimes" because it needs an editor window to already be open and positioned over
         // the area being captured.
         //
@@ -91,7 +94,7 @@ final class CaptureOverlayWindow: NSWindow {
     /// The editor opens at the screen's full visible frame, and a capture now reuses it rather
     /// than stacking up new ones, so by the second screenshot it is typically the frontmost thing
     /// on the display — meaning the hotkey put the editor, not the user's actual screen, inside
-    /// the selection. The display filter in `CaptureManager` excludes nothing, so it was captured
+    /// the selection. The display filter in `CaptureManager` excluded nothing then, so it was captured
     /// verbatim. Ordering these out is also what Advanced Mode already does in spirit (see
     /// `windowIDs(of:)`): Clipr never appears in its own captures.
     ///

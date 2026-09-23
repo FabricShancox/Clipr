@@ -2,6 +2,9 @@ import SwiftUI
 
 struct CaptureOverlayView: View {
     let screen: NSScreen
+    /// The screen as it was when the hotkey fired. Drawn under the dimming so that whatever the
+    /// overlay's activation closed in the app below (an open dropdown or menu) still shows.
+    let frozenImage: NSImage?
     let onResult: (CaptureResult) -> Void
 
     @State private var mode: CaptureMode = .area
@@ -11,6 +14,11 @@ struct CaptureOverlayView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
+            if let frozenImage {
+                Image(nsImage: frozenImage)
+                    .resizable()
+                    .ignoresSafeArea()
+            }
             Color.black.opacity(0.15)
 
             if mode == .area, let start = dragStart, let current = dragCurrent {

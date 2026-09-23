@@ -15,6 +15,16 @@ final class CaptureManager {
     /// preference at launch and whenever it changes in Preferences.
     var captureCursor = false
 
+    /// Each display as it looked the instant the hotkey fired, keyed by display ID.
+    ///
+    /// Area and full-screen captures are cropped from these rather than shot live once the
+    /// selection is done. Bringing the overlay up activates Clipr, which deactivates the app the
+    /// user is shooting — and macOS closes an app's open menus, pop-up buttons and dropdowns the
+    /// moment it deactivates (a click on the overlay would dismiss them too). A live capture after
+    /// the drag therefore never contained the dropdown the user was trying to screenshot. Taken
+    /// before the overlay exists, nothing has lost focus yet.
+    private var frozenScreens: [CGDirectDisplayID: NSImage] = [:]
+
     init(storage: StorageManager) {
         self.storage = storage
     }
@@ -24,8 +34,17 @@ final class CaptureManager {
             PermissionsManager.requestScreenRecordingPermission()
             return
         }
-        CaptureOverlayWindow.showAll { [weak self] result in
-            self?.handle(result)
+        Task { @MainActor in
+            do {
+                frozenScreens = try await Self.snapshotScreens(NSScreen.screens, showsCursor: captureCursor)
+            } catch {
+                NSLog("Clipr capture failed: \(error)")
+                onCaptureFailed?(error)
+                return
+            }
+            CaptureOverlayWindow.showAll(frozenScreens: frozenScreens) { [weak self] result in
+                self?.handle(result)
+            }
         }
     }
 
@@ -35,10 +54,12 @@ final class CaptureManager {
                 let image: NSImage?
                 switch result {
                 case .area(let rect, let screen):
-                    image = try await Self.captureArea(rect, on: screen, showsCursor: captureCursor)
+                    image = try Self.crop(try await frozenImage(of: screen), to: rect, scale: screen.backingScaleFactor)
                 case .fullScreen(let screen):
-                    image = try await Self.captureFullScreen(screen, showsCursor: captureCursor)
+                    image = try await frozenImage(of: screen)
                 case .window(let windowInfo):
+                    // Still live: a window capture is of that one window with its own
+                    // transparency, which a crop of the frozen display can't reproduce.
                     image = try await Self.captureWindow(windowInfo, showsCursor: captureCursor)
                 case .cancelled:
                     image = nil
@@ -46,7 +67,10 @@ final class CaptureManager {
                 // The screenshot has been taken, so Clipr's own windows can come back — see
                 // `CaptureOverlayWindow.hideOwnWindows`. Before `guard let image`, so a cancelled
                 // capture puts them back too rather than leaving the editor hidden for good.
-                await MainActor.run { CaptureOverlayWindow.restoreHiddenWindows() }
+                await MainActor.run {
+                    CaptureOverlayWindow.restoreHiddenWindows()
+                    frozenScreens = [:]
+                }
                 guard let image else { return }
                 let date = Date()
                 let rawURL = try storage.saveRawCapture(image, date: date)
@@ -58,10 +82,27 @@ final class CaptureManager {
                 NSLog("Clipr capture failed: \(error)")
                 await MainActor.run {
                     CaptureOverlayWindow.restoreHiddenWindows()
+                    frozenScreens = [:]
                     onCaptureFailed?(error)
                 }
             }
         }
+    }
+
+    /// The frozen still of `screen`, or a live shot if it has none (a display plugged in
+    /// mid-capture).
+    @MainActor
+    private func frozenImage(of screen: NSScreen) async throws -> NSImage {
+        if let frozen = frozenScreens[screen.displayID] { return frozen }
+        return try await Self.captureFullScreen(screen, showsCursor: captureCursor)
+    }
+
+    private static func snapshotScreens(_ screens: [NSScreen], showsCursor: Bool) async throws -> [CGDirectDisplayID: NSImage] {
+        var snapshots: [CGDirectDisplayID: NSImage] = [:]
+        for screen in screens {
+            snapshots[screen.displayID] = try await captureFullScreen(screen, showsCursor: showsCursor)
+        }
+        return snapshots
     }
 
     private static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
@@ -69,7 +110,12 @@ final class CaptureManager {
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
             throw CaptureError.displayNotFound
         }
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        // Clipr's own ordinary windows (an editor left open) are left out, as they never belong in
+        // a capture. Only `.normal`-layer ones, so the menu bar icon still appears.
+        let ownWindows = content.windows.filter {
+            $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier && $0.windowLayer == 0
+        }
+        let filter = SCContentFilter(display: display, excludingWindows: ownWindows)
         let config = SCStreamConfiguration()
         config.showsCursor = showsCursor
         // `SCDisplay.width`/`.height` are documented (ScreenCaptureKit/SCShareableContent.h) as the
@@ -77,7 +123,7 @@ final class CaptureManager {
         // (ScreenCaptureKit/SCStream.h) are the output width/height in PIXELS. Assigning the former
         // straight into the latter would request a point-sized pixel buffer - i.e. a half-resolution
         // capture on any 2x Retina display - and would also leave the returned `CGImage` smaller
-        // than `captureArea` below assumes when it scales its crop rect into pixel space. Convert
+        // than `crop` below assumes when it scales its crop rect into pixel space. Convert
         // points -> pixels explicitly with the screen's backing scale factor, matching what
         // `captureWindow` already does for its (also points-based) `kCGWindowBounds` size.
         let scale = screen.backingScaleFactor
@@ -87,8 +133,7 @@ final class CaptureManager {
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
-    private static func captureArea(_ rect: CGRect, on screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
-        let fullImage = try await captureFullScreen(screen, showsCursor: showsCursor)
+    private static func crop(_ fullImage: NSImage, to rect: CGRect, scale: CGFloat) throws -> NSImage {
         guard let cgImage = fullImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw CaptureError.cropFailed
         }
@@ -96,7 +141,7 @@ final class CaptureManager {
         // overlay view fills `screen.frame`, which is in points, and the rect comes straight from
         // a SwiftUI DragGesture). `cgImage` above, however, was captured at the display's native
         // PIXEL resolution: `SCDisplay.width`/`.height` are themselves in points, so
-        // `captureFullScreen` explicitly multiplies them by `screen.backingScaleFactor` before
+        // `captureFullScreen` (which took the frozen still) explicitly multiplies them by `screen.backingScaleFactor` before
         // assigning them to `SCStreamConfiguration.width`/`.height` (which are documented in
         // pixels) - meaning the `CGImage` handed back here genuinely is pixel-sized. On any
         // Retina display (backingScaleFactor > 1) those two spaces differ, so the points-space rect
@@ -104,7 +149,6 @@ final class CaptureManager {
         // the crop comes out the wrong size and in the wrong position. Example: on a 2x Retina
         // screen, a rect selected at points (100, 100, 200, 150) must crop pixels
         // (200, 200, 400, 300) - exactly 2x every component (origin and size alike).
-        let scale = screen.backingScaleFactor
         let pixelRect = CGRect(
             x: rect.origin.x * scale,
             y: rect.origin.y * scale,
