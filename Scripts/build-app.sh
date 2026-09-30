@@ -1,11 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build -c release
+# UNIVERSAL=1 builds for both Apple silicon and Intel, which a downloadable release needs;
+# local builds stay native-only because they're faster.
+if [[ "${UNIVERSAL:-0}" == "1" ]]; then
+    swift build -c release --arch arm64 --arch x86_64
+    BIN=".build/apple/Products/Release/Clipr"
+else
+    swift build -c release
+    BIN=".build/release/Clipr"
+fi
 APP="Clipr.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp .build/release/Clipr "$APP/Contents/MacOS/Clipr"
+cp "$BIN" "$APP/Contents/MacOS/Clipr"
 cp Sources/Clipr/Resources/Info.plist "$APP/Contents/Info.plist"
 
 # The .icns is generated from Resources/AppIcon.png rather than committed, so the 1024pt master
