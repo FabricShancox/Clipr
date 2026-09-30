@@ -65,9 +65,19 @@ struct PreferencesView: View {
                 get: { captureCursor },
                 set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
             ))
+
+            Section {
+                LabeledContent("Version", value: Self.appVersion)
+            } header: {
+                Text("About")
+            }
         }
         .padding(20)
         .frame(width: 420)
+    }
+
+    private static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
     }
 
     private func chooseFolder() {

@@ -31,6 +31,9 @@ final class UpdateChecker {
     private static let latestReleaseURL = URL(string: "https://api.github.com/repos/FabricShancox/Clipr/releases/latest")!
     private static let lastCheckKey = "lastUpdateCheck"
     private static let checkInterval: TimeInterval = 24 * 60 * 60
+    /// `brew update` first: Homebrew only refreshes taps about once a day on its own, so a bare
+    /// `brew upgrade` soon after a release still sees the old version and reports it's up to date.
+    private static let upgradeCommand = "brew update && brew upgrade --cask clipr"
 
     private struct Release: Decodable {
         let tagName: String
@@ -107,7 +110,7 @@ final class UpdateChecker {
         alert.informativeText = """
             If you installed Clipr with Homebrew, update it by running:
 
-            brew upgrade --cask clipr
+            \(Self.upgradeCommand)
 
             Otherwise, download the new version from the release page.
             """
@@ -118,7 +121,7 @@ final class UpdateChecker {
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("brew upgrade --cask clipr", forType: .string)
+            NSPasteboard.general.setString(Self.upgradeCommand, forType: .string)
         case .alertSecondButtonReturn:
             NSWorkspace.shared.open(release.htmlURL)
         default:

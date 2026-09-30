@@ -35,6 +35,10 @@ final class StatusItemController {
 
         menu.addItem(.separator())
 
+        let aboutItem = NSMenuItem(title: "About Clipr", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
         let preferencesItem = NSMenuItem(title: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
         preferencesItem.target = self
         menu.addItem(preferencesItem)
@@ -66,4 +70,12 @@ final class StatusItemController {
     @objc private func toggleAdvancedMode() { onToggleAdvancedMode?() }
     @objc private func openPreferences() { onOpenPreferences?() }
     @objc private func checkForUpdates() { onCheckForUpdates?() }
+
+    /// The standard About panel, which shows the app icon and `CFBundleShortVersionString`.
+    /// Activating first brings it in front: opened from the status menu, Clipr may not be the
+    /// active app, and the panel would otherwise appear behind whatever is.
+    @objc private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(nil)
+    }
 }
