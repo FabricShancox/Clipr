@@ -28,6 +28,34 @@ extension EditorView {
         .frame(width: 0, height: 0)
     }
 
+    /// Esc and Return finish with the capture: Esc closes the window, leaving whatever is on the
+    /// clipboard (the raw capture, or an earlier Copy); Return copies the annotated image and then
+    /// closes. Esc with an annotation selected clears the selection first, so it keeps its usual
+    /// "back out" meaning before it dismisses. Disabled during text entry, where Esc ends editing
+    /// and Return types a newline.
+    var dismissShortcuts: some View {
+        let editing = isTextEntryActive
+        return Group {
+            Button("") {
+                if selectedAnnotationID != nil {
+                    selectedAnnotationID = nil
+                } else {
+                    onClose()
+                }
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .disabled(editing)
+            Button("") {
+                onCopy(annotations)
+                onClose()
+            }
+            .keyboardShortcut(.return, modifiers: [])
+            .disabled(editing)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+    }
+
     func shortcutButton(_ key: Character, tool: AnnotationTool, editing: Bool) -> some View {
         Button("") { selectedTool = tool }
             .keyboardShortcut(KeyEquivalent(key), modifiers: [])

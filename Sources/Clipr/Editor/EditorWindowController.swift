@@ -49,7 +49,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
 
         // windowWillClose(_:) is the single place onFinished fires — Copy/Share leave the
-        // window open, so this only fires via the title-bar close button / Cmd+W.
+        // window open, so this only fires via the title-bar close button, Cmd+W, Esc or Return.
         window.delegate = self
 
         window.contentView = makeContentView()
@@ -127,6 +127,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 self.latestHistory = history
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
+            onClose: { [weak self] in self?.window?.performClose(nil) },
             onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
             onRevealInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },
             onShare: { [weak self] annotations in self?.share(annotations: annotations) },

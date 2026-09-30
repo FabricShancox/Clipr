@@ -84,6 +84,9 @@ struct EditorView: View {
     /// them back when it rebuilds the content view for a rename — see `EditorHistory`.
     let onHistoryChanged: (EditorHistory) -> Void
     let onCopy: ([AnnotationObject]) -> Void
+    /// Closes the editor window. The capture is already on the clipboard (`CaptureManager` copies
+    /// it the moment it's taken) and auto-save keeps the files current, so nothing is lost.
+    let onClose: () -> Void
     /// Export a copy elsewhere, in a format the user picks — distinct from auto-save, which keeps
     /// the capture itself up to date in the save folder.
     let onSaveAs: ([AnnotationObject]) -> Void
@@ -144,5 +147,6 @@ struct EditorView: View {
         .background(EditorColors.s0)
         .background(toolShortcuts)
         .background(annotationEditingShortcuts)
+        .background(dismissShortcuts)
     }
 }
