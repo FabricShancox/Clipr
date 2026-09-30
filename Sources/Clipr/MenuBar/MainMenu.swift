@@ -21,6 +21,9 @@ extension AppDelegate {
         let name = "Clipr"
         let menu = NSMenu()
         menu.addItem(withTitle: "About \(name)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdatesFromMenu), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
         menu.addItem(.separator())
 
         // Mirrors the status-item menu's Preferences item. That one's ⌘, only works while that

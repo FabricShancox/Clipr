@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Installs a process-wide Carbon event handler in its init with no teardown logic, so it
     // must live for the whole process lifetime as a plain stored property.
     let hotkeyManager = HotkeyManager()
+    let updateChecker = UpdateChecker()
     lazy var storage = StorageManager(baseFolder: settings.saveFolder)
     lazy var captureManager = CaptureManager(storage: storage)
     lazy var advancedMode = AdvancedModeCoordinator(storage: storage)
@@ -45,8 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.onOpenImage = { [weak self] in self?.openImage() }
         statusItemController.onToggleAdvancedMode = { [weak self] in self?.toggleAdvancedMode() }
         statusItemController.onOpenPreferences = { [weak self] in self?.openPreferences() }
+        statusItemController.onCheckForUpdates = { [weak self] in self?.updateChecker.checkNow() }
 
         registerHotkeys()
+        updateChecker.checkInBackgroundIfDue()
     }
 
     /// Shows a capture in the editor, reusing an already-open window rather than adding another.
@@ -209,6 +212,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `@objc` selector, which `openPreferences` (private, non-`@objc`) can't be.
     @objc func showPreferencesFromMenu() {
         openPreferences()
+    }
+
+    @objc func checkForUpdatesFromMenu() {
+        updateChecker.checkNow()
     }
 
     private func openPreferences() {

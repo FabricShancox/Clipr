@@ -1,3 +1,4 @@
+import Carbon
 import Foundation
 
 struct HotkeyBinding: Codable, Equatable {
@@ -11,11 +12,41 @@ struct HotkeyBinding: Codable, Equatable {
     let keyCode: UInt32
     let modifiers: UInt32
 
-    // macOS virtual keycodes for digits 0-9, used for defaults and display.
-    private static let keyCodeToDigit: [UInt32: String] = [
-        29: "0", 18: "1", 19: "2", 20: "3", 21: "4",
-        23: "5", 22: "6", 26: "7", 28: "8", 25: "9"
+    // Keys that don't type a printable character, so the keyboard layout can't name them.
+    private static let specialKeyNames: [UInt32: String] = [
+        36: "↩", 48: "⇥", 49: "Space", 51: "⌫", 53: "⎋", 117: "⌦", 76: "⌤",
+        123: "←", 124: "→", 125: "↓", 126: "↑",
+        115: "↖", 119: "↘", 116: "⇞", 121: "⇟",
+        122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
+        98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12",
+        105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17", 79: "F18", 80: "F19", 90: "F20"
     ]
+
+    /// The key's label, e.g. "Q" or "F5". Printable keys are named through the current keyboard
+    /// layout rather than a fixed table, so the label matches what's printed on the user's keycap
+    /// (a German layout's Z/Y swap, AZERTY, and so on).
+    static func keyName(for keyCode: UInt32) -> String {
+        if let name = specialKeyNames[keyCode] { return name }
+        return layoutCharacter(for: keyCode)?.uppercased() ?? "?"
+    }
+
+    private static func layoutCharacter(for keyCode: UInt32) -> String? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let layoutPointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let layoutData = Unmanaged<CFData>.fromOpaque(layoutPointer).takeUnretainedValue() as Data
+        var deadKeyState: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let status = layoutData.withUnsafeBytes { raw -> OSStatus in
+            guard let layout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return -1 }
+            return UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0,
+                                  UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                                  &deadKeyState, chars.count, &length, &chars)
+        }
+        guard status == noErr, length > 0 else { return nil }
+        let string = String(utf16CodeUnits: chars, count: length)
+        return string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : string
+    }
 
     var displayString: String {
         var s = ""
@@ -23,7 +54,7 @@ struct HotkeyBinding: Codable, Equatable {
         if modifiers & Modifier.shift.rawValue != 0 { s += "⇧" }
         if modifiers & Modifier.option.rawValue != 0 { s += "⌥" }
         if modifiers & Modifier.control.rawValue != 0 { s += "⌃" }
-        s += HotkeyBinding.keyCodeToDigit[keyCode] ?? "?"
+        s += HotkeyBinding.keyName(for: keyCode)
         return s
     }
 

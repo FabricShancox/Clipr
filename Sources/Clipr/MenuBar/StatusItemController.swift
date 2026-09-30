@@ -9,6 +9,7 @@ final class StatusItemController {
     var onOpenImage: (() -> Void)?
     var onToggleAdvancedMode: (() -> Void)?
     var onOpenPreferences: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
 
     init() {
         // `variableLength`, not `squareLength`: Advanced Mode shows its running step count as the
@@ -38,6 +39,10 @@ final class StatusItemController {
         preferencesItem.target = self
         menu.addItem(preferencesItem)
 
+        let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updatesItem.target = self
+        menu.addItem(updatesItem)
+
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Clipr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
@@ -60,4 +65,5 @@ final class StatusItemController {
     @objc private func openImage() { onOpenImage?() }
     @objc private func toggleAdvancedMode() { onToggleAdvancedMode?() }
     @objc private func openPreferences() { onOpenPreferences?() }
+    @objc private func checkForUpdates() { onCheckForUpdates?() }
 }
