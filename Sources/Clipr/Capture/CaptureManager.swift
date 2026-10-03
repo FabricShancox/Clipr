@@ -97,7 +97,7 @@ final class CaptureManager {
         return try await Self.captureFullScreen(screen, showsCursor: captureCursor)
     }
 
-    private static func snapshotScreens(_ screens: [NSScreen], showsCursor: Bool) async throws -> [CGDirectDisplayID: NSImage] {
+    static func snapshotScreens(_ screens: [NSScreen], showsCursor: Bool) async throws -> [CGDirectDisplayID: NSImage] {
         var snapshots: [CGDirectDisplayID: NSImage] = [:]
         for screen in screens {
             snapshots[screen.displayID] = try await captureFullScreen(screen, showsCursor: showsCursor)
@@ -105,7 +105,7 @@ final class CaptureManager {
         return snapshots
     }
 
-    private static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
+    static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
             throw CaptureError.displayNotFound
