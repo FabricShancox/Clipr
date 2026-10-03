@@ -79,4 +79,58 @@ final class KeystrokeAggregatorTests: XCTestCase {
         _ = a.handle(key("p", secure: true), at: t0)
         XCTAssertEqual(a.handle(key("\r", code: 36), at: t0), [])
     }
+
+    func testShortcutKeysUseGlyphNames() {
+        // Left arrow: code 123
+        var a = KeystrokeAggregator()
+        let events = a.handle(key("\u{F702}", code: 123, mods: [.command]), at: t0)
+        XCTAssertEqual(events, [.shortcut("⌘←")])
+    }
+
+    func testShortcutSpaceUsesCaptionNotWhitespace() {
+        // Space: code 49
+        var a = KeystrokeAggregator()
+        let events = a.handle(key(" ", code: 49, mods: [.command]), at: t0)
+        XCTAssertEqual(events, [.shortcut("⌘Space")])
+    }
+
+    func testShortcutTabUsesTabulationGlyph() {
+        // Tab: code 48
+        var a = KeystrokeAggregator()
+        let events = a.handle(key("\t", code: 48, mods: [.control]), at: t0)
+        XCTAssertEqual(events, [.shortcut("⌃⇥")])
+    }
+
+    func testShortcutDeleteUsesDeletionGlyph() {
+        // Delete (backspace): code 51
+        var a = KeystrokeAggregator()
+        let events = a.handle(key("\u{7F}", code: 51, mods: [.command]), at: t0)
+        XCTAssertEqual(events, [.shortcut("⌘⌫")])
+    }
+
+    func testSecureBurstClearsBuffer() {
+        var a = KeystrokeAggregator()
+        _ = a.handle(key("a"), at: t0)
+        _ = a.handle(key("b"), at: t0)
+        _ = a.handle(key("p", secure: true), at: t0)
+        // Buffer should be cleared, isSecureBurst true
+        _ = a.handle(key("c"), at: t0)
+        XCTAssertNil(a.endBurst())
+    }
+
+    func testSecureBurstEndedByIdleEmitsNothing() {
+        var a = KeystrokeAggregator()
+        _ = a.handle(key("p", secure: true), at: t0)
+        XCTAssertNil(a.idleCheck(now: t0.addingTimeInterval(1.0)))
+        XCTAssertFalse(a.hasPendingBurst)
+    }
+
+    func testCleanBurstAfterSecureEmitsOnlyNewText() {
+        var a = KeystrokeAggregator()
+        _ = a.handle(key("p", secure: true), at: t0)
+        _ = a.handle(key("w"), at: t0)
+        XCTAssertNil(a.endBurst())
+        type("hello", into: &a)
+        XCTAssertEqual(a.endBurst(), .text("hello"))
+    }
 }

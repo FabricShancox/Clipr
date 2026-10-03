@@ -33,7 +33,24 @@ struct KeystrokeAggregator {
     private enum KeyCode {
         static let returnKey: UInt16 = 36, keypadEnter: UInt16 = 76, tab: UInt16 = 48
         static let delete: UInt16 = 51, escape: UInt16 = 53, forwardDelete: UInt16 = 117
+        static let space: UInt16 = 49
         static let arrows: ClosedRange<UInt16> = 123...126
+        static let left: UInt16 = 123, right: UInt16 = 124, down: UInt16 = 125, up: UInt16 = 126
+
+        /// Map keyCode to glyph/name for shortcuts. Keys not in this map use baseCharacters.uppercased().
+        static let nameMap: [UInt16: String] = [
+            returnKey: "↩",
+            keypadEnter: "⌤",
+            tab: "⇥",
+            space: "Space",
+            delete: "⌫",
+            forwardDelete: "⌦",
+            escape: "⎋",
+            left: "←",
+            right: "→",
+            down: "↓",
+            up: "↑"
+        ]
     }
 
     private var buffer = ""
@@ -48,7 +65,8 @@ struct KeystrokeAggregator {
         if key.modifiers.contains(.command) || key.modifiers.contains(.control) {
             var events: [TypingEvent] = []
             if let ended = endBurst() { events.append(ended) }
-            events.append(.shortcut(Self.glyphs(key.modifiers) + key.baseCharacters.uppercased()))
+            let keyName = KeyCode.nameMap[key.keyCode] ?? key.baseCharacters.uppercased()
+            events.append(.shortcut(Self.glyphs(key.modifiers) + keyName))
             return events
         }
         switch key.keyCode {
@@ -60,7 +78,11 @@ struct KeystrokeAggregator {
             break
         }
         lastKeyAt = time
-        if key.isSecure { isSecureBurst = true }
+        if key.isSecure {
+            isSecureBurst = true
+            buffer = ""
+            return []
+        }
         if key.keyCode == KeyCode.delete {
             if !buffer.isEmpty { buffer.removeLast() }
             return []
