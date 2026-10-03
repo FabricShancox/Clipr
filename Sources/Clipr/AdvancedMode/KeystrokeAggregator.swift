@@ -61,6 +61,9 @@ struct KeystrokeAggregator {
 
     var hasPendingBurst: Bool { !buffer.isEmpty || isSecureBurst }
 
+    /// For tests to verify secure input doesn't retain plaintext in the buffer.
+    var bufferedCharacterCount: Int { buffer.count }
+
     mutating func handle(_ key: KeyInput, at time: Date) -> [TypingEvent] {
         if key.modifiers.contains(.command) || key.modifiers.contains(.control) {
             var events: [TypingEvent] = []
@@ -78,7 +81,7 @@ struct KeystrokeAggregator {
             break
         }
         lastKeyAt = time
-        if key.isSecure {
+        if key.isSecure || isSecureBurst {
             isSecureBurst = true
             buffer = ""
             return []

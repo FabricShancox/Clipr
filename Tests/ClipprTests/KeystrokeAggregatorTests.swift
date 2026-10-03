@@ -115,6 +115,7 @@ final class KeystrokeAggregatorTests: XCTestCase {
         _ = a.handle(key("p", secure: true), at: t0)
         // Buffer should be cleared, isSecureBurst true
         _ = a.handle(key("c"), at: t0)
+        XCTAssertEqual(a.bufferedCharacterCount, 0)
         XCTAssertNil(a.endBurst())
     }
 
@@ -132,5 +133,16 @@ final class KeystrokeAggregatorTests: XCTestCase {
         XCTAssertNil(a.endBurst())
         type("hello", into: &a)
         XCTAssertEqual(a.endBurst(), .text("hello"))
+    }
+
+    func testNonSecureKeysDoNotAccumulateAfterSecureKey() {
+        var a = KeystrokeAggregator()
+        _ = a.handle(key("p", secure: true), at: t0)
+        _ = a.handle(key("a"), at: t0)
+        _ = a.handle(key("b"), at: t0)
+        // Buffer should be empty even though non-secure keys were typed
+        XCTAssertEqual(a.bufferedCharacterCount, 0)
+        XCTAssertTrue(a.hasPendingBurst)
+        XCTAssertNil(a.endBurst())
     }
 }
