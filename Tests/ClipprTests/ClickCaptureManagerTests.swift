@@ -22,9 +22,16 @@ private final class FakeImages: StepImageSource {
 
 private final class FakeDescriber: ClickDescribing {
     var target: ClickTarget? = ClickTarget(role: "AXButton", subrole: nil, label: "Save", menuPath: [])
-    var field: (String?, Bool) = ("Name", false)
+    var field = FocusedField(label: "Name", security: .notSecure, element: nil)
+    /// Answers for successive `focusedField()` calls (burst start, then burst end); `field` once
+    /// it runs out. The manager orders the two reads of one burst, so this order is deterministic.
+    var fields: [FocusedField] = []
+    private let lock = NSLock()
     func describe(at point: CGPoint) async -> ClickTarget? { target }
-    func focusedField() async -> (label: String?, isSecure: Bool) { field }
+    func focusedField() async -> FocusedField {
+        lock.lock(); defer { lock.unlock() }
+        return fields.isEmpty ? field : fields.removeFirst()
+    }
 }
 
 final class ClickCaptureManagerTests: XCTestCase {
@@ -164,14 +171,80 @@ final class ClickCaptureManagerTests: XCTestCase {
     }
 
     func testSecureTypingWritesNoStep() throws {
-        describer.field = ("Password", true)
+        describer.field = FocusedField(label: "Password", security: .secure, element: nil)
         _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
-        manager.handle(.key(KeyInput(characters: "s", baseCharacters: "s", keyCode: 0, modifiers: [], isSecure: false)))
-        manager.handle(.key(KeyInput(characters: "\r", baseCharacters: "\r", keyCode: 36, modifiers: [], isSecure: false)))
+        typeAndReturn("s")
         let (manifest, sessionFolder) = stop()
         XCTAssertTrue(manifest.steps.isEmpty)
-        let json = (try? String(contentsOf: sessionFolder.appendingPathComponent("session.json"))) ?? ""
-        XCTAssertFalse(json.contains("\"s\""))
+        assertNothingTyped("s", in: sessionFolder)
+    }
+
+    func testUnknownFieldAtStartWritesNoStep() throws {
+        describer.fields = [FocusedField(label: "Name", security: .unknown, element: nil)]
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        typeAndReturn("John")
+        let (manifest, sessionFolder) = stop()
+        XCTAssertTrue(manifest.steps.isEmpty)
+        assertNothingTyped("John", in: sessionFolder)
+    }
+
+    func testFieldTurningSecureByBurstEndWritesNoStep() throws {
+        describer.fields = [FocusedField(label: "Name", security: .notSecure, element: nil),
+                            FocusedField(label: "Password", security: .secure, element: nil)]
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        typeAndReturn("John")
+        let (manifest, sessionFolder) = stop()
+        XCTAssertTrue(manifest.steps.isEmpty)
+        assertNothingTyped("John", in: sessionFolder)
+    }
+
+    func testFocusMovingToAnotherFieldWritesNoStep() throws {
+        describer.fields = [FocusedField(label: "Name", security: .notSecure, element: AXUIElementCreateApplication(1)),
+                            FocusedField(label: "Name", security: .notSecure, element: AXUIElementCreateApplication(2))]
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        typeAndReturn("John")
+        let (manifest, sessionFolder) = stop()
+        XCTAssertTrue(manifest.steps.isEmpty)
+        assertNothingTyped("John", in: sessionFolder)
+    }
+
+    func testSameNonSecureFieldWritesTypingStep() throws {
+        let element = AXUIElementCreateApplication(1)
+        describer.fields = [FocusedField(label: "Name", security: .notSecure, element: element),
+                            FocusedField(label: "Name", security: .notSecure, element: element)]
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        typeAndReturn("John")
+        waitForSteps(1)
+        let steps = stop().0.steps
+        XCTAssertEqual(steps.map(\.kind), [.typing])
+        XCTAssertEqual(steps.first?.caption, #"Type "John" in **Name**"#)
+    }
+
+    func testTypingEndedBySupersedingClickIsWrittenBeforeTheClick() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        manager.handle(.click(CGPoint(x: 150, y: 160)))
+        manager.handle(.key(KeyInput(characters: "J", baseCharacters: "j", keyCode: 0, modifiers: [.shift], isSecure: false)))
+        manager.handle(.click(CGPoint(x: 170, y: 170)))   // inside the first click's delay
+        waitForSteps(2)
+        XCTAssertEqual(stop().0.steps.map(\.kind), [.typing, .click])
+    }
+
+    private func typeAndReturn(_ text: String) {
+        for ch in text {
+            manager.handle(.key(KeyInput(characters: String(ch), baseCharacters: String(ch), keyCode: 0, modifiers: [], isSecure: false)))
+        }
+        manager.handle(.key(KeyInput(characters: "\r", baseCharacters: "\r", keyCode: 36, modifiers: [], isSecure: false)))
+    }
+
+    /// No screenshot on disk, and nothing typed in the manifest if one was written.
+    private func assertNothingTyped(_ text: String, in sessionFolder: URL, file: StaticString = #filePath, line: UInt = #line) {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: sessionFolder.path)) ?? []
+        XCTAssertFalse(files.contains { $0.hasPrefix("Step_") && $0.hasSuffix(".png") }, "step PNG written: \(files)", file: file, line: line)
+        let manifestURL = sessionFolder.appendingPathComponent("session.json")
+        if FileManager.default.fileExists(atPath: manifestURL.path) {
+            XCTAssertFalse(SessionManifestStore.load(from: sessionFolder).steps.contains { $0.kind == .typing }, file: file, line: line)
+            XCTAssertFalse(((try? String(contentsOf: manifestURL)) ?? "").contains(text), file: file, line: line)
+        }
     }
 
     func testPausedIgnoresEverything() throws {

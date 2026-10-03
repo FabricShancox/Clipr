@@ -19,7 +19,8 @@ final class ClickCaptureManager {
     private var nextStepIndex = 1
     private var trail = CursorTrailRecorder()
     private var keystrokes = KeystrokeAggregator()
-    private var typingFieldTask: Task<(label: String?, isSecure: Bool), Never>?
+    /// The focused field as the current burst's first key arrived; checked again at burst end.
+    private var typingFieldTask: Task<FocusedField, Never>?
     private var idleWork: DispatchWorkItem?
     private var pending: PendingClick?
     /// The tail of the write chain. Captures run concurrently, but every step awaits the one
@@ -27,6 +28,8 @@ final class ClickCaptureManager {
     /// capture finishes after a fast one. `stop` awaits this to know everything is on disk.
     private var lastWrite: Task<Void, Never>?
     private var isStopping = false
+
+    private static let stopFlushTimeout: TimeInterval = 10
 
     var isPaused = false
     var captureCursor = false
@@ -116,7 +119,12 @@ final class ClickCaptureManager {
         idleWork?.cancel()
         let last = lastWrite
         Task { @MainActor in
-            await last?.value
+            // Capped so a hung ScreenCaptureKit call can't leave Stop dead forever. On timeout
+            // the session completes with what's written so far; `write` drops any late step
+            // because the manifest and session folder are cleared below.
+            if let last, await Self.value(of: last, timeout: Self.stopFlushTimeout) == nil {
+                NSLog("Clipr: advanced mode stop gave up waiting for in-flight steps")
+            }
             let final = self.manifest
             self.sessionFolder = nil
             self.manifest = nil
@@ -145,18 +153,17 @@ final class ClickCaptureManager {
         case .click(let p):
             endTypingBurst()
             var points = trail.drain()
-            let slot: WriteSlot
             if let previous = pending {
                 // A second click inside the delay replaces the first (double-click, fast
-                // clicking); its trail is kept so the path still starts where the user began,
-                // and so is its place in the write order.
+                // clicking); its trail is kept so the path still starts where the user began.
+                // Its write slot is released and a fresh one taken below, after the typing
+                // burst this click just ended, so that typing is written before the click.
                 previous.work.cancel()
                 previous.describe?.cancel()
+                previous.slot.done.finish()
                 points = previous.trail + points
-                slot = previous.slot
-            } else {
-                slot = reserveWriteSlot()
             }
+            let slot = reserveWriteSlot()
             let describe = settings.autoCaptions ? Task { await self.describer.describe(at: p) } : nil
             let work = DispatchWorkItem { [weak self] in
                 guard let self, let pending = self.pending else { return }
@@ -211,12 +218,32 @@ final class ClickCaptureManager {
             // typing step would be a screenshot captioned `Type ""`.
             guard !text.isEmpty else { return }
             // The focused-field check is the second line of defence after `IsSecureEventInputEnabled`
-            // (some password fields don't turn secure input on): a secure field drops the step.
+            // (some password fields don't turn secure input on). It fails closed: the field is
+            // read when the burst starts and again now, and anything short of "the same field,
+            // known not secure, both times" drops the step before anything is captured. Focus
+            // can move mid-burst (Tab is caught, but a click-free focus change isn't), so a
+            // single read could vouch for one field while the text went into a password field.
+            // The second read is chained after the first so the two can't be answered out of order.
+            let end: Task<FocusedField, Never>? = field.map { start in
+                Task { _ = await start.value; return await self.describer.focusedField() }
+            }
             enqueue(kind: .typing, target: scopeTarget(for: nil), click: nil, trail: [], skipIf: {
-                await field?.value.isSecure ?? false
+                guard let field, let end else { return true }
+                return !Self.isSameNonSecureField(await field.value, await end.value)
             }, caption: { _ in
                 CaptionFormatter.typing(text, fieldLabel: await field?.value.label)
             })
+        }
+    }
+
+    /// Both reads known not secure, and of the same element. Fakes have no element, so two `nil`s
+    /// count as the same field — but only when both reads are `notSecure` anyway.
+    private static func isSameNonSecureField(_ a: FocusedField, _ b: FocusedField) -> Bool {
+        guard a.security == .notSecure, b.security == .notSecure else { return false }
+        switch (a.element, b.element) {
+        case (nil, nil): return true
+        case let (x?, y?): return CFEqual(x, y)
+        default: return false
         }
     }
 
@@ -278,7 +305,9 @@ final class ClickCaptureManager {
     /// Main actor only, so the index increment and manifest append can never interleave.
     private func write(_ frame: CapturedFrame, kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint],
                        caption: String?, settings: AdvancedModeSettings, folder: URL) {
-        guard manifest != nil else { return }
+        // The folder check drops a step from a session that already stopped (its flush timed
+        // out) and would otherwise land in the next session's manifest.
+        guard manifest != nil, folder == sessionFolder else { return }
         let index = nextStepIndex
         nextStepIndex += 1
         let stepURL: URL
@@ -329,10 +358,11 @@ final class ClickCaptureManager {
     }
 
     /// `task`'s value, or `nil` if it takes longer than `timeout` — a slow AX read falls back to
-    /// the generic caption instead of holding the step back. A race of two unstructured tasks
+    /// the generic caption instead of holding the step back, and a hung capture can't hold up
+    /// `stop` forever. A race of two unstructured tasks
     /// rather than a task group: a group waits for every child before returning, and awaiting
     /// `task.value` ignores cancellation, so a group would never actually cut a slow read short.
-    private static func value<T>(of task: Task<T?, Never>?, timeout: TimeInterval) async -> T?? {
+    private static func value<T>(of task: Task<T, Never>?, timeout: TimeInterval) async -> T? {
         guard let task else { return nil }
         return await withCheckedContinuation { continuation in
             let first = FirstResult()

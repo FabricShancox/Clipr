@@ -5,8 +5,23 @@ import Foundation
 protocol ClickDescribing: AnyObject {
     /// What's under `point` (Quartz global). `nil` if Accessibility can't say.
     func describe(at point: CGPoint) async -> ClickTarget?
-    /// The focused element's label (for "Type … in **Name**") and whether it's a password field.
-    func focusedField() async -> (label: String?, isSecure: Bool)
+    /// The focused element's label (for "Type … in **Name**"), whether it's a password field,
+    /// and the element itself so a burst can be checked to start and end in the same field.
+    func focusedField() async -> FocusedField
+}
+
+/// Whether the focused element is a password field. `unknown` whenever Accessibility couldn't
+/// say for sure (no focused element, timeout, any other read error) — typing steps treat it
+/// like `secure`, so a failed read can never let a password through.
+enum FieldSecurity: Equatable {
+    case secure, notSecure, unknown
+}
+
+struct FocusedField {
+    var label: String?
+    var security: FieldSecurity
+    /// `nil` when there's no focused element (security is then `unknown`), and in test fakes.
+    var element: AXUIElement?
 }
 
 /// Reads the UI under a click through Accessibility. Runs on its own serial queue with a short
@@ -31,15 +46,41 @@ final class ClickDescriber: ClickDescribing {
         }
     }
 
-    func focusedField() async -> (label: String?, isSecure: Bool) {
+    func focusedField() async -> FocusedField {
         await withCheckedContinuation { continuation in
             queue.async { [systemWide] in
                 guard let focused = Self.element(systemWide, kAXFocusedUIElementAttribute) else {
-                    return continuation.resume(returning: (nil, false))
+                    return continuation.resume(returning: FocusedField(label: nil, security: .unknown, element: nil))
                 }
-                let isSecure = Self.string(focused, kAXSubroleAttribute) == "AXSecureTextField"
-                continuation.resume(returning: (Self.label(of: focused, role: Self.string(focused, kAXRoleAttribute), allowValue: false), isSecure))
+                let role = Self.read(focused, kAXRoleAttribute)
+                let subrole = Self.read(focused, kAXSubroleAttribute)
+                let security: FieldSecurity
+                if case .failed = role { security = .unknown }
+                else if case .failed = subrole { security = .unknown }
+                else if case .value("AXSecureTextField") = subrole { security = .secure }
+                else { security = .notSecure }
+                var roleString: String?
+                if case .value(let r) = role { roleString = r }
+                continuation.resume(returning: FocusedField(
+                    label: Self.label(of: focused, role: roleString, allowValue: false), security: security, element: focused
+                ))
             }
+        }
+    }
+
+    private enum AttributeRead: Equatable {
+        case value(String?)
+        /// Anything but "attribute unsupported" / "no value" — a timeout, `cannotComplete`, an
+        /// invalid element. The security check fails closed on these.
+        case failed
+    }
+
+    private static func read(_ el: AXUIElement, _ attribute: String) -> AttributeRead {
+        var value: CFTypeRef?
+        switch AXUIElementCopyAttributeValue(el, attribute as CFString, &value) {
+        case .success: return .value(value as? String)
+        case .attributeUnsupported, .noValue: return .value(nil)
+        default: return .failed
         }
     }
 
