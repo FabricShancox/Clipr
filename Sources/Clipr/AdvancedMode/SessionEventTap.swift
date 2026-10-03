@@ -32,6 +32,7 @@ final class SessionEventTap: SessionEventSource {
     private var runLoopSource: CFRunLoopSource?
 
     func start(options: SessionEventOptions) throws {
+        stop() // a second start must not leak the first tap
         var mask: CGEventMask = 1 << CGEventType.leftMouseDown.rawValue
         if options.mouseMoves {
             mask |= 1 << CGEventType.mouseMoved.rawValue | 1 << CGEventType.leftMouseDragged.rawValue
@@ -56,6 +57,7 @@ final class SessionEventTap: SessionEventSource {
         runLoopSource = source
     }
 
+    /// Must be called on the main thread: the tap's source lives on the main run loop.
     func stop() {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
@@ -83,12 +85,14 @@ final class SessionEventTap: SessionEventSource {
             onEvent?(.mouseMoved(event.location))
         case .keyDown:
             guard let ns = NSEvent(cgEvent: event) else { return }
+            // Password characters must never leave the tap, so blank them while secure input is on.
+            let isSecure = IsSecureEventInputEnabled()
             onEvent?(.key(KeyInput(
-                characters: ns.characters ?? "",
-                baseCharacters: ns.charactersIgnoringModifiers ?? "",
+                characters: isSecure ? "" : (ns.characters ?? ""),
+                baseCharacters: isSecure ? "" : (ns.charactersIgnoringModifiers ?? ""),
                 keyCode: ns.keyCode,
                 modifiers: Self.modifiers(ns.modifierFlags),
-                isSecure: IsSecureEventInputEnabled()
+                isSecure: isSecure
             )))
         default:
             break

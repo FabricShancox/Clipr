@@ -23,10 +23,12 @@ final class LiveStepImageSource: StepImageSource {
     var ownWindowIDs: Set<CGWindowID> = []
 
     func capture(_ target: CaptureTarget, showsCursor: Bool) async throws -> CapturedFrame? {
-        let appName = await MainActor.run { NSWorkspace.shared.frontmostApplication?.localizedName }
+        // Read once so the reported app and the window we capture can't disagree if focus changes.
+        let app = await MainActor.run { NSWorkspace.shared.frontmostApplication }
+        let appName = app?.localizedName
         switch target {
         case .frontmostWindow:
-            guard let window = await MainActor.run(body: { frontmostWindow() }) else { return nil }
+            guard let window = await MainActor.run(body: { frontmostWindow(of: app) }) else { return nil }
             let image = try await CaptureManager.captureWindow(window, showsCursor: showsCursor)
             return CapturedFrame(image: image, origin: window.bounds.origin, appName: appName)
         case .screenContaining(let point):
@@ -47,8 +49,8 @@ final class LiveStepImageSource: StepImageSource {
 
     /// Same rules Advanced Mode has always used: never Clipr itself, never a window Clipr owns.
     @MainActor
-    private func frontmostWindow() -> WindowInfo? {
-        guard let app = NSWorkspace.shared.frontmostApplication,
+    private func frontmostWindow(of app: NSRunningApplication?) -> WindowInfo? {
+        guard let app,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
         guard let window = WindowPicker.frontmostWindow(ownedBy: app.processIdentifier, in: WindowPicker.onScreenWindows()),
               !ownWindowIDs.contains(window.windowID) else { return nil }
