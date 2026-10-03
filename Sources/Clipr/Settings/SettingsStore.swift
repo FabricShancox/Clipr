@@ -13,6 +13,7 @@ final class SettingsStore {
         static let captureCursor = "captureCursor"
         static let copyBorder = "copyBorder"
         static let copyShadow = "copyShadow"
+        static let advancedMode = "advancedMode"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -69,6 +70,12 @@ final class SettingsStore {
             defaults.set(newValue.border, forKey: Key.copyBorder)
             defaults.set(newValue.shadow, forKey: Key.copyShadow)
         }
+    }
+
+    /// All Advanced Mode options — see `AdvancedModeSettings`.
+    var advancedMode: AdvancedModeSettings {
+        get { decoded(Key.advancedMode) ?? .default }
+        set { encode(newValue, forKey: Key.advancedMode) }
     }
 
     private func decoded<T: Decodable>(_ key: String) -> T? {
