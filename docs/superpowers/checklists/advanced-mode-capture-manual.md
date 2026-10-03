@@ -1,0 +1,40 @@
+# Advanced Mode Capture — Manual Checklist
+
+Build with `./Scripts/build-app.sh`, quit any running Clipr, `open Clipr.app`. Re-grant
+Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds can drop them).
+
+## Scopes (defaults otherwise)
+- [ ] Window: click 3 buttons in Safari → 3 steps; each has a red dot on the clicked control.
+- [ ] Screen: same clicks → full-display steps; dots on the right spots, including on a second display.
+- [ ] Fixed area: start → overlay appears; drag an area → steps are that area only.
+- [ ] Fixed area: start → press Esc in the overlay → no session, no alert.
+
+## Features
+- [ ] Captions: Review shows "Click Save in Safari"-style captions; a menu item shows "Choose File ▸ …".
+- [ ] Marker style Dot: small solid filled dot (~14 pt) instead of ring.
+- [ ] Marker off: no annotations on new steps.
+- [ ] Trail on: faint path leading to each click; editable in editor.
+- [ ] Zoom on: `Step_NN_zoom.png` next to each click step, centred on the click.
+- [ ] Typing on (Input Monitoring granted): type a name in a text field, click elsewhere → a "Type "…" in Name" step showing the filled field, before the click step.
+- [ ] Typing on: type in a password field → no typing step; `session.json` has no trace of it.
+- [ ] Typing on: typing in an app with no usable Accessibility data (or where focus moves to another field mid-typing) → no typing step; clicks still record.
+- [ ] Typing on without Input Monitoring: panel shows the warning; clicks still record.
+- [ ] Click captions: only quote visible text for labels, cells, buttons, links, headings; a text field's contents never appear in a caption.
+- [ ] Click into a filled text field → caption names the field, never its contents.
+- [ ] Shortcut: ⌘S in an app → "Press ⌘S" step.
+- [ ] Step hotkey: set one, start session, press it → manual step without caption/marker; after Stop the hotkey no longer fires.
+- [ ] Delay 1.5 s: open a menu by clicking → step shows the menu open.
+- [ ] Double-click → one step.
+
+## Session
+- [ ] Pause → clicks ignored; Resume → numbering continues.
+- [ ] Stop right after a click (within the delay) → that click's step is in Review.
+- [ ] Stop button on panel / menu-bar Stop never creates a step.
+- [ ] Stop never hangs: even if a capture stalls, Review opens within ~10 s.
+- [ ] Open a step in the editor → marker and trail are selectable, movable, deletable.
+- [ ] Review Last Session after relaunching Clipr → same steps and captions.
+- [ ] Old session folder (no session.json) → Review lists its steps without captions.
+
+## Preferences
+- [ ] "Grant…" may stay visible until Preferences is reopened after granting Input Monitoring.
+- [ ] Preferences window fits on the smallest display used.
