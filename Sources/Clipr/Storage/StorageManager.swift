@@ -198,6 +198,12 @@ final class StorageManager {
         return try write(image, to: sessionFolder.appendingPathComponent(name))
     }
 
+    /// Overwrites rather than suffixing: a zoom belongs to exactly one step file.
+    func saveStepZoom(_ image: NSImage, stepURL: URL) throws -> URL {
+        let name = FilenameGenerator.zoomName(fromStep: stepURL.lastPathComponent)
+        return try write(image, to: stepURL.deletingLastPathComponent().appendingPathComponent(name), overwrite: true)
+    }
+
     func copyToClipboard(_ image: NSImage) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
