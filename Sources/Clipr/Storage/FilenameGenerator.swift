@@ -54,6 +54,12 @@ struct FilenameGenerator {
         String(format: "Step_%02d.png", index)
     }
 
+    /// The close-up crop saved next to a step when "Zoom on click" is on.
+    static func zoomName(fromStep stepFilename: String) -> String {
+        guard stepFilename.hasSuffix(".png") else { return stepFilename + "_zoom.png" }
+        return "\(stepFilename.dropLast(4))_zoom.png"
+    }
+
     private static func timestamp(date: Date, timeZone: TimeZone) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HHmmss"

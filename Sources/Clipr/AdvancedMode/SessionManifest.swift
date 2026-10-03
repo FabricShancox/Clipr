@@ -1,0 +1,83 @@
+import Foundation
+import CoreGraphics
+
+/// One step of an Advanced Mode session as recorded in `session.json`.
+struct StepRecord: Codable, Identifiable, Equatable {
+    enum Kind: String, Codable { case click, typing, manual }
+
+    let id: UUID
+    /// Filename relative to the session folder, e.g. "Step_03.png".
+    var file: String
+    var kind: Kind
+    var caption: String?
+    /// Image point space, top-left origin. `nil` when the click fell outside the captured image
+    /// or the step had no click.
+    var clickPoint: CGPoint?
+    var zoomFile: String?
+    var appName: String?
+    var capturedAt: Date
+}
+
+/// `steps` order is display order, so steps can be reordered later without renaming files.
+struct SessionManifest: Codable, Equatable {
+    var version: Int
+    var createdAt: Date
+    var steps: [StepRecord]
+
+    init(createdAt: Date, steps: [StepRecord] = []) {
+        version = 1
+        self.createdAt = createdAt
+        self.steps = steps
+    }
+}
+
+enum SessionManifestStore {
+    static let fileName = "session.json"
+
+    static func save(_ manifest: SessionManifest, in folder: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(manifest).write(to: folder.appendingPathComponent(fileName), options: .atomic)
+    }
+
+    /// Always returns a manifest that matches the folder's contents: entries whose PNG is gone are
+    /// dropped and raw step PNGs with no entry are appended as `.manual` steps without captions.
+    /// A missing or unreadable `session.json` (sessions recorded before the manifest existed, or a
+    /// failed write) therefore still yields every step instead of an empty session.
+    static func load(from folder: URL) -> SessionManifest {
+        let onDisk = rawStepFiles(in: folder)
+        var manifest = decoded(from: folder) ?? SessionManifest(createdAt: creationDate(of: folder))
+        let present = Set(onDisk)
+        manifest.steps.removeAll { !present.contains($0.file) }
+        let listed = Set(manifest.steps.map(\.file))
+        for file in onDisk where !listed.contains(file) {
+            manifest.steps.append(StepRecord(
+                id: UUID(), file: file, kind: .manual, caption: nil, clickPoint: nil,
+                zoomFile: nil, appName: nil, capturedAt: manifest.createdAt
+            ))
+        }
+        return manifest
+    }
+
+    /// Raw step PNGs only, in natural order ("Step_2" before "Step_10"). The editor writes
+    /// `_edited.png` previews and zoom writes `_zoom.png` next to them; neither is a step.
+    static func rawStepFiles(in folder: URL) -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names
+            .filter { $0.hasPrefix("Step_") && $0.lowercased().hasSuffix(".png")
+                && !$0.hasSuffix("_edited.png") && !$0.hasSuffix("_zoom.png") }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private static func decoded(from folder: URL) -> SessionManifest? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(fileName)) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(SessionManifest.self, from: data)
+    }
+
+    private static func creationDate(of folder: URL) -> Date {
+        (try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+    }
+}
