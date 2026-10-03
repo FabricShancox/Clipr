@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             existing.present(image: image, rawURL: rawURL)
             return
         }
-        let editor = EditorWindowController(image: image, rawURL: rawURL, storage: storage)
+        let editor = EditorWindowController(image: image, rawURL: rawURL, storage: storage, settings: settings)
         openEditors.append(editor)
         editor.onFinished = { [weak self, weak editor] in
             guard let self, let editor else { return }

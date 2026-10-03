@@ -18,9 +18,9 @@ extension EditorView {
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .help("Redo")
                 Button { deleteSelected() } label: { Image(systemName: "trash").frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .disabled(selectedAnnotationID == nil || isTextEntryActive)
+                    .disabled(selectedIDs.isEmpty || isTextEntryActive)
                     .keyboardShortcut(.delete, modifiers: [])
-                    .help("Delete selected annotation")
+                    .help("Delete selected annotations")
             }
             .buttonStyle(.plain)
             .foregroundColor(EditorColors.t1)
@@ -119,7 +119,7 @@ extension EditorView {
         .popover(isPresented: $showingStampAlternatives, arrowEdge: .bottom) {
             stampAlternativesList
         }
-        .help("Stamp — click to place, hold or click the corner for tick / cross / star (7)")
+        .help("Stamp — click to place, hold or click the corner to pick the next number or a tick / cross / star (7)")
     }
 
     /// The redact slot, following the same pattern as the stamp slot: click to use it, long press
@@ -152,12 +152,6 @@ extension EditorView {
             VStack(alignment: .leading, spacing: 2) {
                 redactionStyleOption(.pixelate, symbol: "checkerboard.rectangle", title: "Pixelate")
                 redactionStyleOption(.solid, symbol: "rectangle.fill", title: "Solid block")
-                Text("A solid block is the only one that leaves nothing to recover.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 4)
             }
             .padding(6)
             .frame(width: 232)
@@ -191,13 +185,53 @@ extension EditorView {
     private var stampAlternativesList: some View {
         VStack(alignment: .leading, spacing: 2) {
             stampAlternative(nil, symbol: "number.circle.fill", title: "Numbered step")
+            nextNumberControl
             Divider().padding(.vertical, 2)
             stampAlternative(.check, symbol: "checkmark.circle.fill", title: "Tick")
             stampAlternative(.cross, symbol: "xmark.circle.fill", title: "Cross")
             stampAlternative(.star, symbol: "star.fill", title: "Star")
         }
         .padding(6)
-        .frame(width: 196)
+        .frame(width: 220)
+    }
+
+    /// Which number the next numbered stamp places: type one, step it, or reset to 1.
+    private var nextNumberControl: some View {
+        HStack(spacing: 6) {
+            Text("Next")
+                .foregroundColor(.secondary)
+            TextField("", value: Binding(
+                get: { nextStampNumber },
+                set: { number in
+                    selectedStampKind = nil
+                    setNextStampNumber(number)
+                    selectedTool = numberTool
+                }
+            ), format: .number)
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.center)
+            .frame(width: 48)
+            Stepper("", value: Binding(
+                get: { nextStampNumber },
+                set: { number in
+                    selectedStampKind = nil
+                    setNextStampNumber(number)
+                    selectedTool = numberTool
+                }
+            ), in: 1...Self.maxStampNumber)
+            .labelsHidden()
+            Spacer()
+            Button("Reset") {
+                selectedStampKind = nil
+                setNextStampNumber(1)
+                selectedTool = numberTool
+            }
+            .disabled(nextStampNumber == 1)
+            .help("Start numbering again from 1")
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 
     private func stampAlternative(_ kind: StampKind?, symbol: String, title: String) -> some View {
@@ -246,7 +280,7 @@ extension EditorView {
         case .check: return "checkmark.circle.fill"
         case .cross: return "xmark.circle.fill"
         case .star: return "star.fill"
-        default: return "\(nextStampNumber).circle.fill"
+        default: return stampKind(for: nextStampNumber).symbolName
         }
     }
 

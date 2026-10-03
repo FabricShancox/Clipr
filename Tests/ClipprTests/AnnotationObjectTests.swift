@@ -14,7 +14,7 @@ final class AnnotationObjectTests: XCTestCase {
 
     func testStampSymbolNames() {
         XCTAssertEqual(StampKind.check.symbolName, "checkmark.circle.fill")
-        XCTAssertEqual(StampKind.number3.symbolName, "3.circle.fill")
+        XCTAssertEqual(StampKind.numbered(3).symbolName, "3.circle.fill")
     }
 
     func testCodableRoundTrip() throws {

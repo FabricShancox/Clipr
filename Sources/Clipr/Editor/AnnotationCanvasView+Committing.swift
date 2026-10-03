@@ -3,8 +3,11 @@ import CoreGraphics
 /// Helpers for finishing an annotation (committing it, or preparing its display points) shared
 /// across the gesture handlers in `AnnotationCanvasView+Gestures.swift`.
 extension AnnotationCanvasView {
+    /// Appends and selects the new annotation, so it can be deleted, recoloured, resized or
+    /// restyled straight away without clicking it again first.
     func commit(_ annotation: AnnotationObject) {
         annotations.append(annotation)
+        selectedIDs = [annotation.id]
         onAnnotationCommitted?(annotation)
     }
 

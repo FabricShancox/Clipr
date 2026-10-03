@@ -53,7 +53,7 @@ extension AnnotationCanvasView {
               case .text(let string, _) = annotation.kind,
               string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         annotations.removeAll { $0.id == id }
-        if selectedID == id { selectedID = nil }
+        selectedIDs.remove(id)
     }
 
     func displayColor(for annotation: AnnotationObject) -> Color {

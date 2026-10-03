@@ -19,11 +19,10 @@ final class StorageManagerTests: XCTestCase {
     }
 
     private func makeTestImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 4, height: 4))
-        image.lockFocus()
-        NSColor.red.set()
-        NSRect(x: 0, y: 0, width: 4, height: 4).fill()
-        image.unlockFocus()
+        let image = testImage(width: 4, height: 4) {
+            NSColor.red.set()
+            NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+        }
         return image
     }
 

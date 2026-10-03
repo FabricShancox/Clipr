@@ -40,13 +40,14 @@ struct CaptureGeometry {
     /// requested size then landed off by the same factor. Callers must derive their delta and new
     /// canvas size from the returned rect.
     static func cropped(_ image: NSImage, to topLeftRect: CGRect) -> (image: NSImage, rect: CGRect)? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        guard let cgImage = image.bitmap else { return nil }
         // Clamped against `image.size`, not the CGImage's pixel dimensions: `topLeftRect` is in
-        // the image's point space, which is what the rest of the crop path works in. The two
-        // coincide for real captures (`CaptureManager` builds its NSImages 1:1 with pixels).
+        // the image's point space, which is what the rest of the crop path works in. Only the
+        // bitmap crop itself converts to pixels, so a Retina capture keeps full resolution.
+        let scale = image.pixelScale
         let effective = topLeftRect.integral.intersection(CGRect(origin: .zero, size: image.size))
         guard !effective.isNull, effective.width >= 1, effective.height >= 1,
-              let cropped = cgImage.cropping(to: effective) else { return nil }
+              let cropped = cgImage.cropping(to: effective.scaled(by: scale).integral) else { return nil }
         return (NSImage(cgImage: cropped, size: effective.size), effective)
     }
 
@@ -63,12 +64,9 @@ struct CaptureGeometry {
     /// theory was wrong in practice (it flipped the image upside down), so this reuses the one
     /// drawing convention already proven to work correctly in this codebase.
     static func resizedCanvas(_ image: NSImage, to topLeftRect: CGRect, delta: CGPoint) -> NSImage? {
-        let pixelWidth = max(Int(topLeftRect.width.rounded()), 1)
-        let pixelHeight = max(Int(topLeftRect.height.rounded()), 1)
-        guard let context = CGContext(
-            data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        // Drawn in points into a context at the image's own pixel density, so resizing the
+        // canvas never downsamples a Retina capture.
+        guard let context = NSImage.pixelContext(size: topLeftRect.size, scale: image.pixelScale) else { return nil }
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)

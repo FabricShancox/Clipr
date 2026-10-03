@@ -87,7 +87,7 @@ struct AnnotationOverlayShape: View {
             redactionPreview
         case .stamp(let kind):
             if let number = kind.number {
-                discStamp { Text("\(number)").font(.system(size: stampSide * StampKind.digitScale, weight: .bold, design: .rounded)) }
+                discStamp { Text("\(number)").font(.system(size: stampSide * StampKind.digitScale(for: number), weight: .bold, design: .rounded)) }
             } else if let glyph = kind.discGlyph {
                 discStamp {
                     Image(systemName: glyph)
@@ -123,7 +123,7 @@ struct AnnotationOverlayShape: View {
     ///
     /// `displayFrame` is already in the image's own point space with a top-left origin — the
     /// canvas draws the capture 1:1 and applies zoom outside it — which is the convention
-    /// `Pixelation` expects, so it needs no conversion. Falls back to an opaque box if the region
+    /// `Pixelation` expects, once scaled to the bitmap's pixels. Falls back to an opaque box if the region
     /// can't be sampled; opaque rather than the old 90% so a failure can never leak the content
     /// it was meant to hide.
     @ViewBuilder
@@ -133,8 +133,8 @@ struct AnnotationOverlayShape: View {
                 .fill(Color(white: 0.12))
                 .frame(width: displayFrame.width, height: displayFrame.height)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
-        } else if let cg = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil),
-           let pixelated = Pixelation.pixelatedRegion(of: cg, in: displayFrame) {
+        } else if let cg = baseImage.bitmap,
+           let pixelated = Pixelation.pixelatedRegion(of: cg, in: displayFrame.scaled(by: baseImage.pixelScale)) {
             Image(decorative: pixelated, scale: 1)
                 .resizable()
                 .interpolation(.none)

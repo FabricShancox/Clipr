@@ -6,7 +6,11 @@ import SwiftUI
 extension AnnotationCanvasView {
     func commitFreehand() {
         dragStart = nil
-        guard !freehandPoints.isEmpty else { return }
+        // A click without movement leaves a single point — nothing to draw, just a deselect.
+        guard freehandPoints.count > 1 else {
+            freehandPoints = []
+            return
+        }
         let rendererPoints = freehandPoints.map { rendererPoint(fromSwiftUIPoint: $0, canvasHeight: canvasHeight) }
         commit(AnnotationObject(
             id: UUID(), kind: .freehand(rendererPoints),
@@ -22,12 +26,13 @@ extension AnnotationCanvasView {
         // A real drag sizes the box; a plain click (or a drag too small to have been
         // deliberate) falls back to a sensible default sized to the current font, so
         // click-to-place still works.
-        let minHeight = currentTextStyle.fontSize + 10
+        let style = currentTextStyle
+        let minHeight = style.fontSize + 10
         let swiftUIFrame = dragged.width >= 24 && dragged.height >= 16
             ? CGRect(x: dragged.origin.x, y: dragged.origin.y, width: dragged.width, height: max(dragged.height, minHeight))
             : CGRect(x: start.x, y: start.y, width: 160, height: minHeight)
         let newAnnotation = AnnotationObject(
-            id: UUID(), kind: .text("", currentTextStyle),
+            id: UUID(), kind: .text("", style),
             frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame, canvasHeight: canvasHeight),
             color: currentColor, strokeWidth: currentStrokeWidth
         )
@@ -38,7 +43,8 @@ extension AnnotationCanvasView {
     }
 
     func commitStamp(_ kind: StampKind, at location: CGPoint) {
-        let swiftUIFrame = CGRect(x: location.x - 16, y: location.y - 16, width: 32, height: 32)
+        let side = StampKind.side(forStrokeWidth: currentStrokeWidth)
+        let swiftUIFrame = CGRect(x: location.x - side / 2, y: location.y - side / 2, width: side, height: side)
         commit(AnnotationObject(
             id: UUID(), kind: .stamp(kind),
             frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame, canvasHeight: canvasHeight),

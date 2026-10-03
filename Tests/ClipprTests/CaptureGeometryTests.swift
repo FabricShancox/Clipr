@@ -4,11 +4,10 @@ import Cocoa
 
 final class CaptureGeometryTests: XCTestCase {
     private func makeTestImage(width: Int, height: Int, color: NSColor) -> NSImage {
-        let image = NSImage(size: NSSize(width: width, height: height))
-        image.lockFocus()
-        color.set()
-        NSRect(x: 0, y: 0, width: width, height: height).fill()
-        image.unlockFocus()
+        let image = testImage(width: width, height: height) {
+            color.set()
+            NSRect(x: 0, y: 0, width: width, height: height).fill()
+        }
         return image
     }
 

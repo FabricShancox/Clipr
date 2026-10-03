@@ -18,6 +18,7 @@ struct PreferencesView: View {
     @State private var saveFolder: URL
     @State private var launchAtLogin: Bool
     @State private var captureCursor: Bool
+    @State private var copyStyle: CopyStyle
 
     init(
         settings: SettingsStore,
@@ -34,6 +35,7 @@ struct PreferencesView: View {
         _saveFolder = State(initialValue: settings.saveFolder)
         _launchAtLogin = State(initialValue: settings.launchAtLogin)
         _captureCursor = State(initialValue: settings.captureCursor)
+        _copyStyle = State(initialValue: settings.copyStyle)
     }
 
     var body: some View {
@@ -64,6 +66,16 @@ struct PreferencesView: View {
             Toggle("Capture Mouse Cursor", isOn: Binding(
                 get: { captureCursor },
                 set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
+            ))
+
+            Toggle("Add Border When Copying", isOn: Binding(
+                get: { copyStyle.border },
+                set: { copyStyle.border = $0; settings.copyStyle = copyStyle }
+            ))
+
+            Toggle("Add Drop Shadow When Copying", isOn: Binding(
+                get: { copyStyle.shadow },
+                set: { copyStyle.shadow = $0; settings.copyStyle = copyStyle }
             ))
 
             Section {

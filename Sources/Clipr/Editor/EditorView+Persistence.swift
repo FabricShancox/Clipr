@@ -56,8 +56,9 @@ extension EditorView {
     }
 
     func deleteSelected() {
-        guard let id = selectedAnnotationID else { return }
-        mutateAnnotations { $0.removeAll { $0.id == id } }
-        selectedAnnotationID = nil
+        guard !selectedIDs.isEmpty else { return }
+        let ids = selectedIDs
+        mutateAnnotations { $0.removeAll { ids.contains($0.id) } }
+        selectedIDs = []
     }
 }

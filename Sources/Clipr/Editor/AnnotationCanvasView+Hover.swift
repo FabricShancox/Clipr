@@ -1,10 +1,11 @@
 import SwiftUI
 import Cocoa
 
-/// Hover-to-select prompting: while a non-Select drawing tool is active, hovering over an
-/// EXISTING annotation highlights it and switches the cursor to a pointing hand, so it's clear
-/// before clicking that this will select that element rather than draw a new one on top of it.
-/// See `AnnotationCanvasView.swift`'s header for how this file relates to the rest of the type.
+/// Hover handling: hovering over an EXISTING annotation highlights it, shows its resize handles
+/// and switches the cursor, so it can be moved or resized straight away and it's clear before
+/// clicking that this grabs that element rather than drawing a new one on top of it. Also the
+/// shared hit test the drag gesture uses. See `AnnotationCanvasView.swift`'s header for how this
+/// file relates to the rest of the type.
 extension AnnotationCanvasView {
     func handleHover(_ phase: HoverPhase) {
         guard hoverPromptApplies else {
@@ -13,26 +14,47 @@ extension AnnotationCanvasView {
         }
         switch phase {
         case .active(let location):
-            let point = rendererPoint(fromSwiftUIPoint: location, canvasHeight: canvasHeight)
-            setHovered(annotations.last(where: { $0.contains(point) })?.id)
+            // Leave the highlight alone mid-drag; the gesture owns the cursor until it ends.
+            guard resizingID == nil, movingIDs.isEmpty, !isMarqueeSelecting else { return }
+            setHovered(annotation(atSwiftUIPoint: location)?.id)
         case .ended:
             setHovered(nil)
         }
     }
 
-    /// Select's own selection UI already communicates "click to grab this"; Crop and Freehand
-    /// always act on the whole gesture rather than a specific existing element, so neither needs
-    /// this prompt either.
+    /// The annotation a click at `location` grabs. Among overlapping hits the smallest wins, so
+    /// an arrow or stamp lying inside a large box or highlight is still reachable; on a tie the
+    /// topmost (last drawn) wins. With a drawing tool, a hollow box or ellipse is only grabbed by
+    /// its outline, so a click in its empty middle draws instead; Select grabs it anywhere.
+    func annotation(atSwiftUIPoint location: CGPoint) -> AnnotationObject? {
+        let point = rendererPoint(fromSwiftUIPoint: location, canvasHeight: canvasHeight)
+        let grabsInterior = selectedTool == .select
+        return annotations
+            .reversed()
+            .filter {
+                grabsInterior
+                    ? $0.contains(point, tolerance: hitTolerance)
+                    : $0.outlineContains(point, tolerance: hitTolerance)
+            }
+            .min { $0.hitArea < $1.hitArea }
+    }
+
+    /// Crop and Freehand always act on the whole gesture rather than a specific existing
+    /// element, so neither offers to grab what's under the mouse.
     private var hoverPromptApplies: Bool {
         switch selectedTool {
-        case .select, .crop, .freehand: return false
+        case .crop, .freehand: return false
         default: return true
         }
     }
 
+    /// Open hand with Select (dragging moves), pointing hand with a drawing tool (clicking grabs
+    /// this element instead of drawing).
+    var hoverCursor: NSCursor { selectedTool == .select ? .openHand : .pointingHand }
+
     private func setHovered(_ id: UUID?) {
         guard id != hoveredID else { return }
         hoveredID = id
-        if id != nil { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+        if id != nil { hoverCursor.set() } else { NSCursor.arrow.set() }
     }
 }

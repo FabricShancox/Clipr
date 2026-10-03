@@ -1,24 +1,72 @@
 import Cocoa
 
 struct AnnotationRenderer {
+    static let borderColor = RGBAColor(red: 0.55, green: 0.58, blue: 0.62, alpha: 1)
+
+    /// Border thickness for an image of `size`: scales with the capture so it reads the same on
+    /// a small crop and a full Retina screen, never thinner than 2px.
+    static func borderWidth(for size: CGSize) -> CGFloat {
+        max(2, (max(size.width, size.height) / 600).rounded())
+    }
+
+    /// `image` with `style`'s finishing touches; unchanged when none are on. Border first, so the
+    /// shadow is cast by the bordered card.
+    static func applying(_ style: CopyStyle, to image: NSImage) -> NSImage {
+        var result = image
+        if style.border { result = addingBorder(to: result) }
+        if style.shadow { result = addingShadow(to: result) }
+        return result
+    }
+
+    /// `image` on transparent padding with a soft shadow beneath it. Sized relative to the image
+    /// like the border, so it looks the same on a small crop and a full-screen capture.
+    static func addingShadow(to image: NSImage) -> NSImage {
+        let unit = max(1, (max(image.size.width, image.size.height) / 600).rounded())
+        let blur = 12 * unit
+        let offset = 4 * unit
+        // Enough room on every side for the blur, plus the downward offset at the bottom.
+        let pad = blur * 1.5
+        let size = CGSize(width: image.size.width + pad * 2, height: image.size.height + pad * 2 + offset)
+        let scale = image.pixelScale
+        guard let context = NSImage.pixelContext(size: size, scale: scale), let source = image.bitmap else {
+            return image
+        }
+        // Shadow offset and blur are in device pixels — the CTM doesn't scale them — so convert.
+        // CG is y-up, so a negative y offset pushes the shadow down on screen.
+        context.setShadow(
+            offset: CGSize(width: 0, height: -offset * scale), blur: blur * scale,
+            color: CGColor(gray: 0, alpha: 0.35)
+        )
+        context.draw(source, in: CGRect(x: pad, y: pad + offset, width: image.size.width, height: image.size.height))
+        guard let cgImage = context.makeImage() else { return image }
+        return NSImage(cgImage: cgImage, size: size)
+    }
+
+    /// `image` framed in a solid border, added around the outside so none of the capture is
+    /// covered. Drawn at the image's own pixel density, for the same reason as `flatten`.
+    static func addingBorder(to image: NSImage, width: CGFloat? = nil, color: RGBAColor = borderColor) -> NSImage {
+        let inset = width ?? borderWidth(for: image.size)
+        let size = CGSize(width: image.size.width + inset * 2, height: image.size.height + inset * 2)
+        guard let context = NSImage.pixelContext(size: size, scale: image.pixelScale), let source = image.bitmap else {
+            return image
+        }
+        context.setFillColor(color.cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
+        context.draw(source, in: CGRect(x: inset, y: inset, width: image.size.width, height: image.size.height))
+        guard let cgImage = context.makeImage() else { return image }
+        return NSImage(cgImage: cgImage, size: size)
+    }
+
+    /// The capture with every annotation drawn onto it, at the capture's full resolution.
+    ///
+    /// Rendered into an explicit CGContext at the base image's own pixel density (see
+    /// `NSImage+PixelScale.swift`) rather than via `NSImage.lockFocus()`, which sizes its backing
+    /// bitmap by whatever screen happens to be main — so the output would change resolution
+    /// depending on which display the editor was on. Everything is drawn in points; the context's
+    /// scale turns that into pixels.
     static func flatten(base: NSImage, annotations: [AnnotationObject]) -> NSImage {
         let size = base.size
-        let pixelWidth = max(Int(size.width.rounded()), 1)
-        let pixelHeight = max(Int(size.height.rounded()), 1)
-
-        // Render into a pixel-exact CGContext rather than using NSImage.lockFocus(),
-        // which sizes its backing bitmap by the screen's backing scale factor (e.g. 2x
-        // on Retina displays). That would silently double the output's pixel dimensions
-        // relative to `size`, which callers (and tests) rely on being 1:1 with points.
-        guard let context = CGContext(
-            data: nil,
-            width: pixelWidth,
-            height: pixelHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
+        guard let context = NSImage.pixelContext(size: size, scale: base.pixelScale) else {
             return NSImage(size: size)
         }
 
@@ -29,7 +77,11 @@ struct AnnotationRenderer {
         // an unflipped context.
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
 
-        base.draw(in: CGRect(origin: .zero, size: size))
+        if let bitmap = base.bitmap {
+            context.draw(bitmap, in: CGRect(origin: .zero, size: size))
+        } else {
+            base.draw(in: CGRect(origin: .zero, size: size))
+        }
 
         for annotation in annotations {
             draw(annotation, in: context, canvasSize: size)
@@ -90,12 +142,14 @@ struct AnnotationRenderer {
     /// 90% opaque and let a tenth of the original pixels through into the export.
     private static func drawRedaction(over frame: CGRect, in context: CGContext, canvasSize: CGSize) {
         guard let snapshot = context.makeImage() else { return }
+        // The snapshot is in pixels; `frame` and `canvasSize` are in points.
+        let scale = canvasSize.width > 0 ? CGFloat(snapshot.width) / canvasSize.width : 1
         let topDown = CGRect(
             x: frame.origin.x,
             y: canvasSize.height - frame.origin.y - frame.height,
             width: frame.width,
             height: frame.height
-        )
+        ).scaled(by: scale)
         guard let pixelated = Pixelation.pixelatedRegion(of: snapshot, in: topDown) else { return }
         context.draw(pixelated, in: frame)
     }
@@ -187,7 +241,7 @@ struct AnnotationRenderer {
         context.setFillColor(color.cgColor)
         context.fillEllipse(in: disc)
 
-        let pointSize = side * StampKind.digitScale
+        let pointSize = side * StampKind.digitScale(for: number)
         let base = NSFont.systemFont(ofSize: pointSize, weight: .bold)
         // `.rounded` to match the SwiftUI side's `design: .rounded`; the descriptor falls back to
         // the plain system font on any OS that can't supply the rounded design.

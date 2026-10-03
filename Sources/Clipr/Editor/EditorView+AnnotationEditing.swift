@@ -1,62 +1,67 @@
 import SwiftUI
 
-/// Operations on the selected annotation — duplicate, nudge, reorder. See `EditorView.swift`'s
-/// header for how this file relates to the rest of the type.
+/// Operations on the selection — duplicate, nudge, reorder, select all, and copy/cut/paste of
+/// annotations. See `EditorView.swift`'s header for how this file relates to the rest of the type.
 ///
 /// Everything here goes through `mutateAnnotations`, so each operation is a single undo step
 /// without needing its own bookkeeping.
 extension EditorView {
-    /// Offset applied to a duplicate so it doesn't land exactly on the original and look like
-    /// nothing happened. In renderer space (y up), so down-right on screen is -y.
-    private static let duplicateOffset = CGPoint(x: 12, y: -12)
-
     func duplicateSelected() {
-        guard let id = selectedAnnotationID,
-              let original = annotations.first(where: { $0.id == id }) else { return }
-
-        // Rebuilt rather than mutated: `id` is a `let`, and a duplicate must not share the
-        // original's identity or selection and `ForEach` would confuse the two.
-        let moved = original.translated(by: Self.duplicateOffset)
-        let copy = AnnotationObject(
-            id: UUID(), kind: moved.kind, frame: moved.frame,
-            color: moved.color, strokeWidth: moved.strokeWidth
-        )
-        mutateAnnotations { $0.append(copy) }
-        // Select the copy, so a duplicate can immediately be dragged into place — and so
+        let originals = annotations.filter { selectedIDs.contains($0.id) }
+        guard !originals.isEmpty else { return }
+        let copies = originals.map { $0.translated(by: AnnotationClipboard.pasteOffset).withNewID() }
+        mutateAnnotations { $0.append(contentsOf: copies) }
+        // Select the copies, so a duplicate can immediately be dragged into place — and so
         // repeating ⌘D walks a trail rather than stacking every copy on the same spot.
-        selectedAnnotationID = copy.id
+        selectedIDs = Set(copies.map(\.id))
     }
 
     /// Moves the selection by whole points. `frame` is in renderer space (bottom-left origin, y
     /// up), so an on-screen "up" is a positive y — callers pass screen-sense values and this
     /// flips them, keeping the call sites readable.
     func nudgeSelected(dx: CGFloat, dy: CGFloat) {
-        guard let id = selectedAnnotationID else { return }
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
         mutateAnnotations { annotations in
-            guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
-            annotations[index] = annotations[index].translated(by: CGPoint(x: dx, y: -dy))
+            for index in annotations.indices where ids.contains(annotations[index].id) {
+                annotations[index] = annotations[index].translated(by: CGPoint(x: dx, y: -dy))
+            }
         }
     }
 
+    func selectAll() {
+        selectedIDs = Set(annotations.map(\.id))
+    }
+
     /// Annotations render in array order, so z-order is position: later entries draw on top.
+    /// Forward/backward step one place and only make sense for a single annotation; front/back
+    /// move the whole selection, keeping its members' order among themselves.
     func bringSelectedForward() {
-        moveSelected { index, count in min(index + 1, count - 1) }
+        moveSole { index, count in min(index + 1, count - 1) }
     }
 
     func sendSelectedBackward() {
-        moveSelected { index, _ in max(index - 1, 0) }
+        moveSole { index, _ in max(index - 1, 0) }
     }
 
     func bringSelectedToFront() {
-        moveSelected { _, count in count - 1 }
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
+        mutateAnnotations { list in
+            list = list.filter { !ids.contains($0.id) } + list.filter { ids.contains($0.id) }
+        }
     }
 
     func sendSelectedToBack() {
-        moveSelected { _, _ in 0 }
+        let ids = selectedIDs
+        guard !ids.isEmpty else { return }
+        mutateAnnotations { list in
+            list = list.filter { ids.contains($0.id) } + list.filter { !ids.contains($0.id) }
+        }
     }
 
-    private func moveSelected(_ destination: (_ index: Int, _ count: Int) -> Int) {
-        guard let id = selectedAnnotationID else { return }
+    private func moveSole(_ destination: (_ index: Int, _ count: Int) -> Int) {
+        guard selectedIDs.count == 1, let id = selectedIDs.first else { return }
         mutateAnnotations { annotations in
             guard let index = annotations.firstIndex(where: { $0.id == id }) else { return }
             let target = destination(index, annotations.count)
@@ -66,31 +71,69 @@ extension EditorView {
         }
     }
 
+    // MARK: - Clipboard
+
+    /// ⌘C: the selected annotations, so they can be pasted elsewhere. With nothing selected it
+    /// copies the annotated image instead, the same as the Copy button.
+    func copySelection() {
+        let selected = annotations.filter { selectedIDs.contains($0.id) }
+        guard !selected.isEmpty else {
+            onCopy(annotations)
+            return
+        }
+        AnnotationClipboard(canvasHeight: image.size.height, annotations: selected).write()
+    }
+
+    func cutSelection() {
+        guard !selectedIDs.isEmpty else { return }
+        copySelection()
+        deleteSelected()
+    }
+
+    /// ⌘V: annotations copied from this or any other capture, selected once placed.
+    func pasteAnnotations() {
+        guard let clipboard = AnnotationClipboard.read() else { return }
+        let pasted = clipboard.annotationsForPaste(into: image.size, existing: annotations)
+        guard !pasted.isEmpty else { return }
+        mutateAnnotations { $0.append(contentsOf: pasted) }
+        selectedIDs = Set(pasted.map(\.id))
+    }
+
     /// Zero-size buttons carrying the shortcuts, same approach as `toolShortcuts` — SwiftUI has no
     /// lighter way to bind a bare key outside a visible control. All are disabled while a text
     /// field is active so arrow keys move the caret, and while nothing is selected.
     var annotationEditingShortcuts: some View {
-        let unavailable = selectedAnnotationID == nil || isTextEntryActive
+        let unavailable = selectedIDs.isEmpty || isTextEntryActive
         return Group {
-            Button("") { duplicateSelected() }
-                .keyboardShortcut("d", modifiers: .command)
-            Button("") { nudgeSelected(dx: 0, dy: -1) }.keyboardShortcut(.upArrow, modifiers: [])
-            Button("") { nudgeSelected(dx: 0, dy: 1) }.keyboardShortcut(.downArrow, modifiers: [])
-            Button("") { nudgeSelected(dx: -1, dy: 0) }.keyboardShortcut(.leftArrow, modifiers: [])
-            Button("") { nudgeSelected(dx: 1, dy: 0) }.keyboardShortcut(.rightArrow, modifiers: [])
-            // Shift for a coarse nudge, the usual convention.
-            Button("") { nudgeSelected(dx: 0, dy: -10) }.keyboardShortcut(.upArrow, modifiers: .shift)
-            Button("") { nudgeSelected(dx: 0, dy: 10) }.keyboardShortcut(.downArrow, modifiers: .shift)
-            Button("") { nudgeSelected(dx: -10, dy: 0) }.keyboardShortcut(.leftArrow, modifiers: .shift)
-            Button("") { nudgeSelected(dx: 10, dy: 0) }.keyboardShortcut(.rightArrow, modifiers: .shift)
+            Group {
+                Button("") { duplicateSelected() }
+                    .keyboardShortcut("d", modifiers: .command)
+                Button("") { nudgeSelected(dx: 0, dy: -1) }.keyboardShortcut(.upArrow, modifiers: [])
+                Button("") { nudgeSelected(dx: 0, dy: 1) }.keyboardShortcut(.downArrow, modifiers: [])
+                Button("") { nudgeSelected(dx: -1, dy: 0) }.keyboardShortcut(.leftArrow, modifiers: [])
+                Button("") { nudgeSelected(dx: 1, dy: 0) }.keyboardShortcut(.rightArrow, modifiers: [])
+                // Shift for a coarse nudge, the usual convention.
+                Button("") { nudgeSelected(dx: 0, dy: -10) }.keyboardShortcut(.upArrow, modifiers: .shift)
+                Button("") { nudgeSelected(dx: 0, dy: 10) }.keyboardShortcut(.downArrow, modifiers: .shift)
+                Button("") { nudgeSelected(dx: -10, dy: 0) }.keyboardShortcut(.leftArrow, modifiers: .shift)
+                Button("") { nudgeSelected(dx: 10, dy: 0) }.keyboardShortcut(.rightArrow, modifiers: .shift)
+            }
+            .disabled(unavailable)
             Group {
                 Button("") { bringSelectedForward() }.keyboardShortcut("]", modifiers: .command)
                 Button("") { sendSelectedBackward() }.keyboardShortcut("[", modifiers: .command)
                 Button("") { bringSelectedToFront() }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("") { sendSelectedToBack() }.keyboardShortcut("[", modifiers: [.command, .shift])
             }
+            .disabled(unavailable)
+            // Bare [ and ] step the stroke preset, for the selection or the next shape — so these
+            // only need a text field to be inactive, not a selection.
+            Group {
+                Button("") { stepStrokeWidth(by: -1) }.keyboardShortcut("[", modifiers: [])
+                Button("") { stepStrokeWidth(by: 1) }.keyboardShortcut("]", modifiers: [])
+            }
+            .disabled(isTextEntryActive)
         }
-        .disabled(unavailable)
         .opacity(0)
         .frame(width: 0, height: 0)
     }

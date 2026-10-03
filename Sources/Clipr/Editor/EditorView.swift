@@ -26,7 +26,7 @@ struct EditorView: View {
     @State var currentColor = EditorView.swatchColors[5] // red
     @State var currentStrokeWidth: CGFloat = 4
     @State var currentTextStyle = TextStyle.default
-    @State var selectedAnnotationID: UUID?
+    @State var selectedIDs: Set<UUID> = []
     @State var editingTextID: UUID?
     @State var undoStack: [[AnnotationObject]] = []
     @State var redoStack: [[AnnotationObject]] = []
@@ -84,6 +84,10 @@ struct EditorView: View {
     /// them back when it rebuilds the content view for a rename — see `EditorHistory`.
     let onHistoryChanged: (EditorHistory) -> Void
     let onCopy: ([AnnotationObject]) -> Void
+    /// What Copy adds around the image — see `CopyStyle`. Held as state so the header menu
+    /// redraws; every change is written straight back through `onCopyStyleChanged`.
+    @State var copyStyle: CopyStyle
+    let onCopyStyleChanged: (CopyStyle) -> Void
     /// Closes the editor window. The capture is already on the clipboard (`CaptureManager` copies
     /// it the moment it's taken) and auto-save keeps the files current, so nothing is lost.
     let onClose: () -> Void
@@ -106,6 +110,8 @@ struct EditorView: View {
     /// extension, unsanitised as typed), and the current annotations so the controller can flush
     /// them against the OLD name before any file moves — same reasoning as `onOpenCapture`.
     let onRename: (URL, String, [AnnotationObject]) -> Void
+    /// ⌘C/⌘X/⌘V/⌘A, forwarded by the window controller — see `EditorCommands`.
+    let commands: EditorCommands
 
     static let swatchColors: [RGBAColor] = [
         RGBAColor(red: 1, green: 1, blue: 1, alpha: 1),
@@ -129,7 +135,7 @@ struct EditorView: View {
     /// annotation — used to decide whether the toolbar's text-style controls should edit
     /// "the next new text" (`currentTextStyle`) or the already-placed one that's selected.
     var selectedTextAnnotation: (id: UUID, style: TextStyle)? {
-        guard let id = selectedAnnotationID, let annotation = annotations.first(where: { $0.id == id }),
+        guard selectedIDs.count == 1, let id = selectedIDs.first, let annotation = annotations.first(where: { $0.id == id }),
               case .text(_, let style) = annotation.kind else { return nil }
         return (id, style)
     }
@@ -148,5 +154,18 @@ struct EditorView: View {
         .background(toolShortcuts)
         .background(annotationEditingShortcuts)
         .background(dismissShortcuts)
+        .onAppear {
+            commands.perform = { handle($0) }
+            resumeStampNumbering()
+        }
+    }
+
+    private func handle(_ action: EditorCommands.Action) {
+        switch action {
+        case .copy: copySelection()
+        case .cut: cutSelection()
+        case .paste: pasteAnnotations()
+        case .selectAll: selectAll()
+        }
     }
 }

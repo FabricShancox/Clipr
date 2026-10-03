@@ -4,11 +4,10 @@ import Cocoa
 
 final class AnnotationRendererTests: XCTestCase {
     func testFlattenDrawsRectangleOverBaseImage() {
-        let base = NSImage(size: NSSize(width: 20, height: 20))
-        base.lockFocus()
-        NSColor.white.set()
-        NSRect(x: 0, y: 0, width: 20, height: 20).fill()
-        base.unlockFocus()
+        let base = testImage(width: 20, height: 20) {
+            NSColor.white.set()
+            NSRect(x: 0, y: 0, width: 20, height: 20).fill()
+        }
 
         let redRect = AnnotationObject(
             id: UUID(), kind: .rectangle,
@@ -33,11 +32,10 @@ final class AnnotationRendererTests: XCTestCase {
     }
 
     func testFlattenWithNoAnnotationsReturnsSameSize() {
-        let base = NSImage(size: NSSize(width: 10, height: 10))
-        base.lockFocus()
-        NSColor.blue.set()
-        NSRect(x: 0, y: 0, width: 10, height: 10).fill()
-        base.unlockFocus()
+        let base = testImage(width: 10, height: 10) {
+            NSColor.blue.set()
+            NSRect(x: 0, y: 0, width: 10, height: 10).fill()
+        }
 
         let flattened = AnnotationRenderer.flatten(base: base, annotations: [])
         XCTAssertEqual(flattened.size, base.size)

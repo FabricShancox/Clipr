@@ -1,4 +1,5 @@
 import SwiftUI
+import Cocoa
 
 /// The main per-tool drag state machine — the canvas-wide `DragGesture` attached in
 /// `AnnotationCanvasView.body`. Per-kind annotation creation (text/stamp/arrow/crop/plain shape)
@@ -23,26 +24,10 @@ extension AnnotationCanvasView {
 
         if dragStart == nil {
             dragStart = value.startLocation
-            // Clicking on an EXISTING annotation always selects (and, if dragged, moves) it,
-            // regardless of which drawing tool is currently active — so something already
-            // placed can be grabbed without switching to Select first, and a new element never
-            // gets stacked on top of one the user was actually trying to select. Crop and
-            // Freehand are excluded: Crop always acts on the whole canvas rather than a
-            // specific element, and a freehand stroke starting on top of an existing shape is
-            // normally "draw over it," not "pick it up."
-            if selectedTool != .crop, selectedTool != .freehand {
-                let point = rendererPoint(fromSwiftUIPoint: value.startLocation, canvasHeight: canvasHeight)
-                if let hit = annotations.last(where: { $0.contains(point) }) {
-                    selectedID = hit.id
-                    movingID = hit.id
-                } else {
-                    selectedID = nil
-                    movingID = nil
-                }
-            }
+            beginGesture(at: value.startLocation)
         }
 
-        if movingID != nil {
+        if !movingIDs.isEmpty {
             moveOffset = CGSize(width: value.location.x - value.startLocation.x, height: value.location.y - value.startLocation.y)
             return
         }
@@ -50,9 +35,48 @@ extension AnnotationCanvasView {
         switch selectedTool {
         case .freehand:
             freehandPoints.append(value.location)
-        default:
+        case .select:
             dragCurrentLocation = value.location
+            isMarqueeSelecting = true
+        default:
+            dragCurrentLocation = constrained(value.location, from: value.startLocation)
         }
+    }
+
+    /// Decides, once per gesture, what the press grabbed.
+    ///
+    /// Clicking on an EXISTING annotation always selects (and, if dragged, moves) it, regardless
+    /// of which drawing tool is currently active — so something already placed can be grabbed
+    /// without switching to Select first, and a new element never gets stacked on top of one the
+    /// user was actually trying to select. Crop and Freehand are excluded: Crop always acts on
+    /// the whole canvas rather than a specific element, and a freehand stroke starting on top of
+    /// an existing shape is normally "draw over it," not "pick it up."
+    ///
+    /// Shift-click adds or removes an annotation from the selection. Pressing on something that
+    /// is already part of a multi-selection keeps the whole group selected so it moves together.
+    private func beginGesture(at location: CGPoint) {
+        guard selectedTool != .crop, selectedTool != .freehand else {
+            if !NSEvent.modifierFlags.contains(.shift) { selectedIDs = [] }
+            return
+        }
+        let extending = NSEvent.modifierFlags.contains(.shift)
+        guard let hit = annotation(atSwiftUIPoint: location) else {
+            if !extending { selectedIDs = [] }
+            movingIDs = []
+            return
+        }
+        if extending {
+            if selectedIDs.contains(hit.id) { selectedIDs.remove(hit.id) } else { selectedIDs.insert(hit.id) }
+            movingIDs = selectedIDs
+        } else if selectedIDs.contains(hit.id) {
+            movingIDs = selectedIDs
+        } else {
+            selectedIDs = [hit.id]
+            movingIDs = [hit.id]
+        }
+        // Shift-clicking the last selected one off leaves nothing to drag; fall back to a no-op
+        // gesture rather than drawing with the active tool.
+        if movingIDs.isEmpty { movingIDs = [hit.id] }
     }
 
     func handleDragEnded(_ value: DragGesture.Value) {
@@ -62,19 +86,16 @@ extension AnnotationCanvasView {
             return
         }
 
-        // This gesture started on an existing annotation (see `handleDragChanged`): it selects
-        // or moves that annotation instead of whatever the active tool would otherwise draw. A
-        // pure click (no movement) only needed to select, which already happened in
-        // `handleDragChanged` — committing a zero-delta "move" here would just spam the undo
-        // stack with no-op entries.
-        if let movingID {
-            if moveOffset != .zero, let index = annotations.firstIndex(where: { $0.id == movingID }) {
-                // SwiftUI's drag delta is in y-down space; the stored geometry is in the
-                // renderer's y-up space, so the y component of the delta flips sign too.
-                let rendererDelta = CGPoint(x: moveOffset.width, y: -moveOffset.height)
-                annotations[index] = annotations[index].translated(by: rendererDelta)
+        // This gesture started on an existing annotation (see `beginGesture`): it selects or
+        // moves the selection instead of whatever the active tool would otherwise draw. A pure
+        // click (no movement) only needed to select, which already happened — committing a
+        // zero-delta "move" here would just spam the undo stack with no-op entries.
+        if !movingIDs.isEmpty {
+            if moveOffset != .zero {
+                let delta = rendererDelta(of: moveOffset)
+                annotations = annotations.map { movingIDs.contains($0.id) ? $0.translated(by: delta) : $0 }
             }
-            self.movingID = nil
+            movingIDs = []
             moveOffset = .zero
             dragStart = nil
             return
@@ -82,7 +103,7 @@ extension AnnotationCanvasView {
 
         switch selectedTool {
         case .select:
-            dragStart = nil
+            finishMarquee(endingAt: value.location)
         case .freehand:
             commitFreehand()
         case .text:
@@ -90,11 +111,38 @@ extension AnnotationCanvasView {
         case .stamp(let kind):
             commitStamp(kind, at: value.location)
         case .arrow:
-            commitArrow(endingAt: value.location)
+            commitArrow(endingAt: constrained(value.location, from: value.startLocation))
         case .crop:
             commitCrop(endingAt: value.location)
         default:
-            commitPlainShape(endingAt: value.location)
+            commitPlainShape(endingAt: constrained(value.location, from: value.startLocation))
         }
+    }
+
+    /// Selects everything the Select-tool marquee touches. Shift adds to the existing selection.
+    private func finishMarquee(endingAt location: CGPoint) {
+        defer {
+            dragStart = nil
+            dragCurrentLocation = nil
+            isMarqueeSelecting = false
+        }
+        guard isMarqueeSelecting, let start = dragStart else { return }
+        let swiftUIRect = rectBetween(start, location)
+        guard swiftUIRect.width > 2 || swiftUIRect.height > 2 else { return }
+        let rect = rendererFrame(fromSwiftUIFrame: swiftUIRect, canvasHeight: canvasHeight)
+        // `hitRect(tolerance: 1)` rather than `frame` so a perfectly horizontal arrow (zero-height
+        // frame) can still be caught.
+        let touched = annotations.filter { $0.hitRect(tolerance: 1).intersects(rect) }.map(\.id)
+        if NSEvent.modifierFlags.contains(.shift) {
+            selectedIDs.formUnion(touched)
+        } else {
+            selectedIDs = Set(touched)
+        }
+    }
+
+    /// SwiftUI's drag delta is in y-down space; the stored geometry is in the renderer's y-up
+    /// space, so the y component of the delta flips sign.
+    func rendererDelta(of offset: CGSize) -> CGPoint {
+        CGPoint(x: offset.width, y: -offset.height)
     }
 }

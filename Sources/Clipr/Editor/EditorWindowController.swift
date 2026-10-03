@@ -5,6 +5,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private var image: NSImage
     private var rawURL: URL
     private let storage: StorageManager
+    private let settings: SettingsStore
+    /// Shared by every content view this window shows; each one re-registers on appear.
+    private let commands = EditorCommands()
+    private var keyMonitor: Any?
     var onFinished: (() -> Void)?
 
     /// The live annotations of the currently-shown content view, updated synchronously on every
@@ -32,10 +36,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// every settled edit made the editor hitch continuously on large captures.
     private static let flattenedWriteInterval: TimeInterval = 3
 
-    init(image: NSImage, rawURL: URL, storage: StorageManager) {
+    init(image: NSImage, rawURL: URL, storage: StorageManager, settings: SettingsStore = SettingsStore()) {
         self.image = image
         self.rawURL = rawURL
         self.storage = storage
+        self.settings = settings
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
@@ -53,6 +58,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
 
         window.contentView = makeContentView()
+        installKeyMonitor()
         // Opens maximized (screen's visible frame, not true fullscreen) so the capture is
         // visible at its largest size on launch.
         if let screen = NSScreen.main {
@@ -65,7 +71,24 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
 
+    /// See `EditorCommands`. Only for this window, only while it has no sheet up, and never while
+    /// a text view (a text annotation, the rename field) is first responder — there the keys keep
+    /// their normal text meaning via the Edit menu.
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.window, event.window === window,
+                  window.attachedSheet == nil,
+                  !(window.firstResponder is NSText),
+                  let action = EditorCommands.action(for: event),
+                  let perform = self.commands.perform else { return event }
+            perform(action)
+            return nil
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
         // Before `onFinished` — that releases this controller, and with it any in-flight debounce.
         flushPendingSave()
         onFinished?()
@@ -127,6 +150,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 self.latestHistory = history
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
+            copyStyle: settings.copyStyle,
+            onCopyStyleChanged: { [weak self] style in self?.settings.copyStyle = style },
             onClose: { [weak self] in self?.window?.performClose(nil) },
             onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
             onRevealInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },
@@ -134,7 +159,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
             onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) },
-            onRename: { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) }
+            onRename: { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) },
+            commands: commands
         ))
     }
 
@@ -288,7 +314,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     private func copy(annotations: [AnnotationObject]) {
         let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
-        storage.copyToClipboard(flattened)
+        storage.copyToClipboard(AnnotationRenderer.applying(settings.copyStyle, to: flattened))
     }
 
     /// `rendererRect` arrives in `AnnotationObject.frame`'s space — origin bottom-left, y up —

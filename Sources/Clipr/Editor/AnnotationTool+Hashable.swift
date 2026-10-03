@@ -1,8 +1,8 @@
 /// `AnnotationTool` only declares `Equatable`, but SwiftUI's selection state in `EditorView`
 /// requires `Hashable`. Synthesis of `hash(into:)` for an enum with an associated value only
 /// happens automatically when the conformance is declared in the same file as the type, so it's
-/// implemented by hand here; `StampKind`'s case-only, `String`-raw-value enum already gets
-/// `Hashable` for free from the compiler, so `hasher.combine(kind)` below is valid.
+/// implemented by hand here; `StampKind` declares `Hashable` itself, so `hasher.combine(kind)`
+/// below is valid.
 extension AnnotationTool: Hashable {
     func hash(into hasher: inout Hasher) {
         switch self {

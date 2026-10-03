@@ -1,9 +1,10 @@
 import CoreGraphics
 import Foundation
 
-enum StampKind: String, CaseIterable, Codable {
+enum StampKind: Hashable, Codable {
     case check, cross, star
-    case number1, number2, number3, number4, number5, number6, number7, number8, number9
+    /// A numbered step. Any positive number — the counter used to stop at 9.
+    case numbered(Int)
 
     /// The digit a numbered stamp shows, or `nil` for the non-numeric stamps.
     ///
@@ -13,17 +14,34 @@ enum StampKind: String, CaseIterable, Codable {
     /// and makes the number hard to read over busy captures. `symbolName` still covers the
     /// non-numeric stamps, whose symbols have no such cutout.
     var number: Int? {
+        if case .numbered(let n) = self { return n }
+        return nil
+    }
+
+    // Stored as the same single string the old fixed `number1`…`number9` cases used as their raw
+    // value ("check", "number3"), now with any number after "number", so every sidecar written
+    // before keeps decoding unchanged.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "check": self = .check
+        case "cross": self = .cross
+        case "star": self = .star
+        default:
+            guard raw.hasPrefix("number"), let n = Int(raw.dropFirst("number".count)), n > 0 else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown stamp \(raw)"))
+            }
+            self = .numbered(n)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
         switch self {
-        case .check, .cross, .star: return nil
-        case .number1: return 1
-        case .number2: return 2
-        case .number3: return 3
-        case .number4: return 4
-        case .number5: return 5
-        case .number6: return 6
-        case .number7: return 7
-        case .number8: return 8
-        case .number9: return 9
+        case .check: try container.encode("check")
+        case .cross: try container.encode("cross")
+        case .star: try container.encode("star")
+        case .numbered(let n): try container.encode("number\(n)")
         }
     }
 
@@ -31,6 +49,21 @@ enum StampKind: String, CaseIterable, Codable {
     /// (`AnnotationOverlayShape`) and flattened (`AnnotationRenderer`) renderers so a stamp looks
     /// the same in the editor as it does in the exported image.
     static let digitScale: CGFloat = 0.6
+
+    /// `digitScale`, shrunk for two- and three-digit numbers so they still fit inside the disc.
+    static func digitScale(for number: Int) -> CGFloat {
+        switch String(number).count {
+        case 1: return digitScale
+        case 2: return digitScale * 0.78
+        default: return digitScale * 0.6
+        }
+    }
+
+    /// Stamp diameter for a stroke preset, so the toolbar's Thin/Medium/Thick also size stamps,
+    /// which have no outline of their own. Medium (4) gives the original fixed 32pt.
+    static func side(forStrokeWidth width: CGFloat) -> CGFloat {
+        16 + width * 4
+    }
 
     /// Symbol drawn on top of a solid disc, for the stamps that are a mark inside a circle.
     ///
@@ -56,15 +89,8 @@ enum StampKind: String, CaseIterable, Codable {
         case .check: return "checkmark.circle.fill"
         case .cross: return "xmark.circle.fill"
         case .star: return "star.fill"
-        case .number1: return "1.circle.fill"
-        case .number2: return "2.circle.fill"
-        case .number3: return "3.circle.fill"
-        case .number4: return "4.circle.fill"
-        case .number5: return "5.circle.fill"
-        case .number6: return "6.circle.fill"
-        case .number7: return "7.circle.fill"
-        case .number8: return "8.circle.fill"
-        case .number9: return "9.circle.fill"
+        // SF Symbols only has numbered circles up to 50.
+        case .numbered(let n): return (0...50).contains(n) ? "\(n).circle.fill" : "number.circle.fill"
         }
     }
 }

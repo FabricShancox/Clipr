@@ -210,29 +210,37 @@ final class StorageManager {
         // JPEG can't carry alpha: a capture whose canvas was resized outward has transparent
         // regions that would encode as black, so flatten onto white first.
         let source = format.needsOpaqueBackground ? Self.onWhite(image) : image
-        guard let tiff = source.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let data = bitmap.representation(using: format.bitmapType, properties: format.properties) else {
+        guard let data = Self.bitmapRep(of: source)?.representation(using: format.bitmapType, properties: format.properties) else {
             throw StorageError.pngEncodingFailed
         }
         try data.write(to: url, options: .atomic)
     }
 
+    /// Drawn at the image's own pixel density — `lockFocus` would use whichever screen is main,
+    /// silently halving a Retina capture on a non-Retina display.
     private static func onWhite(_ image: NSImage) -> NSImage {
         let size = image.size
-        let result = NSImage(size: size)
-        result.lockFocus()
-        NSColor.white.setFill()
-        NSRect(origin: .zero, size: size).fill()
-        image.draw(in: NSRect(origin: .zero, size: size))
-        result.unlockFocus()
-        return result
+        guard let context = NSImage.pixelContext(size: size, scale: image.pixelScale),
+              let bitmap = image.bitmap else { return image }
+        context.setFillColor(.white)
+        context.fill(CGRect(origin: .zero, size: size))
+        context.draw(bitmap, in: CGRect(origin: .zero, size: size))
+        guard let result = context.makeImage() else { return image }
+        return NSImage(cgImage: result, size: size)
+    }
+
+    /// The full-resolution bitmap, tagged with the image's point size so the file records its
+    /// pixel density (144 dpi for a Retina capture). That's what makes it reopen — here, in
+    /// Preview, or pasted into a document — at the size it appeared on screen.
+    private static func bitmapRep(of image: NSImage) -> NSBitmapImageRep? {
+        guard let bitmap = image.bitmap else { return nil }
+        let rep = NSBitmapImageRep(cgImage: bitmap)
+        rep.size = image.size
+        return rep
     }
 
     private func write(_ image: NSImage, to url: URL, overwrite: Bool = false) throws -> URL {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+        guard let pngData = Self.bitmapRep(of: image)?.representation(using: .png, properties: [:]) else {
             throw StorageError.pngEncodingFailed
         }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

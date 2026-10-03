@@ -37,8 +37,8 @@ extension EditorView {
         let editing = isTextEntryActive
         return Group {
             Button("") {
-                if selectedAnnotationID != nil {
-                    selectedAnnotationID = nil
+                if !selectedIDs.isEmpty {
+                    selectedIDs = []
                 } else {
                     onClose()
                 }

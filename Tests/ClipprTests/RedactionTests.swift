@@ -12,16 +12,15 @@ final class RedactionTests: XCTestCase {
     /// A base image split into two halves of very different colours, so a redaction over the
     /// boundary has real detail to destroy.
     private func stripedImage(width: Int, height: Int) -> NSImage {
-        let image = NSImage(size: NSSize(width: width, height: height))
-        image.lockFocus()
-        NSColor.black.set()
-        NSRect(x: 0, y: 0, width: width, height: height).fill()
-        NSColor.white.set()
-        // Fine stripes: the detail a redaction has to average away.
-        for y in stride(from: 0, to: height, by: 4) {
-            NSRect(x: 0, y: y, width: width, height: 2).fill()
+        let image = testImage(width: width, height: height) {
+            NSColor.black.set()
+            NSRect(x: 0, y: 0, width: width, height: height).fill()
+            NSColor.white.set()
+            // Fine stripes: the detail a redaction has to average away.
+            for y in stride(from: 0, to: height, by: 4) {
+                NSRect(x: 0, y: y, width: width, height: 2).fill()
+            }
         }
-        image.unlockFocus()
         return image
     }
 

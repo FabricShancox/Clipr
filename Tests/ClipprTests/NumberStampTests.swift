@@ -61,24 +61,38 @@ final class NumberStampTests: XCTestCase {
     // MARK: - StampKind
 
     func testNumberStampsExposeTheirDigitAndOthersDoNot() {
-        XCTAssertEqual(StampKind.number1.number, 1)
-        XCTAssertEqual(StampKind.number9.number, 9)
+        XCTAssertEqual(StampKind.numbered(1).number, 1)
+        XCTAssertEqual(StampKind.numbered(42).number, 42)
         XCTAssertNil(StampKind.check.number)
         XCTAssertNil(StampKind.cross.number)
         XCTAssertNil(StampKind.star.number)
     }
 
+    /// Sidecars written before numbers went past 9 stored "number3"-style strings; they must keep
+    /// decoding, and new two-digit numbers use the same format.
+    func testStampCodingStaysCompatibleWithOldSidecars() throws {
+        let decoded = try JSONDecoder().decode([StampKind].self, from: Data(#"["number3","check","star"]"#.utf8))
+        XCTAssertEqual(decoded, [.numbered(3), .check, .star])
+        let encoded = try JSONEncoder().encode([StampKind.numbered(12)])
+        XCTAssertEqual(String(data: encoded, encoding: .utf8), #"["number12"]"#)
+        XCTAssertThrowsError(try JSONDecoder().decode([StampKind].self, from: Data(#"["number0"]"#.utf8)))
+    }
+
+    func testLongerNumbersUseASmallerDigit() {
+        XCTAssertLessThan(StampKind.digitScale(for: 12), StampKind.digitScale(for: 2))
+        XCTAssertLessThan(StampKind.digitScale(for: 120), StampKind.digitScale(for: 12))
+    }
+
     // MARK: - Flattened render
 
     private func flattenedStamp(color: RGBAColor, over background: NSColor) -> NSBitmapImageRep? {
-        let base = NSImage(size: NSSize(width: 60, height: 60))
-        base.lockFocus()
-        background.set()
-        NSRect(x: 0, y: 0, width: 60, height: 60).fill()
-        base.unlockFocus()
+        let base = testImage(width: 60, height: 60) {
+            background.set()
+            NSRect(x: 0, y: 0, width: 60, height: 60).fill()
+        }
 
         let stamp = AnnotationObject(
-            id: UUID(), kind: .stamp(.number1),
+            id: UUID(), kind: .stamp(.numbered(1)),
             frame: CGRect(x: 10, y: 10, width: 40, height: 40),
             color: color,
             strokeWidth: 1

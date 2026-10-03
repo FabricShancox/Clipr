@@ -24,6 +24,15 @@ extension EditorView {
             // this is explicitly an export-a-copy action.
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .help("Export a copy as PNG or JPEG (⇧⌘S)")
+            Menu {
+                Toggle("Border", isOn: copyStyleBinding(\.border))
+                Toggle("Drop Shadow", isOn: copyStyleBinding(\.shadow))
+            } label: {
+                Image(systemName: "square.dashed")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("What Copy adds around the image: a border, a drop shadow")
             Button { onCopy(annotations) } label: {
                 Label("Copy", systemImage: "square.on.square")
             }
@@ -41,6 +50,13 @@ extension EditorView {
         .padding(.vertical, 10)
         .background(EditorColors.s1)
         .foregroundColor(EditorColors.t1)
+    }
+
+    private func copyStyleBinding(_ keyPath: WritableKeyPath<CopyStyle, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { copyStyle[keyPath: keyPath] },
+            set: { copyStyle[keyPath: keyPath] = $0; onCopyStyleChanged(copyStyle) }
+        )
     }
 
     /// Click-to-rename, Finder-style: the name is plain text until clicked, then an inline field.

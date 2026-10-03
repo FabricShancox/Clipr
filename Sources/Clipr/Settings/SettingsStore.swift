@@ -11,6 +11,8 @@ final class SettingsStore {
         static let saveFolder = "saveFolder"
         static let launchAtLogin = "launchAtLogin"
         static let captureCursor = "captureCursor"
+        static let copyBorder = "copyBorder"
+        static let copyShadow = "copyShadow"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -58,6 +60,15 @@ final class SettingsStore {
     var captureCursor: Bool {
         get { defaults.bool(forKey: Key.captureCursor) }
         set { defaults.set(newValue, forKey: Key.captureCursor) }
+    }
+
+    /// What Copy adds around the image — see `CopyStyle`. Both off by default.
+    var copyStyle: CopyStyle {
+        get { CopyStyle(border: defaults.bool(forKey: Key.copyBorder), shadow: defaults.bool(forKey: Key.copyShadow)) }
+        set {
+            defaults.set(newValue.border, forKey: Key.copyBorder)
+            defaults.set(newValue.shadow, forKey: Key.copyShadow)
+        }
     }
 
     private func decoded<T: Decodable>(_ key: String) -> T? {

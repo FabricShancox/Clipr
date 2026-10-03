@@ -28,6 +28,15 @@ extension AnnotationCanvasView {
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
             }
+        case .select:
+            if isMarqueeSelecting, let start = dragStart, let current = dragCurrentLocation {
+                let rect = rectBetween(start, current)
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.08))
+                    .overlay(Rectangle().strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1 / max(canvasScale, 0.05), dash: [4, 3])))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+            }
         case .crop:
             if let start = dragStart, let current = dragCurrentLocation {
                 Rectangle()

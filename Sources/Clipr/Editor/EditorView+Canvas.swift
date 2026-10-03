@@ -52,14 +52,16 @@ extension EditorView {
             let scaledSize = CGSize(width: image.size.width * renderScale, height: image.size.height * renderScale)
             ScrollView([.horizontal, .vertical]) {
                 ZStack {
+                    CheckerboardBackground(squareSize: 8 / renderScale)
+                        .frame(width: image.size.width, height: image.size.height)
                     AnnotationCanvasView(
                         image: image,
                         annotations: annotationsBinding,
                         selectedTool: $selectedTool,
                         currentColor: $currentColor,
-                        currentStrokeWidth: $currentStrokeWidth,
+                        currentStrokeWidth: currentStrokeWidth,
                         currentTextStyle: $currentTextStyle,
-                        selectedID: $selectedAnnotationID,
+                        selectedIDs: $selectedIDs,
                         editingTextID: $editingTextID,
                         canvasScale: renderScale,
                         redactionStyle: redactionStyle,

@@ -130,7 +130,8 @@ final class CaptureManager {
         config.width = Int((CGFloat(display.width) * scale).rounded())
         config.height = Int((CGFloat(display.height) * scale).rounded())
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        // Point-sized, every pixel kept — see `NSImage+PixelScale.swift`.
+        return NSImage(bitmap: cgImage, scale: scale)
     }
 
     private static func crop(_ fullImage: NSImage, to rect: CGRect, scale: CGFloat) throws -> NSImage {
@@ -158,7 +159,7 @@ final class CaptureManager {
         guard let cropped = cgImage.cropping(to: pixelRect) else {
             throw CaptureError.cropFailed
         }
-        return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
+        return NSImage(bitmap: cropped, scale: scale)
     }
 
     static func captureWindow(_ windowInfo: WindowInfo, showsCursor: Bool) async throws -> NSImage {
@@ -179,6 +180,6 @@ final class CaptureManager {
         config.width = Int((windowInfo.bounds.width * scale).rounded())
         config.height = Int((windowInfo.bounds.height * scale).rounded())
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        return NSImage(bitmap: cgImage, scale: scale)
     }
 }
