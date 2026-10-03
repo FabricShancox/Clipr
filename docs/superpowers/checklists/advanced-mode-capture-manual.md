@@ -4,13 +4,14 @@ Build with `./Scripts/build-app.sh`, quit any running Clipr, `open Clipr.app`. R
 Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds can drop them).
 
 ## Scopes (defaults otherwise)
-- [ ] Window: click 3 buttons in Safari → 3 steps; each has a red dot on the clicked control.
-- [ ] Screen: same clicks → full-display steps; dots on the right spots, including on a second display.
+- [ ] Window: click 3 buttons in Safari → 3 steps; each has a red ring on the clicked control.
+- [ ] Screen: same clicks → full-display steps; rings on the right spots, including on a second display.
 - [ ] Fixed area: start → overlay appears; drag an area → steps are that area only.
 - [ ] Fixed area: start → press Esc in the overlay → no session, no alert.
 
 ## Features
 - [ ] Captions: Review shows "Click Save in Safari"-style captions; a menu item shows "Choose File ▸ …".
+- [ ] Marker style Ring (default): red ring centred on the clicked control.
 - [ ] Marker style Dot: small solid filled dot (~14 pt) instead of ring.
 - [ ] Marker off: no annotations on new steps.
 - [ ] Trail on: faint path leading to each click; editable in editor.
@@ -19,8 +20,7 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] Typing on: type in a password field → no typing step; `session.json` has no trace of it.
 - [ ] Typing on: typing in an app with no usable Accessibility data (or where focus moves to another field mid-typing) → no typing step; clicks still record.
 - [ ] Typing on without Input Monitoring: panel shows the warning; clicks still record.
-- [ ] Click captions: only quote visible text for labels, cells, buttons, links, headings; a text field's contents never appear in a caption.
-- [ ] Click into a filled text field → caption names the field, never its contents.
+- [ ] Click captions: only quote visible text for labels, cells, buttons, links, headings; clicking a filled text field shows the field name, never its contents.
 - [ ] Shortcut: ⌘S in an app → "Press ⌘S" step.
 - [ ] Step hotkey: set one, start session, press it → manual step without caption/marker; after Stop the hotkey no longer fires.
 - [ ] Delay 1.5 s: open a menu by clicking → step shows the menu open.
@@ -29,12 +29,12 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 ## Session
 - [ ] Pause → clicks ignored; Resume → numbering continues.
 - [ ] Stop right after a click (within the delay) → that click's step is in Review.
-- [ ] Stop button on panel / menu-bar Stop never creates a step.
+- [ ] Clicking Pause/Resume/Stop, anything on Clipr's floating bar, the menu-bar icon, or Preferences never creates a step.
 - [ ] Stop never hangs: even if a capture stalls, Review opens within ~10 s.
 - [ ] Open a step in the editor → marker and trail are selectable, movable, deletable.
 - [ ] Review Last Session after relaunching Clipr → same steps and captions.
 - [ ] Old session folder (no session.json) → Review lists its steps without captions.
 
 ## Preferences
-- [ ] "Grant…" may stay visible until Preferences is reopened after granting Input Monitoring.
+- [ ] After granting Input Monitoring, 'Grant…' may remain until Preferences is reopened; reopening hides it.
 - [ ] Preferences window fits on the smallest display used.
