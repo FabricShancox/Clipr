@@ -15,15 +15,23 @@ enum StepAnnotationFactory {
 
     static func marker(at imagePoint: CGPoint, style: AdvancedModeSettings.MarkerStyle, imageSize: CGSize) -> AnnotationObject {
         let center = StepGeometry.toRenderer(imagePoint, imageHeight: imageSize.height)
-        let diameter = style == .ring ? ringDiameter : dotDiameter
-        // A dot is an ellipse stroked as thick as its radius, which fills it without needing a
-        // new filled-shape annotation kind.
-        let stroke = style == .ring ? ringStroke : dotDiameter / 2
-        return AnnotationObject(
-            id: UUID(), kind: .ellipse,
-            frame: CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter),
-            color: markerColor, strokeWidth: stroke
-        )
+
+        if style == .ring {
+            return AnnotationObject(
+                id: UUID(), kind: .ellipse,
+                frame: CGRect(x: center.x - ringDiameter / 2, y: center.y - ringDiameter / 2, width: ringDiameter, height: ringDiameter),
+                color: markerColor, strokeWidth: ringStroke
+            )
+        } else {
+            // A dot: frame is 7×7 (half the visual diameter), stroked at 7pt so the stroke extends
+            // 3.5pt inward and outward from the 3.5pt radius path, filling a solid 14pt circle.
+            let dotFrame = CGFloat(7)
+            return AnnotationObject(
+                id: UUID(), kind: .ellipse,
+                frame: CGRect(x: center.x - dotFrame / 2, y: center.y - dotFrame / 2, width: dotFrame, height: dotFrame),
+                color: markerColor, strokeWidth: dotFrame
+            )
+        }
     }
 
     static func trail(globalPoints: [CGPoint], captureOrigin: CGPoint, imageSize: CGSize) -> AnnotationObject? {

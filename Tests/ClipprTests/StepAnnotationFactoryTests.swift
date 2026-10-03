@@ -15,8 +15,23 @@ final class StepAnnotationFactoryTests: XCTestCase {
 
     func testDotIsSmallAndFilledByStroke() {
         let a = StepAnnotationFactory.marker(at: CGPoint(x: 100, y: 50), style: .dot, imageSize: size)
-        XCTAssertEqual(a.frame, CGRect(x: 93, y: 243, width: 14, height: 14))
+        XCTAssertEqual(a.frame, CGRect(x: 96.5, y: 246.5, width: 7, height: 7))
         XCTAssertEqual(a.strokeWidth, 7)
+
+        // Integration: verify the dot renders as a solid filled circle
+        let base = testImage(width: 400, height: 300) { NSColor.white.set(); NSRect(x: 0, y: 0, width: 400, height: 300).fill() }
+        let dot = StepAnnotationFactory.marker(at: CGPoint(x: 100, y: 50), style: .dot, imageSize: size)
+        let flat = AnnotationRenderer.flatten(base: base, annotations: [dot])
+        let rep = NSBitmapImageRep(cgImage: flat.bitmap!)
+
+        // Center of the dot should be red
+        let centerColor = rep.colorAt(x: 100, y: 50)!
+        XCTAssertGreaterThan(centerColor.redComponent, 0.8)
+        XCTAssertLessThan(centerColor.greenComponent, 0.5)
+
+        // Just outside the 7pt radius (at distance ~7.5 from center) should be white
+        let outsideColor = rep.colorAt(x: 109, y: 50)!
+        XCTAssertGreaterThan(outsideColor.greenComponent, 0.9)
     }
 
     func testTrailMapsClipsAndFlips() throws {

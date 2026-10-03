@@ -20,6 +20,15 @@ final class StepZoomTests: XCTestCase {
                        CGRect(x: 0, y: 0, width: 300, height: 120))
     }
 
+    func testFractionalClickPointsAreRounded() {
+        let rect = StepZoom.cropRect(centeredOn: CGPoint(x: 500.5, y: 400.5), imageSize: CGSize(width: 1000, height: 800))
+        XCTAssertEqual(rect.width, 400)
+        XCTAssertEqual(rect.height, 300)
+        // Origin should be rounded (500.5 - 200 = 300.5 → 300 or 301)
+        XCTAssertTrue(rect.origin.x.truncatingRemainder(dividingBy: 1) == 0, "x origin should be integer")
+        XCTAssertTrue(rect.origin.y.truncatingRemainder(dividingBy: 1) == 0, "y origin should be integer")
+    }
+
     func testCropKeepsRetinaPixelsAndSavesNextToStep() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
