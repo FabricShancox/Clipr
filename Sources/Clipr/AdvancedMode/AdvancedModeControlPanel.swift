@@ -6,6 +6,8 @@ import SwiftUI
 final class AdvancedModeControlState: ObservableObject {
     @Published var stepCount = 0
     @Published var isPaused = false
+    /// One-line notice under the controls, e.g. typing is off because Input Monitoring is denied.
+    @Published var warning: String?
 }
 
 /// The small floating Pause/Stop bar shown while Advanced Mode runs. It never appears in a
@@ -46,6 +48,15 @@ final class AdvancedModeControlPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    /// Resizes to the content after `state` changes its height (the warning row), keeping the
+    /// top edge where it was so the bar grows downward instead of into the menu bar.
+    func fitContent() {
+        guard let size = contentView?.fittingSize else { return }
+        let top = frame.maxY
+        setContentSize(size)
+        setFrameOrigin(NSPoint(x: frame.minX, y: top - frame.height))
+    }
+
     private func positionAtTopCenter() {
         guard let screen = NSScreen.main else { return }
         let visible = screen.visibleFrame
@@ -59,30 +70,38 @@ private struct AdvancedModeControlView: View {
     let onStop: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(state.isPaused ? Color.orange : Color.red)
-                .frame(width: 8, height: 8)
-            Text(state.isPaused ? "Paused · \(stepLabel)" : stepLabel)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .frame(minWidth: 70, alignment: .leading)
-            Button(action: onTogglePause) {
-                Image(systemName: state.isPaused ? "play.fill" : "pause.fill")
-                    .frame(width: 20, height: 20)
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(state.isPaused ? Color.orange : Color.red)
+                    .frame(width: 8, height: 8)
+                Text(state.isPaused ? "Paused · \(stepLabel)" : stepLabel)
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .frame(minWidth: 70, alignment: .leading)
+                Button(action: onTogglePause) {
+                    Image(systemName: state.isPaused ? "play.fill" : "pause.fill")
+                        .frame(width: 20, height: 20)
+                }
+                .help(state.isPaused ? "Resume recording clicks" : "Pause — clicks won't be captured")
+                Button(action: onStop) {
+                    Image(systemName: "stop.fill")
+                        .foregroundColor(.red)
+                        .frame(width: 20, height: 20)
+                }
+                .help("Stop and review captured steps")
             }
-            .help(state.isPaused ? "Resume recording clicks" : "Pause — clicks won't be captured")
-            Button(action: onStop) {
-                Image(systemName: "stop.fill")
-                    .foregroundColor(.red)
-                    .frame(width: 20, height: 20)
+            .buttonStyle(.borderless)
+            if let warning = state.warning {
+                Text(warning)
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
             }
-            .help("Stop and review captured steps")
         }
-        .buttonStyle(.borderless)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1)))
+        // Not a Capsule: with the warning row the bar is two lines tall and a capsule would clip it.
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.primary.opacity(0.1)))
         .fixedSize()
     }
 

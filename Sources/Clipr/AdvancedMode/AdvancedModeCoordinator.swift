@@ -4,14 +4,6 @@ import Cocoa
 /// to decide what UI to show for each outcome (status item state, alerts) rather than also
 /// tracking window bookkeeping itself.
 final class AdvancedModeCoordinator {
-    enum ToggleOutcome {
-        case started
-        case accessibilityNotGranted
-        case startFailed(Error)
-        case stoppedNoSteps
-        case stopped(ReviewWindowController)
-    }
-
     private let clickCaptureManager: ClickCaptureManager
     private let storage: StorageManager
     private var openReviewWindows: [ReviewWindowController] = []
@@ -42,34 +34,42 @@ final class AdvancedModeCoordinator {
     /// so Advanced Mode never captures its own Review window as if it were a step.
     var reviewWindows: [NSWindow?] { openReviewWindows.map(\.window) }
 
-    /// `ownWindowIDs` is `@autoclosure` since it's only needed when starting (self-exclusion),
-    /// not when stopping — avoids computing it pointlessly on every stop.
-    func toggle(ownWindowIDs: @autoclosure () -> Set<CGWindowID>) -> ToggleOutcome {
-        guard clickCaptureManager.isActive else {
-            clickCaptureManager.ownWindowIDs = ownWindowIDs()
-            do {
-                _ = try clickCaptureManager.start()
-                return .started
-            } catch ClickCaptureError.accessibilityNotGranted {
-                return .accessibilityNotGranted
-            } catch {
-                return .startFailed(error)
-            }
-        }
-
-        let sessionFolder = clickCaptureManager.currentSessionFolder
-        let stepURLs = clickCaptureManager.stop()
-        guard !stepURLs.isEmpty else {
-            // Nothing to keep — don't leave an empty Session folder behind to be picked up by
-            // "Review Last Session".
-            if let sessionFolder,
-               (try? FileManager.default.contentsOfDirectory(atPath: sessionFolder.path))?.isEmpty == true {
-                try? FileManager.default.removeItem(at: sessionFolder)
-            }
-            return .stoppedNoSteps
-        }
-        return .stopped(openReview(stepURLs: stepURLs, sessionFolder: sessionFolder))
+    enum StartOutcome {
+        case started
+        case accessibilityNotGranted
+        case startFailed(Error)
     }
+
+    var isActive: Bool { clickCaptureManager.isActive }
+    var typingUnavailable: Bool { clickCaptureManager.typingUnavailable }
+
+    /// Main thread only: `ownWindowIDs` is read by the live image source on the main actor.
+    func start(settings: AdvancedModeSettings, area: CGRect?, ownWindowIDs: Set<CGWindowID>) -> StartOutcome {
+        clickCaptureManager.ownWindowIDs = ownWindowIDs
+        do {
+            _ = try clickCaptureManager.start(settings: settings, area: area)
+            return .started
+        } catch ClickCaptureError.accessibilityNotGranted {
+            return .accessibilityNotGranted
+        } catch {
+            return .startFailed(error)
+        }
+    }
+
+    /// `nil` when the session captured nothing; its empty folder is removed so "Review Last
+    /// Session" never lands on it.
+    func stop(completion: @escaping (ReviewWindowController?) -> Void) {
+        clickCaptureManager.stop { [weak self] manifest, folder in
+            guard let self, let folder else { return completion(nil) }
+            guard let manifest, !manifest.steps.isEmpty else {
+                try? FileManager.default.removeItem(at: folder)
+                return completion(nil)
+            }
+            completion(self.openReview(manifest: manifest, sessionFolder: folder))
+        }
+    }
+
+    func captureManualStep() { clickCaptureManager.captureManualStep() }
 
     /// The most recent session's steps, read back from disk so it works after a relaunch too.
     /// `nil` when there's no session folder with any steps in it.
@@ -84,23 +84,14 @@ final class AdvancedModeCoordinator {
             .filter { $0.lastPathComponent.hasPrefix("Session_") }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
         for folder in sessions {
-            let steps = Self.stepURLs(in: folder)
-            if !steps.isEmpty { return openReview(stepURLs: steps, sessionFolder: folder) }
+            let manifest = SessionManifestStore.load(from: folder)
+            if !manifest.steps.isEmpty { return openReview(manifest: manifest, sessionFolder: folder) }
         }
         return nil
     }
 
-    private static func stepURLs(in folder: URL) -> [URL] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        return files
-            // Raw steps only — the editor writes `_edited.png` previews alongside them.
-            .filter { $0.lastPathComponent.hasPrefix("Step_") && $0.pathExtension.lowercased() == "png"
-                && !$0.lastPathComponent.hasSuffix("_edited.png") }
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-    }
-
-    private func openReview(stepURLs: [URL], sessionFolder: URL?) -> ReviewWindowController {
-        let review = ReviewWindowController(stepURLs: stepURLs, sessionFolder: sessionFolder, storage: storage)
+    private func openReview(manifest: SessionManifest, sessionFolder: URL) -> ReviewWindowController {
+        let review = ReviewWindowController(manifest: manifest, sessionFolder: sessionFolder, storage: storage)
         openReviewWindows.append(review)
         // ReviewWindowController has no onFinished-style closure (unlike EditorWindowController),
         // so its close is observed externally via NSWindow.willCloseNotification instead.

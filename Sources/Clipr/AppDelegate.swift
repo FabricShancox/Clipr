@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum HotkeyID: UInt32 {
         case capture = 1
         case advancedMode = 2
+        case advancedModeStep = 3
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -174,10 +175,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func toggleAdvancedMode() {
-        switch advancedMode.toggle(ownWindowIDs: currentOwnWindowIDs()) {
+        if advancedMode.isActive {
+            unregisterStepHotkey()
+            advancedMode.stop { [weak self] review in
+                guard let self else { return }
+                self.statusItemController.setAdvancedModeActive(false)
+                self.hideAdvancedModePanel()
+                if let review {
+                    review.present()
+                } else {
+                    NSApp.activate(ignoringOtherApps: true)
+                    showNoStepsCapturedAlert()
+                }
+            }
+            return
+        }
+        let advancedSettings = settings.advancedMode
+        guard advancedSettings.scope == .fixedArea else {
+            return startAdvancedMode(advancedSettings, area: nil)
+        }
+        AreaPicker.pick(showsCursor: settings.captureCursor) { [weak self] area in
+            // Cancelling the selection simply doesn't start the session — no alert.
+            guard let self, let area else { return }
+            self.startAdvancedMode(advancedSettings, area: area)
+        }
+    }
+
+    private func startAdvancedMode(_ advancedSettings: AdvancedModeSettings, area: CGRect?) {
+        switch advancedMode.start(settings: advancedSettings, area: area, ownWindowIDs: currentOwnWindowIDs()) {
         case .started:
             statusItemController.setAdvancedModeActive(true)
             showAdvancedModePanel()
+            if advancedMode.typingUnavailable {
+                advancedModePanel?.state.warning = "Typing not recorded — grant Input Monitoring"
+                advancedModePanel?.fitContent()
+            }
+            registerStepHotkey(advancedSettings.stepHotkey)
         case .accessibilityNotGranted:
             showPermissionAlert(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
         case .startFailed(let error):
@@ -189,16 +222,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
             alert.runModal()
-        case .stoppedNoSteps:
-            statusItemController.setAdvancedModeActive(false)
-            hideAdvancedModePanel()
-            NSApp.activate(ignoringOtherApps: true)
-            showNoStepsCapturedAlert()
-        case .stopped(let review):
-            statusItemController.setAdvancedModeActive(false)
-            hideAdvancedModePanel()
-            review.present()
         }
+    }
+
+    /// Only while a session runs, so the combination stays free for other apps the rest of the time.
+    private func registerStepHotkey(_ binding: HotkeyBinding?) {
+        guard let binding else { return }
+        if !hotkeyManager.register(binding, id: HotkeyID.advancedModeStep.rawValue, handler: { [weak self] in
+            self?.advancedMode.captureManualStep()
+        }) {
+            NSLog("Clipr: step hotkey \(binding.displayString) unavailable for this session")
+        }
+    }
+
+    private func unregisterStepHotkey() {
+        hotkeyManager.unregister(id: HotkeyID.advancedModeStep.rawValue)
     }
 
     private func showAdvancedModePanel() {

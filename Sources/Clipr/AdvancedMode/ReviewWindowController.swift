@@ -10,7 +10,7 @@ final class ReviewWindowController: NSWindowController {
     private var openEditors: [EditorWindowController] = []
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
-    init(stepURLs: [URL], sessionFolder: URL?, storage: StorageManager) {
+    init(manifest: SessionManifest, sessionFolder: URL, storage: StorageManager) {
         self.storage = storage
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 450),
@@ -18,14 +18,14 @@ final class ReviewWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = sessionFolder.map { "Review — \($0.lastPathComponent)" } ?? "Review Advanced Mode Session"
+        window.title = "Review — \(sessionFolder.lastPathComponent)"
         super.init(window: window)
 
         window.contentView = NSHostingView(rootView: ReviewView(
-            stepURLs: stepURLs,
+            steps: manifest.steps.map { ReviewView.Step(url: sessionFolder.appendingPathComponent($0.file), caption: $0.caption) },
             onOpenEditor: { [weak self] url in self?.openEditor(for: url) },
             onDelete: { url in try? FileManager.default.removeItem(at: url) },
-            onShowInFinder: sessionFolder.map { folder in { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
+            onShowInFinder: { NSWorkspace.shared.activateFileViewerSelecting([sessionFolder]) }
         ))
         window.center()
     }
