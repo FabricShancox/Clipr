@@ -8,6 +8,7 @@ final class StatusItemController {
     var onCaptureNow: (() -> Void)?
     var onOpenImage: (() -> Void)?
     var onToggleAdvancedMode: (() -> Void)?
+    var onReviewLastSession: (() -> Void)?
     var onOpenPreferences: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
 
@@ -32,6 +33,10 @@ final class StatusItemController {
         advancedModeItem.action = #selector(toggleAdvancedMode)
         advancedModeItem.target = self
         menu.addItem(advancedModeItem)
+
+        let reviewItem = NSMenuItem(title: "Review Last Session…", action: #selector(reviewLastSession), keyEquivalent: "")
+        reviewItem.target = self
+        menu.addItem(reviewItem)
 
         menu.addItem(.separator())
 
@@ -61,13 +66,14 @@ final class StatusItemController {
         statusItem.button?.title = active ? "  0 captured" : ""
     }
 
-    func setAdvancedModeStepCount(_ count: Int) {
-        statusItem.button?.title = "  \(count) captured"
+    func setAdvancedModeStepCount(_ count: Int, paused: Bool = false) {
+        statusItem.button?.title = paused ? "  \(count) captured (paused)" : "  \(count) captured"
     }
 
     @objc private func captureNow() { onCaptureNow?() }
     @objc private func openImage() { onOpenImage?() }
     @objc private func toggleAdvancedMode() { onToggleAdvancedMode?() }
+    @objc private func reviewLastSession() { onReviewLastSession?() }
     @objc private func openPreferences() { onOpenPreferences?() }
     @objc private func checkForUpdates() { onCheckForUpdates?() }
 

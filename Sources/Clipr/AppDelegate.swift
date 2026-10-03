@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var storage = StorageManager(baseFolder: settings.saveFolder)
     lazy var captureManager = CaptureManager(storage: storage)
     lazy var advancedMode = AdvancedModeCoordinator(storage: storage)
+    /// The floating Pause/Stop bar — present only while an Advanced Mode session runs.
+    private var advancedModePanel: AdvancedModeControlPanel?
     var preferencesWindowController: PreferencesWindowController?
 
     // NSWindow does NOT retain its NSWindowController, so a locally-created one merely shown
@@ -40,11 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         advancedMode.onStepCaptured = { [weak self] count in
             self?.statusItemController.setAdvancedModeStepCount(count)
+            self?.advancedModePanel?.state.stepCount = count
         }
 
         statusItemController.onCaptureNow = { [weak self] in self?.performCapture() }
         statusItemController.onOpenImage = { [weak self] in self?.openImage() }
         statusItemController.onToggleAdvancedMode = { [weak self] in self?.toggleAdvancedMode() }
+        statusItemController.onReviewLastSession = { [weak self] in self?.reviewLastSession() }
         statusItemController.onOpenPreferences = { [weak self] in self?.openPreferences() }
         statusItemController.onCheckForUpdates = { [weak self] in self?.updateChecker.checkNow() }
 
@@ -173,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch advancedMode.toggle(ownWindowIDs: currentOwnWindowIDs()) {
         case .started:
             statusItemController.setAdvancedModeActive(true)
+            showAdvancedModePanel()
         case .accessibilityNotGranted:
             showPermissionAlert(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
         case .startFailed(let error):
@@ -186,17 +191,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         case .stoppedNoSteps:
             statusItemController.setAdvancedModeActive(false)
+            hideAdvancedModePanel()
+            NSApp.activate(ignoringOtherApps: true)
             showNoStepsCapturedAlert()
         case .stopped(let review):
             statusItemController.setAdvancedModeActive(false)
-            review.showWindow(nil)
+            hideAdvancedModePanel()
+            review.present()
         }
+    }
+
+    private func showAdvancedModePanel() {
+        let panel = AdvancedModeControlPanel(
+            onTogglePause: { [weak self] in self?.toggleAdvancedModePause() },
+            onStop: { [weak self] in self?.toggleAdvancedMode() }
+        )
+        panel.orderFrontRegardless()
+        advancedModePanel = panel
+    }
+
+    private func hideAdvancedModePanel() {
+        advancedModePanel?.orderOut(nil)
+        advancedModePanel = nil
+    }
+
+    private func toggleAdvancedModePause() {
+        let paused = advancedMode.togglePause()
+        advancedModePanel?.state.isPaused = paused
+        statusItemController.setAdvancedModeStepCount(advancedModePanel?.state.stepCount ?? 0, paused: paused)
+    }
+
+    private func reviewLastSession() {
+        if let review = advancedMode.reviewLastSession() {
+            review.present()
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "No Advanced Mode Sessions"
+        alert.informativeText = "Sessions recorded with Advanced Mode will show up here once they've captured at least one step."
+        alert.runModal()
     }
 
     private func currentOwnWindowIDs() -> Set<CGWindowID> {
         windowIDs(of: [statusItemController.statusItem.button?.window, preferencesWindowController?.window]
             + openEditors.map { $0.window }
-            + advancedMode.reviewWindows)
+            + advancedMode.reviewWindows
+            + [advancedModePanel])
     }
 
     /// Quitting abandons every editor's pending 800ms auto-save debounce, so the last edit in each

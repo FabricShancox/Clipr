@@ -45,6 +45,29 @@ struct WindowPicker {
         }
     }
 
+    /// Owner of the topmost on-screen window at `point` (global, top-left-origin coordinates — the
+    /// same space as `CGEvent.location`), across every layer and every process. Unlike
+    /// `onScreenWindows()` this keeps Clipr's own and non-normal-layer windows, since its job is
+    /// telling Advanced Mode a click landed on Clipr itself (its menu-bar icon, its control panel).
+    static func ownerPIDOfWindow(at point: CGPoint) -> pid_t? {
+        guard let list = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+        for entry in list {
+            guard let ownerPID = entry[kCGWindowOwnerPID as String] as? pid_t,
+                  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            if let alpha = entry[kCGWindowAlpha as String] as? CGFloat, alpha == 0 { continue }
+            let bounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+            if bounds.contains(point) { return ownerPID }
+        }
+        return nil
+    }
+
     static func window(at point: CGPoint, in windows: [WindowInfo]) -> WindowInfo? {
         windows.first { $0.bounds.contains(point) }
     }

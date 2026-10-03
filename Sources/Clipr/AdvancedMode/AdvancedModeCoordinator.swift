@@ -23,6 +23,16 @@ final class AdvancedModeCoordinator {
         clickCaptureManager.onStepCaptured = { [weak self] count in self?.onStepCaptured?(count) }
     }
 
+    var isPaused: Bool { clickCaptureManager.isPaused }
+
+    /// Returns the new paused state.
+    @discardableResult
+    func togglePause() -> Bool {
+        guard clickCaptureManager.isActive else { return false }
+        clickCaptureManager.isPaused.toggle()
+        return clickCaptureManager.isPaused
+    }
+
     var captureCursor: Bool {
         get { clickCaptureManager.captureCursor }
         set { clickCaptureManager.captureCursor = newValue }
@@ -47,10 +57,50 @@ final class AdvancedModeCoordinator {
             }
         }
 
+        let sessionFolder = clickCaptureManager.currentSessionFolder
         let stepURLs = clickCaptureManager.stop()
-        guard !stepURLs.isEmpty else { return .stoppedNoSteps }
+        guard !stepURLs.isEmpty else {
+            // Nothing to keep — don't leave an empty Session folder behind to be picked up by
+            // "Review Last Session".
+            if let sessionFolder,
+               (try? FileManager.default.contentsOfDirectory(atPath: sessionFolder.path))?.isEmpty == true {
+                try? FileManager.default.removeItem(at: sessionFolder)
+            }
+            return .stoppedNoSteps
+        }
+        return .stopped(openReview(stepURLs: stepURLs, sessionFolder: sessionFolder))
+    }
 
-        let review = ReviewWindowController(stepURLs: stepURLs, storage: storage)
+    /// The most recent session's steps, read back from disk so it works after a relaunch too.
+    /// `nil` when there's no session folder with any steps in it.
+    func reviewLastSession() -> ReviewWindowController? {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: storage.baseFolder, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles
+        ) else { return nil }
+        // Session folder names embed a sortable `yyyy-MM-dd_HHmmss` timestamp, so name order is
+        // chronological order.
+        let sessions = entries
+            .filter { $0.lastPathComponent.hasPrefix("Session_") }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for folder in sessions {
+            let steps = Self.stepURLs(in: folder)
+            if !steps.isEmpty { return openReview(stepURLs: steps, sessionFolder: folder) }
+        }
+        return nil
+    }
+
+    private static func stepURLs(in folder: URL) -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return files
+            // Raw steps only — the editor writes `_edited.png` previews alongside them.
+            .filter { $0.lastPathComponent.hasPrefix("Step_") && $0.pathExtension.lowercased() == "png"
+                && !$0.lastPathComponent.hasSuffix("_edited.png") }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    private func openReview(stepURLs: [URL], sessionFolder: URL?) -> ReviewWindowController {
+        let review = ReviewWindowController(stepURLs: stepURLs, sessionFolder: sessionFolder, storage: storage)
         openReviewWindows.append(review)
         // ReviewWindowController has no onFinished-style closure (unlike EditorWindowController),
         // so its close is observed externally via NSWindow.willCloseNotification instead.
@@ -62,6 +112,6 @@ final class AdvancedModeCoordinator {
                 self.openReviewWindows.removeAll { $0 === review }
             }
         }
-        return .stopped(review)
+        return review
     }
 }

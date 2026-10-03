@@ -10,7 +10,7 @@ final class ReviewWindowController: NSWindowController {
     private var openEditors: [EditorWindowController] = []
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
-    init(stepURLs: [URL], storage: StorageManager) {
+    init(stepURLs: [URL], sessionFolder: URL?, storage: StorageManager) {
         self.storage = storage
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 450),
@@ -18,15 +18,24 @@ final class ReviewWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Review Advanced Mode Session"
+        window.title = sessionFolder.map { "Review — \($0.lastPathComponent)" } ?? "Review Advanced Mode Session"
         super.init(window: window)
 
         window.contentView = NSHostingView(rootView: ReviewView(
             stepURLs: stepURLs,
             onOpenEditor: { [weak self] url in self?.openEditor(for: url) },
-            onDelete: { url in try? FileManager.default.removeItem(at: url) }
+            onDelete: { url in try? FileManager.default.removeItem(at: url) },
+            onShowInFinder: sessionFolder.map { folder in { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
         ))
         window.center()
+    }
+
+    /// Clipr is a menu-bar (accessory) app, so a plain `showWindow` can open the Review window
+    /// behind whatever app the user was just recording — activate so it actually comes forward.
+    func present() {
+        NSApp.activate(ignoringOtherApps: true)
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     @available(*, unavailable)

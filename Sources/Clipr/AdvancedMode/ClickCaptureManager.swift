@@ -15,6 +15,10 @@ final class ClickCaptureManager {
 
     var ownWindowIDs: Set<CGWindowID> = []
     var isActive: Bool { sessionFolder != nil }
+    /// While paused the tap stays installed but clicks record nothing, so resuming keeps the same
+    /// session folder and step numbering.
+    var isPaused = false
+    var currentSessionFolder: URL? { sessionFolder }
     /// Mirrors `CaptureManager.captureCursor` / `SettingsStore.captureCursor` for the per-click
     /// window captures this manager takes — kept in sync by `AppDelegate`.
     var captureCursor = false
@@ -35,6 +39,7 @@ final class ClickCaptureManager {
         let folder = try storage.createSessionFolder(date: Date())
         stepURLs = []
         nextStepIndex = 1
+        isPaused = false
         // Before `sessionFolder` is set, so a failure can't leave `isActive` true with no tap
         // installed — the session would report as running while recording nothing.
         try installEventTap()
@@ -44,7 +49,11 @@ final class ClickCaptureManager {
 
     func stop() -> [URL] {
         teardownEventTap()
+        // A click that's still inside its debounce window (e.g. the one that opened the menu
+        // holding "Stop") must not land a step after the session has ended.
+        debouncer.cancel()
         sessionFolder = nil
+        isPaused = false
         return stepURLs
     }
 
@@ -68,6 +77,16 @@ final class ClickCaptureManager {
                 // re-arm instead of dropping every subsequent click on the floor.
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                     manager.reenableEventTap()
+                    return Unmanaged.passUnretained(event)
+                }
+                // Clicks on Clipr itself — the menu-bar icon that opens "Stop Advanced Mode", the
+                // floating control panel's Pause/Stop buttons — are controlling the session, not
+                // a step in it. Resolved here, at click time, because by the time the debounced
+                // capture runs the menu or panel may already be gone. The frontmost-app check in
+                // `captureFrontmostWindow` can't catch these: an accessory app's status item and
+                // non-activating panel never make Clipr frontmost.
+                let ownPID = ProcessInfo.processInfo.processIdentifier
+                if manager.isPaused || WindowPicker.ownerPIDOfWindow(at: event.location) == ownPID {
                     return Unmanaged.passUnretained(event)
                 }
                 manager.debouncer.call { manager.captureFrontmostWindow() }
@@ -105,7 +124,7 @@ final class ClickCaptureManager {
     }
 
     private func captureFrontmostWindow() {
-        guard let sessionFolder, let frontmostApp = NSWorkspace.shared.frontmostApplication else { return }
+        guard let sessionFolder, !isPaused, let frontmostApp = NSWorkspace.shared.frontmostApplication else { return }
         // `ownWindowIDs` is a start-time snapshot of Clipr's own on-screen window IDs, but
         // NSMenu windows (e.g. the status-bar menu) are created on-demand only when actually
         // opened, so they're never in that snapshot. The most common way to stop an Advanced
