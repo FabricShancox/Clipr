@@ -67,8 +67,26 @@ final class ClickCaptureManager {
         set { imageSource.ownWindowIDs = newValue }
     }
 
-    struct PendingClick {
+    /// The last click that became a step, for a slow double-click whose second press comes after
+    /// the first was already captured. `id` is that step's `StepRecord.id`.
+    struct FiredClick {
+        let id: UUID
         let point: CGPoint
+        let time: TimeInterval
+        let trail: [CGPoint]
+    }
+    var lastFiredClick: FiredClick?
+    /// The system double-click interval and a monotonic clock; replaced in tests.
+    var doubleClickInterval: () -> TimeInterval = { NSEvent.doubleClickInterval }
+    var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+
+    struct PendingClick {
+        /// Becomes the step's `StepRecord.id`.
+        var id = UUID()
+        let point: CGPoint
+        var time: TimeInterval = 0
+        /// The already-captured step this click is the second press of — see `FiredClick`.
+        var replaces: UUID?
         /// What was under the click when it happened.
         let window: ClickedWindow?
         let trail: [CGPoint]
@@ -111,6 +129,7 @@ final class ClickCaptureManager {
         manifest = SessionManifest(createdAt: now)
         nextStepIndex = 1
         lastClickPoint = nil
+        lastFiredClick = nil
         trail = CursorTrailRecorder()
         typing.reset()
         self.ignoredKeys = ignoredKeys
@@ -183,6 +202,7 @@ final class ClickCaptureManager {
             typing.endBurst()
             lastClickPoint = p
             var points = trail.drain()
+            var replaces: UUID?
             if let previous = pending {
                 previous.work.cancel()
                 pending = nil
@@ -194,11 +214,19 @@ final class ClickCaptureManager {
                     previous.describe?.cancel()
                     previous.slot.done.finish()
                     points = previous.trail + points
+                    replaces = previous.replaces
                 } else {
                     // A click on something else (a checkbox, then OK) is a step of its own:
                     // capture the earlier one now rather than lose it.
                     fire(previous)
                 }
+            } else if let fired = lastFiredClick, Self.isRepeatClick(clickCount: clickCount, at: p, after: fired.point),
+                      now() - fired.time <= doubleClickInterval() {
+                // A slow double-click: the first press's delay ran out and it was captured, but
+                // this is still the same double-click, so its step is replaced rather than
+                // followed by a near-identical second one.
+                replaces = fired.id
+                points = fired.trail + points
             }
             let slot = writes.reserve()
             let describe = settings.autoCaptions ? Task { await self.describer.describe(at: p) } : nil
@@ -207,7 +235,8 @@ final class ClickCaptureManager {
                 self.pending = nil
                 self.fire(pending)
             }
-            pending = PendingClick(point: p, window: window, trail: points, describe: describe, work: work, slot: slot)
+            pending = PendingClick(point: p, time: now(), replaces: replaces, window: window, trail: points,
+                                   describe: describe, work: work, slot: slot)
             DispatchQueue.main.asyncAfter(deadline: .now() + settings.effectiveDelay, execute: work)
         case .key(let key):
             guard settings.typingSteps, !typingUnavailable, !isFrontmostClipr(),
@@ -231,7 +260,7 @@ final class ClickCaptureManager {
     func enqueue(
         kind: StepRecord.Kind, target: CaptureTarget, resolveTarget: (() async -> CaptureTarget)? = nil,
         click: CGPoint?, appName: String? = nil, trail: [CGPoint],
-        slot: StepWriteChain.Slot? = nil,
+        slot: StepWriteChain.Slot? = nil, id: UUID = UUID(), replaces: UUID? = nil,
         skipIf: @escaping () async -> Bool = { false }, caption: @escaping (_ appName: String?) async -> String?
     ) {
         guard let folder = sessionFolder else {
@@ -251,10 +280,12 @@ final class ClickCaptureManager {
             defer { slot?.done.finish() }
             // Encoded before waiting for the steps ahead, so a queue of fast clicks holds PNG
             // bytes rather than full-resolution bitmaps.
-            let prepared = await Self.captureAndPrepare(
+            var prepared = await Self.captureAndPrepare(
                 target: target, resolveTarget: resolveTarget, imageSource: imageSource, showsCursor: showsCursor, skipIf: skipIf,
                 kind: kind, click: click, appName: appName, trail: trail, settings: settings, caption: caption
             )
+            prepared?.id = id
+            prepared?.replaces = replaces
             await predecessor?.value
             guard let self, let prepared else { return }
             await self.write(prepared, folder: folder)
@@ -268,32 +299,41 @@ final class ClickCaptureManager {
     private func write(_ step: PreparedStep, folder: URL) async {
         // The folder check drops a step from a session that already stopped (its flush timed
         // out) and would otherwise land in the next session's manifest.
-        let claimed: Int? = await MainActor.run {
-            guard self.manifest != nil, folder == self.sessionFolder else { return nil }
-            return self.nextStepIndex
+        // A step that replaces another (see `PreparedStep.replaces`) takes over its file name
+        // and position; if that step isn't in the manifest (it was skipped), this one is new.
+        let claimed: (index: Int, replacing: StepRecord?)? = await MainActor.run {
+            guard let manifest = self.manifest, folder == self.sessionFolder else { return nil }
+            let replaced = step.replaces.flatMap { id in manifest.steps.first { $0.id == id } }
+            return (self.nextStepIndex, replaced)
         }
-        guard let index = claimed else { return }
+        guard let (index, replaced) = claimed else { return }
         let files: (step: URL, zoom: URL?)
         do {
-            files = try Self.writeFiles(step, index: index, in: folder)
+            files = try Self.writeFiles(step, index: index, replacing: replaced?.file, in: folder)
         } catch {
             NSLog("Clipr: advanced mode step save failed: \(error)")
             await MainActor.run { self.onSaveProblem?(.stepDropped) }
             return
         }
         let record = StepRecord(
-            id: UUID(), file: files.step.lastPathComponent, kind: step.kind, caption: step.caption,
+            id: step.id, file: files.step.lastPathComponent, kind: step.kind, caption: step.caption,
             clickPoint: step.clickPoint, zoomFile: files.zoom?.lastPathComponent, appName: step.appName,
             capturedAt: step.capturedAt
         )
         let snapshot: SessionManifest? = await MainActor.run {
             guard self.manifest != nil, folder == self.sessionFolder else { return nil }
-            self.nextStepIndex = index + 1
-            self.manifest?.steps.append(record)
+            if let replaced, let position = self.manifest?.steps.firstIndex(where: { $0.id == replaced.id }) {
+                self.manifest?.steps[position] = record
+            } else {
+                self.nextStepIndex = index + 1
+                self.manifest?.steps.append(record)
+            }
             return self.manifest
         }
         guard let snapshot else {
             // The session ended while the files were being written; they belong to no manifest.
+            // (A replacement overwrote a step the ended session still lists, so it stays.)
+            guard replaced == nil else { return }
             for url in [files.step, files.zoom].compactMap({ $0 }) + [Self.annotationsURL(for: files.step)] {
                 try? FileManager.default.removeItem(at: url)
             }

@@ -13,6 +13,11 @@ extension ClickCaptureManager {
         let clickPoint: CGPoint?
         let appName: String?
         let capturedAt: Date
+        /// Becomes the step's `StepRecord.id`.
+        var id = UUID()
+        /// The step this one replaces in place (same file name and position): the second press of
+        /// a double-click whose first press was already captured.
+        var replaces: UUID?
     }
 
     /// Captures, captions and encodes a step. The captured bitmap lives only inside this call.
@@ -70,10 +75,19 @@ extension ClickCaptureManager {
 
     /// PNG → annotations sidecar → zoom, each owner-only, so the manifest never names a file that
     /// isn't on disk. A sidecar or zoom that fails to write is logged and left out.
-    static func writeFiles(_ step: PreparedStep, index: Int, in folder: URL) throws -> (step: URL, zoom: URL?) {
-        let stepURL = availableStepURL(index: index, in: folder)
+    ///
+    /// `replacing` names an existing step file to overwrite (atomically, so a failed write leaves
+    /// it intact) instead of claiming `index`; its old sidecar and zoom are removed first.
+    static func writeFiles(_ step: PreparedStep, index: Int, replacing existing: String? = nil,
+                           in folder: URL) throws -> (step: URL, zoom: URL?) {
+        let stepURL = existing.map { folder.appendingPathComponent($0) } ?? availableStepURL(index: index, in: folder)
         try step.png.write(to: stepURL, options: .atomic)
         SessionFolder.restrict(stepURL)
+        if existing != nil {
+            try? FileManager.default.removeItem(at: annotationsURL(for: stepURL))
+            try? FileManager.default.removeItem(
+                at: folder.appendingPathComponent(FilenameGenerator.zoomName(fromStep: stepURL.lastPathComponent)))
+        }
         if !step.annotations.isEmpty {
             let sidecar = annotationsURL(for: stepURL)
             do {

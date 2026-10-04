@@ -12,9 +12,10 @@ extension ClickCaptureManager {
         // The clicked window's app, not whichever app is frontmost when the capture runs: a click
         // on a non-activating panel or another app's palette doesn't change the frontmost app.
         let appName = click.window?.isCapturable == true ? click.window?.appName : nil
+        lastFiredClick = FiredClick(id: click.id, point: click.point, time: click.time, trail: click.trail)
         enqueue(kind: .click, target: scopeTarget(for: click.point, window: click.window), click: click.point,
                 appName: appName, trail: click.trail,
-                slot: click.slot, caption: caption)
+                slot: click.slot, id: click.id, replaces: click.replaces, caption: caption)
     }
 
     func emit(_ typed: TypingEvent, fields: TypingBurstTracker.FieldReads) {

@@ -224,6 +224,38 @@ final class ClickCaptureManagerTests: XCTestCase {
     }
 
     // M1: a repeat press far from the first isn't the same double-click either.
+    // A slow double-click: the first press was already captured when the second arrives (still
+    // within the double-click interval, on the same spot), so it replaces that step.
+    func testSlowDoubleClickReplacesTheAlreadyCapturedStep() throws {
+        var clock: TimeInterval = 100
+        manager.now = { clock }
+        manager.doubleClickInterval = { 0.5 }
+        _ = try manager.start(settings: settings { $0.zoomOnClick = true }, area: nil)
+        manager.handle(.click(CGPoint(x: 140, y: 120)))
+        waitForSteps(1)
+        clock += 0.4
+        manager.handle(.click(CGPoint(x: 143, y: 122), clickCount: 2))
+        waitForSteps(1)
+        let (manifest, sessionFolder) = stop()
+        XCTAssertEqual(manifest.steps.map(\.file), [FilenameGenerator.stepName(index: 1)])
+        XCTAssertEqual(manifest.steps[0].clickPoint, CGPoint(x: 43, y: 22), "the second press")
+        XCTAssertEqual(SessionManifestStore.load(from: sessionFolder).steps.map(\.id), manifest.steps.map(\.id))
+        XCTAssertEqual(SessionManifestStore.rawStepFiles(in: sessionFolder), [FilenameGenerator.stepName(index: 1)])
+    }
+
+    func testSecondPressAfterTheDoubleClickIntervalIsANewStep() throws {
+        var clock: TimeInterval = 100
+        manager.now = { clock }
+        manager.doubleClickInterval = { 0.5 }
+        _ = try manager.start(settings: settings(), area: nil)
+        manager.handle(.click(CGPoint(x: 140, y: 120)))
+        waitForSteps(1)
+        clock += 0.6
+        manager.handle(.click(CGPoint(x: 140, y: 120), clickCount: 2))
+        waitForSteps(2)
+        XCTAssertEqual(stop().0.steps.count, 2)
+    }
+
     func testRepeatClickCountFarAwayIsNotADoubleClick() throws {
         _ = try manager.start(settings: settings { $0.captureDelay = 1.5 }, area: nil)
         manager.handle(.click(CGPoint(x: 150, y: 160)))
