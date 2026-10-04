@@ -138,15 +138,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private func reportSaveFailureOnce() {
         guard !hasReportedSaveFailure else { return }
         hasReportedSaveFailure = true
-        let alert = NSAlert()
-        alert.messageText = "Couldn't save your annotations"
-        alert.informativeText = "Changes to \(rawURL.lastPathComponent) couldn't be written to its folder. Use Save As… to keep a copy elsewhere."
-        alert.alertStyle = .warning
-        if let window, window.isVisible, window.attachedSheet == nil {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
+        let sheetWindow = window.flatMap { $0.isVisible && $0.attachedSheet == nil ? $0 : nil }
+        Alerts.present("Couldn't save your annotations",
+                       "Changes to \(rawURL.lastPathComponent) couldn't be written to its folder. Use Save As… to keep a copy elsewhere.",
+                       on: sheetWindow)
     }
 
     /// `initialAnnotations`, when omitted, loads whatever was last saved for `rawURL` from its
@@ -218,17 +213,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // Deferred: this runs from `makeContentView`, which is called during `init` before the
             // window is on screen, and a sheet can't be presented on a window that isn't showing.
             DispatchQueue.main.async { [weak self] in
-                let alert = NSAlert()
-                alert.messageText = "Saved annotations for this capture couldn't be read"
-                alert.informativeText = backup.map {
+                let detail = backup.map {
                     "\(name) has opened without them. The unreadable file was kept as \($0.lastPathComponent) in case it can be recovered."
                 } ?? "\(name) has opened without them."
-                alert.alertStyle = .warning
-                if let window = self?.window, window.isVisible {
-                    alert.beginSheetModal(for: window)
-                } else {
-                    alert.runModal()
-                }
+                Alerts.present("Saved annotations for this capture couldn't be read", detail,
+                               on: self?.window.flatMap { $0.isVisible ? $0 : nil })
             }
             return []
         }
@@ -252,11 +241,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             window?.contentView = makeContentView(initialAnnotations: annotations, history: history)
         } catch {
             NSLog("Clipr: rename failed: \(error)")
-            let alert = NSAlert()
-            alert.messageText = "Couldn't rename this capture"
-            alert.informativeText = "\(url.lastPathComponent) was left unchanged.\n\n\(error.localizedDescription)"
-            alert.alertStyle = .warning
-            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+            Alerts.present("Couldn't rename this capture",
+                           "\(url.lastPathComponent) was left unchanged.\n\n\(error.localizedDescription)", on: window)
         }
     }
 
@@ -346,11 +332,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 try self.storage.export(flattened, to: url, format: format)
             } catch {
                 NSLog("Clipr: export failed: \(error)")
-                let alert = NSAlert()
-                alert.messageText = "Couldn't export the image"
-                alert.informativeText = error.localizedDescription
-                alert.alertStyle = .warning
-                alert.beginSheetModal(for: window)
+                Alerts.present("Couldn't export the image", error.localizedDescription, on: window)
             }
         }
     }
@@ -360,12 +342,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// capture permanently with no warning; a failure was swallowed and the tile hidden anyway.
     private func deleteRecent(_ url: URL, then deleted: @escaping () -> Void) {
         guard let window else { return }
-        let alert = NSAlert()
-        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
-        alert.informativeText = "Its edited copy and annotations go too. You can put them back from the Trash in Finder."
-        alert.addButton(withTitle: "Move to Trash")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
+        Alerts.present("Move “\(url.lastPathComponent)” to the Trash?",
+                       "Its edited copy and annotations go too. You can put them back from the Trash in Finder.",
+                       buttons: ["Move to Trash", "Cancel"], on: window) { [weak self] response in
             guard let self, response == .alertFirstButtonReturn else { return }
             do {
                 try self.storage.deleteCapture(rawURL: url)
@@ -373,11 +352,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 deleted()
             } catch {
                 NSLog("Clipr: couldn't move \(url.lastPathComponent) to the Trash: \(error)")
-                let failure = NSAlert()
-                failure.messageText = "Couldn't move this capture to the Trash"
-                failure.informativeText = "\(url.lastPathComponent) was left where it is.\n\n\(error.localizedDescription)"
-                failure.alertStyle = .warning
-                failure.beginSheetModal(for: window)
+                Alerts.present("Couldn't move this capture to the Trash",
+                               "\(url.lastPathComponent) was left where it is.\n\n\(error.localizedDescription)", on: window)
             }
         }
     }
@@ -428,11 +404,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             return true
         } catch {
             NSLog("Clipr: \(operation) failed to write \(rawURL.lastPathComponent): \(error)")
-            let alert = NSAlert()
-            alert.messageText = "Couldn't \(operation) this capture"
-            alert.informativeText = "\(rawURL.lastPathComponent) could not be written, so it was left unchanged.\n\n\(error.localizedDescription)"
-            alert.alertStyle = .warning
-            if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
+            Alerts.present("Couldn't \(operation) this capture",
+                           "\(rawURL.lastPathComponent) could not be written, so it was left unchanged.\n\n\(error.localizedDescription)",
+                           on: window)
             return false
         }
     }

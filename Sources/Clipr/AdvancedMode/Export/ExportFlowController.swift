@@ -126,12 +126,9 @@ final class ExportFlowController {
     /// images folder, which may be the user's own rather than an earlier export's.
     private func confirmReplace(in folder: URL, completion: @escaping (URL?) -> Void) {
         guard let window else { return completion(nil) }
-        let alert = NSAlert()
-        alert.messageText = "This folder already has guide.md or an images folder."
-        alert.informativeText = "Replacing overwrites guide.md and the whole images folder in “\(folder.lastPathComponent)”."
-        alert.addButton(withTitle: "Replace")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { response in
+        Alerts.present("This folder already has guide.md or an images folder.",
+                       "Replacing overwrites guide.md and the whole images folder in “\(folder.lastPathComponent)”.",
+                       buttons: ["Replace", "Cancel"], on: window) { response in
             completion(response == .alertFirstButtonReturn ? folder : nil)
         }
     }
@@ -185,10 +182,6 @@ final class ExportFlowController {
 
     private func showAlert(_ message: String, _ detail: String, style: NSAlert.Style, then done: @escaping () -> Void = {}) {
         guard let window else { return done() }
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.informativeText = detail
-        alert.alertStyle = style
-        alert.beginSheetModal(for: window) { _ in done() }
+        Alerts.present(message, detail, style: style, on: window) { _ in done() }
     }
 }

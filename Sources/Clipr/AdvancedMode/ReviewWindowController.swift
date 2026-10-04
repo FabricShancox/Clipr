@@ -71,12 +71,8 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         flush()
         guard MainActor.assumeIsolated({ model.hasUnsavedChanges }) else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Couldn't save your changes to this session."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Keep Window Open")
-        alert.addButton(withTitle: "Close Anyway")
-        return alert.runModal() == .alertSecondButtonReturn
+        return Alerts.run("Couldn't save your changes to this session.",
+                          buttons: ["Keep Window Open", "Close Anyway"]) == .alertSecondButtonReturn
     }
 
     /// A caption typed in the last half-second must still be saved.

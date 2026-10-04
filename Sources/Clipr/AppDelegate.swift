@@ -125,20 +125,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openEditor(image: image, rawURL: editable)
         } catch {
             NSLog("Clipr: could not import \(url.lastPathComponent): \(error)")
-            let alert = NSAlert()
-            alert.messageText = "Couldn't open this image"
-            alert.informativeText = "Clipr couldn't copy \(url.lastPathComponent) into your capture folder, so it wasn't opened. The original wasn't changed.\n\n\(error.localizedDescription)"
-            alert.alertStyle = .warning
-            alert.runModal()
+            Alerts.run("Couldn't open this image", "Clipr couldn't copy \(url.lastPathComponent) into your capture folder, so it wasn't opened. The original wasn't changed.\n\n\(error.localizedDescription)")
         }
     }
 
     private func showOpenImageFailure(_ url: URL, reason: String) {
-        let alert = NSAlert()
-        alert.messageText = "Couldn't open \(url.lastPathComponent)"
-        alert.informativeText = reason
-        alert.alertStyle = .warning
-        alert.runModal()
+        Alerts.run("Couldn't open \(url.lastPathComponent)", reason)
     }
 
     private func registerHotkeys() {
@@ -157,16 +149,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The registration that failed has already dropped whatever was bound before, so staying
         // quiet would leave the user with a hotkey that simply stopped working and no clue why.
-        let alert = NSAlert()
-        alert.messageText = rejected.count == 1 ? "A shortcut couldn't be registered" : "Some shortcuts couldn't be registered"
-        alert.informativeText = """
+        Alerts.run(rejected.count == 1 ? "A shortcut couldn't be registered" : "Some shortcuts couldn't be registered", """
             \(rejected.joined(separator: "\n"))
 
             Another app or macOS is probably already using \(rejected.count == 1 ? "it" : "them"). \
             Pick a different combination in Preferences.
-            """
-        alert.alertStyle = .warning
-        alert.runModal()
+            """)
     }
 
     /// Tells the user a capture failed, pointing at Screen Recording when that's the likely cause.
@@ -179,19 +167,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // importing ScreenCaptureKit here just for it.
         let isPermissionProblem = (error as NSError).domain == "com.apple.ScreenCaptureKit.SCStreamErrorDomain"
         if isPermissionProblem {
-            showPermissionAlert(
+            Alerts.permissionRequired(
                 pane: .screenRecording,
                 message: "Clipr couldn't capture the screen. If you've recently changed Screen Recording access, it may need to be re-granted — and Clipr restarted."
             )
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "Capture failed"
-        alert.informativeText = error.localizedDescription
-        alert.alertStyle = .warning
         // A capture is started from a hotkey while another app is frontmost.
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        Alerts.run("Capture failed", error.localizedDescription, activate: true)
     }
 
     /// Routes both the capture hotkey and "Capture Now" through here rather than calling
@@ -213,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if PermissionsManager.hasScreenRecordingPermission() {
                 MainActor.assumeIsolated { self.captureManager.beginCapture() }
             } else {
-                showPermissionAlert(pane: .screenRecording, message: "Clipr needs Screen Recording access to capture screenshots.")
+                Alerts.permissionRequired(pane: .screenRecording, message: "Clipr needs Screen Recording access to capture screenshots.")
             }
         }
     }
@@ -229,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     review.present()
                 } else {
                     NSApp.activate(ignoringOtherApps: true)
-                    showNoStepsCapturedAlert()
+                    Alerts.noStepsCaptured()
                 }
             }
             return
@@ -261,16 +244,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             registerStepHotkey(advancedSettings.stepHotkey)
         case .accessibilityNotGranted:
-            showPermissionAlert(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
+            Alerts.permissionRequired(pane: .accessibility, message: "Clipr needs Accessibility access to detect clicks for Advanced Mode.")
         case .startFailed(let error):
             // Surfaced, not just logged: the user asked for this and nothing visible would
             // happen otherwise — the menu would simply stay on "Start Advanced Mode".
             NSLog("Clipr: failed to start advanced mode: \(error)")
-            let alert = NSAlert()
-            alert.messageText = "Couldn't start Advanced Mode"
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
+            Alerts.run("Couldn't start Advanced Mode", error.localizedDescription)
         }
     }
 
@@ -313,11 +292,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             review.present()
             return
         }
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "No Advanced Mode Sessions"
-        alert.informativeText = "Sessions recorded with Advanced Mode will show up here once they've captured at least one step."
-        alert.runModal()
+        Alerts.run("No Advanced Mode Sessions",
+                   "Sessions recorded with Advanced Mode will show up here once they've captured at least one step.",
+                   activate: true)
     }
 
     private func currentOwnWindowIDs() -> Set<CGWindowID> {

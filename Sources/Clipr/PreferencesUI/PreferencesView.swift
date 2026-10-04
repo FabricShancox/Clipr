@@ -286,11 +286,8 @@ struct PreferencesView: View {
             try settings.setLaunchAtLogin(enabled)
         } catch {
             NSLog("Clipr: failed to update login item registration: \(error)")
-            let alert = NSAlert()
-            alert.messageText = enabled ? "Couldn't add Clipr to your login items" : "Couldn't remove Clipr from your login items"
-            alert.informativeText = "\(error.localizedDescription)\n\nYou can change this in System Settings › General › Login Items."
-            alert.alertStyle = .warning
-            alert.runModal()
+            Alerts.run(enabled ? "Couldn't add Clipr to your login items" : "Couldn't remove Clipr from your login items",
+                       "\(error.localizedDescription)\n\nYou can change this in System Settings › General › Login Items.")
         }
         launchAtLogin = settings.launchAtLogin
     }

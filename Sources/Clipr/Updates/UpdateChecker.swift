@@ -140,20 +140,15 @@ final class UpdateChecker {
 
     private func showUpdateAvailable(_ release: Release) {
         let version = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
-        let alert = NSAlert()
-        alert.messageText = "Clipr \(version) is available"
-        alert.informativeText = """
+        let detail = """
             If you installed Clipr with Homebrew, update it by running:
 
             \(Self.upgradeCommand)
 
             Otherwise, download the new version from the release page.
             """
-        alert.addButton(withTitle: "Copy Command")
-        alert.addButton(withTitle: "Open Release Page")
-        alert.addButton(withTitle: "Later")
-        NSApp.activate(ignoringOtherApps: true)
-        switch alert.runModal() {
+        switch Alerts.run("Clipr \(version) is available", detail,
+                          buttons: ["Copy Command", "Open Release Page", "Later"], activate: true) {
         case .alertFirstButtonReturn:
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(Self.upgradeCommand, forType: .string)
@@ -165,10 +160,6 @@ final class UpdateChecker {
     }
 
     private func showAlert(title: String, text: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = text
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        Alerts.run(title, text, activate: true)
     }
 }
