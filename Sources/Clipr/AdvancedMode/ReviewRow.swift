@@ -108,15 +108,17 @@ struct ReviewRow: View {
             let showControls = isHovering || isSelected
             VStack(alignment: .trailing, spacing: 6) {
                 // Full controls when they fit above the image, otherwise a one-letter size menu.
+                // Both variants are drawn in SwiftUI (no native control), so measuring both is cheap.
                 ViewThatFits(in: .horizontal) {
                     toolbarChrome { sizePicker; imageEditMenu }
                     toolbarChrome { compactSizeMenu; imageEditMenu }
                 }
                 // Space stays reserved while hidden so rows don't jump as the pointer moves;
                 // shown on hover and on selected rows so the rest reads like the finished guide.
+                // Hidden by opacity only: the controls stay in the accessibility tree, since
+                // flipping accessibility attributes on hover changes them during the row's update.
                 .opacity(showControls ? 1 : 0)
                 .allowsHitTesting(showControls)
-                .accessibilityHidden(!showControls)
                 imageBox
             }
             .onHover { isHovering = $0 }
@@ -146,49 +148,88 @@ struct ReviewRow: View {
             .fixedSize()
     }
 
-    private var imageEditMenu: some View {
-        Menu {
-            imageActions
-        } label: {
-            Text("Edit")
-        } primaryAction: {
-            onOpenEditor(step)
+    /// The row's menus are popped up from SwiftUI-drawn buttons as native `NSMenu`s — see
+    /// `RowMenuEntry` for why there is no `Menu` (an `NSPopUpButton`) in a List row.
+    private var imageActionEntries: [RowMenuEntry] {
+        RowMenu.imageActions(
+            isReadOnly: model.isReadOnly, isInEditor: model.stepsInEditor.contains(step.id),
+            onEdit: { onOpenEditor(step) }, onRetake: { onRetake(step) }, onReplace: { onReplaceWithFile(step) }
+        )
+    }
+
+    /// Acts on the whole selection when this row is part of it, like the context menu.
+    private var imageSizeEntries: [RowMenuEntry] {
+        let targets = model.selection.contains(step.id) ? model.selection : [step.id]
+        return RowMenu.sizes(current: step.imageSize ?? .full, isReadOnly: model.isReadOnly) { size in
+            model.setImageSize(size, for: targets)
         }
-        .menuStyle(.borderedButton)
+    }
+
+    /// A split button: "Edit" opens the editor, the arrow shows Retake and Replace.
+    private var imageEditMenu: some View {
+        HStack(spacing: 0) {
+            Button { onOpenEditor(step) } label: {
+                Text("Edit")
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Edit the image")
+            .accessibilityLabel("Edit Image")
+            Divider().frame(height: 12)
+            Button { RowMenu.popUp(imageActionEntries) } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .frame(width: 16, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Edit, retake or replace the image")
+            .accessibilityLabel("Image actions")
+        }
+        .padding(1)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
         .fixedSize()
     }
 
     private var compactSizeMenu: some View {
         let current = step.imageSize ?? .full
-        return Menu {
-            ForEach(ImageSize.allCases) { size in
-                Toggle(size.title, isOn: Binding(
-                    get: { current == size },
-                    set: { _ in model.setImageSize(size, for: [step.id]) }
-                ))
+        return Button { RowMenu.popUp(RowMenu.sizes(current: current, isReadOnly: model.isReadOnly) { size in
+            model.setImageSize(size, for: [step.id])
+        }) } label: {
+            HStack(spacing: 3) {
+                Text(current.shortLabel).font(.system(size: 11))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
-        } label: {
-            Text(current.shortLabel)
+            .padding(.horizontal, 7)
+            .frame(minHeight: 18)
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderedButton)
+        .buttonStyle(.plain)
+        .padding(1)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
         .fixedSize()
         .disabled(model.isReadOnly)
         .help("Image size in the guide (⌘+ / ⌘−)")
-        .accessibilityLabel("Image size: \(current.title)")
+        .accessibilityLabel("Image Size")
+        .accessibilityValue(current.title)
     }
 
     /// List layout: one small ⋯ menu beside the caption (Edit Image first), since the thumbnail
     /// is too small to carry the image toolbar.
     private var compactEditMenu: some View {
-        Menu {
-            imageActions
-            Divider()
-            imageSizeMenu
+        Button {
+            RowMenu.popUp(imageActionEntries + [.separator, .submenu("Image Size", enabled: !model.isReadOnly, imageSizeEntries)])
         } label: {
             Image(systemName: "ellipsis.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .fixedSize()
         .help("Edit, retake, replace or resize the image")
         .accessibilityLabel("Image options")
