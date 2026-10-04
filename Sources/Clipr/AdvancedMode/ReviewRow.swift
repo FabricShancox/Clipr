@@ -59,7 +59,8 @@ struct ReviewRow: View {
             if newValue == step.id {
                 model.beginCaptionEdit(for: step.id)
                 draft = step.caption ?? ""
-                fieldFocused = true
+                // Next run loop: the field only exists once this state change has rendered.
+                DispatchQueue.main.async { fieldFocused = true }
             }
         }
     }
@@ -71,7 +72,10 @@ struct ReviewRow: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
                 .focused($fieldFocused)
-                .onChange(of: draft) { _, text in model.editCaption(text, for: step.id) }
+                .onChange(of: draft) { _, text in
+                    // Setting the initial draft when editing begins isn't a user edit.
+                    if text != (step.caption ?? "") { model.editCaption(text, for: step.id) }
+                }
                 .onSubmit { finishEditing(commit: true) }
                 .onExitCommand { finishEditing(commit: false) }
                 .onChange(of: fieldFocused) { _, focused in
@@ -79,9 +83,8 @@ struct ReviewRow: View {
                 }
         } else {
             Group {
-                if let text = step.caption,
-                   let rendered = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-                    Text(rendered)
+                if let text = step.caption {
+                    Text(CaptionText.rendered(text))
                 } else {
                     Text("Add a caption").foregroundStyle(.tertiary)
                 }

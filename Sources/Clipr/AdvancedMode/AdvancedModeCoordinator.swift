@@ -92,6 +92,7 @@ final class AdvancedModeCoordinator {
     }
 
     private func openReview(manifest: SessionManifest, sessionFolder: URL) -> ReviewWindowController {
+        // The coordinator is only ever called on the main thread.
         let review = MainActor.assumeIsolated { ReviewWindowController(sessionFolder: sessionFolder, storage: storage) }
         openReviewWindows.append(review)
         // ReviewWindowController has no onFinished-style closure (unlike EditorWindowController),

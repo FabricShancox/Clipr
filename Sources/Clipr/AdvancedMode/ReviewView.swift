@@ -32,6 +32,11 @@ struct ReviewView: View {
             }
         }
         .background(shortcuts)
+        // Deleting the row being edited removes its field without a focus-loss callback, which
+        // would leave editing "on" and every shortcut disabled.
+        .onChange(of: model.manifest.steps.map(\.id)) { _, ids in
+            if let id = editingID, !ids.contains(id) { editingID = nil }
+        }
     }
 
     private var header: some View {
