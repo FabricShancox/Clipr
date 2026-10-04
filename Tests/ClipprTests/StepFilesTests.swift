@@ -44,6 +44,10 @@ final class StepFilesTests: XCTestCase {
         XCTAssertEqual(Set(names), ["Step_03.png", "Step_03_annotations.json", "Step_03_edited.png"])
         touch("Step_03_zoom.png")
         XCTAssertEqual(StepFiles.companions(of: "Step_03.png", in: folder).count, 4)
+        // Prefix collision check: similar names are not included.
+        touch("Step_030.png"); touch("Step_03x_annotations.json")
+        XCTAssertFalse(StepFiles.companions(of: "Step_03.png", in: folder).map(\.lastPathComponent).contains("Step_030.png"))
+        XCTAssertFalse(StepFiles.companions(of: "Step_03.png", in: folder).map(\.lastPathComponent).contains("Step_03x_annotations.json"))
     }
 
     func testThumbnailPrefersEdited() {
@@ -77,6 +81,38 @@ final class StepFilesTests: XCTestCase {
             XCTAssertEqual($0 as? StepFilesError, .trashedFileMissing("Step_05.png"))
         }
         XCTAssertFalse(exists("Step_05.png")); XCTAssertFalse(exists("Step_05_zoom.png"))  // nothing half-restored
+    }
+
+    func testRestoreRollsBackOnMoveItemFailure() throws {
+        touch("Step_06.png"); touch("Step_06_annotations.json"); touch("Step_06_zoom.png")
+        let trashed = try fakeFiles.trash("Step_06.png", in: folder)
+        XCTAssertEqual(trashed.moves.count, 3)
+        // Verify files are in Trash
+        XCTAssertFalse(exists("Step_06.png")); XCTAssertFalse(exists("Step_06_annotations.json")); XCTAssertFalse(exists("Step_06_zoom.png"))
+        // Create a failing moveItem that throws on the second call (after Step_06.png is moved back)
+        var moveCount = 0
+        let failing = StepFiles(
+            trashItem: { [trash] url in
+                let dest = trash!.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                try FileManager.default.moveItem(at: url, to: dest)
+                return dest
+            },
+            moveItem: { source, dest in
+                moveCount += 1
+                if moveCount == 2 { throw CocoaError(.fileWriteNoPermission) }
+                try FileManager.default.moveItem(at: source, to: dest)
+            }
+        )
+        // Restore should fail and roll back the first move
+        XCTAssertThrowsError(try failing.restore(trashed)) { error in
+            XCTAssertEqual((error as? CocoaError)?.code, .fileWriteNoPermission)
+        }
+        // All files should still be in Trash, none in session folder (all-or-nothing)
+        XCTAssertFalse(exists("Step_06.png")); XCTAssertFalse(exists("Step_06_annotations.json")); XCTAssertFalse(exists("Step_06_zoom.png"))
+        // All trashed files still exist at their Trash URLs
+        for move in trashed.moves {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: move.trashed.path), "File should still be in Trash: \(move.trashed.lastPathComponent)")
+        }
     }
 
     func testThumbnailCacheRemove() {

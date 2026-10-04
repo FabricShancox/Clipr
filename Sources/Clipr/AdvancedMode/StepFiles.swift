@@ -31,7 +31,12 @@ struct StepFiles {
     static func liveTrash(_ url: URL) throws -> URL {
         var resulting: NSURL?
         try FileManager.default.trashItem(at: url, resultingItemURL: &resulting)
-        return (resulting as URL?) ?? url
+        guard let result = resulting as URL? else {
+            // If the Trash operation succeeded but resultingItemURL is nil, we can't undo this move,
+            // so we must fail rather than return a fabricated URL that undo might restore incorrectly.
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return result
     }
 
     /// The raw PNG first, then whichever of its sidecar, zoom crop and edited preview exist.
@@ -70,14 +75,25 @@ struct StepFiles {
         return TrashedStep(file: file, moves: moves)
     }
 
-    /// All-or-nothing: if any trashed file is gone (the Trash was emptied) nothing is moved back,
-    /// so a restored manifest entry never points at a missing image.
+    /// All-or-nothing: if any trashed file is gone (the Trash was emptied), nothing is moved back.
+    /// If a moveItem fails mid-restore, all already-restored files are moved back to the Trash
+    /// (best-effort) so a restored manifest entry never points at a partially-restored step.
     func restore(_ trashed: TrashedStep) throws {
         for move in trashed.moves where !FileManager.default.fileExists(atPath: move.trashed.path) {
             throw StepFilesError.trashedFileMissing(trashed.file)
         }
-        for move in trashed.moves {
-            try moveItem(move.trashed, move.original)
+        var restoredMoves: [TrashedStep.Move] = []
+        do {
+            for move in trashed.moves {
+                try moveItem(move.trashed, move.original)
+                restoredMoves.append(move)
+            }
+        } catch {
+            // Restore failed: move already-restored files back to Trash (best-effort, reverse order).
+            for move in restoredMoves.reversed() {
+                try? moveItem(move.original, move.trashed)
+            }
+            throw error
         }
     }
 }
