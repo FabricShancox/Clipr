@@ -96,12 +96,12 @@ final class AdvancedModeCoordinator {
         return sessions.first { !SessionManifestStore.load(from: $0).steps.isEmpty }
     }
 
-    /// Writes every open Review's pending caption (and its editors' pending saves) now. Quit calls
-    /// this: termination doesn't close windows, so their close-time flush would never run.
     /// Runs a capture for Review's "Retake Screenshot…" and hands back the image. Set by
     /// `AppDelegate`, which owns the capture manager.
     var captureReplacement: ((@escaping (NSImage?) -> Void) -> Void)?
 
+    /// Writes every open Review's pending caption (and its editors' pending saves) now. Quit calls
+    /// this: termination doesn't close windows, so their close-time flush would never run.
     func flushOpenReviews() {
         for review in openReviewWindows { review.flush() }
     }

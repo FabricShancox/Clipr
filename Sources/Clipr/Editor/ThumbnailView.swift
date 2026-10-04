@@ -31,7 +31,9 @@ struct ThumbnailView: View {
             let loaded = await Task.detached(priority: .userInitiated) {
                 ThumbnailCache.decodeThumbnail(at: url, maxPixelSize: size)
             }.value
-            guard let loaded else { return }
+            // A view whose URL changed (or that went away) mid-decode has its task cancelled; its
+            // late result may be of a file that's since been replaced, so it isn't cached.
+            guard let loaded, !Task.isCancelled else { return }
             image = loaded
             ThumbnailCache.shared.store(loaded, for: url, maxPixelSize: size)
         }
