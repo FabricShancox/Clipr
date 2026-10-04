@@ -178,10 +178,12 @@ final class ReviewModelTests: XCTestCase {
         let model = makeModel(save: { m, f in if fail { throw CocoaError(.fileWriteUnknown) }; try SessionManifestStore.saveSafely(m, in: f) })
         model.move(fromOffsets: [0], toOffset: 2)
         XCTAssertEqual(model.banner, "Couldn't save changes — will retry")
+        XCTAssertTrue(model.hasUnsavedChanges)  // what makes closing the window ask first
         XCTAssertEqual(captions(onDisk), ["a", "b", "c", "d"])  // disk untouched
         fail = false
         model.move(fromOffsets: [0], toOffset: 2)
         XCTAssertNil(model.banner)
+        XCTAssertFalse(model.hasUnsavedChanges)
         XCTAssertEqual(captions(onDisk), captions(model.manifest))
     }
 

@@ -74,7 +74,8 @@ struct ReviewView: View {
     }
 
     /// Keyboard commands Clipr's main menu doesn't provide. Disabled while a caption is being
-    /// edited so ⌘Z there undoes typing and ⌥↑ moves the text cursor, not the step.
+    /// edited so they don't act on steps while a caption field has focus. Hidden from
+    /// accessibility: they're invisible stand-ins for menu items, not controls.
     private var shortcuts: some View {
         Group {
             Button("") { model.undoManager.undo() }
@@ -92,5 +93,6 @@ struct ReviewView: View {
         }
         .opacity(0)
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

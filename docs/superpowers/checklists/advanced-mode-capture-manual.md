@@ -61,4 +61,7 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] Hand-edit `session.json` "version" to 2, open Review → read-only notice; no drag/edit/delete.
 - [ ] Click a caption, type one character, press Return → the character is saved (first keystroke not lost).
 - [ ] Type into a caption, delete back to the original text, close the window without pressing Return → reopen Review: the original caption is unchanged.
-- [ ] A caption whose text came from an app label containing a Markdown link (e.g. hand-edit session.json caption to `[Open](https://example.com)`) shows as plain text and is not clickable.
+- [ ] A caption whose text came from an app label containing a Markdown link (e.g. hand-edit session.json caption to `[Open](https://example.com)`) shows "Open" as plain text and is not clickable.
+- [ ] Start recording, open Review Last Session → the session being recorded is not offered.
+- [ ] Stop recording while that session's Review is already open → the existing window comes forward (no second window).
+- [ ] Type a caption and press ⌘Q within half a second → reopen Review: caption saved.

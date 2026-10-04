@@ -280,12 +280,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + [advancedModePanel])
     }
 
-    /// Quitting abandons every editor's pending 800ms auto-save debounce, so the last edit in each
-    /// open window would be lost silently. Flushing here writes them synchronously first.
+    /// Quitting abandons every editor's pending 800ms auto-save debounce (and each Review's 0.5s
+    /// caption debounce), so the last edit in each open window would be lost silently. Flushing
+    /// here writes them synchronously first.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         for editor in openEditors {
             editor.flushPendingSave()
         }
+        advancedMode.flushOpenReviews()
         return .terminateNow
     }
 
