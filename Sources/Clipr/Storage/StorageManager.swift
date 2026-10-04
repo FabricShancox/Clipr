@@ -3,7 +3,7 @@ import Cocoa
 final class StorageManager {
     /// Mutable so a save-folder change made in Preferences takes effect immediately, without
     /// needing to rebuild the manager (which every capture path already holds a reference to) or
-    /// relaunch the app. `AppDelegate` reassigns this from its `PreferencesWindowController`'s
+    /// relaunch the app. `AppDelegate` reassigns this from the `PreferencesWindowController`'s
     /// `onSaveFolderChanged` callback; every path below reads it at call time.
     var baseFolder: URL
 

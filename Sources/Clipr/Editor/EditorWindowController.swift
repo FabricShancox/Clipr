@@ -122,7 +122,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// lost the edit outright: the pending `Task` holds the view weakly and the controller is
     /// released the moment `onFinished` runs, so the scheduled write simply never happened, with
     /// nothing shown to the user. Called from `windowWillClose` and from
-    /// `AppDelegate.applicationShouldTerminate`.
+    /// `EditorPresenter.flushPendingSaves` on quit.
     func flushPendingSave() {
         guard !persist(latestAnnotations) else { return }
         reportSaveFailureOnce()
@@ -442,7 +442,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// Shows an already-loaded image (a fresh capture, or a file picked via Open) in THIS window
     /// instead of opening another one.
     ///
-    /// `AppDelegate` routes every capture through here when an editor is already open: taking ten
+    /// `EditorPresenter` routes every capture through here when an editor is already open: taking ten
     /// screenshots used to leave ten editor windows stacked on screen, each holding its own copy
     /// of a full-resolution image, and the newest one wasn't necessarily the one in front. The
     /// outgoing capture's annotations are flushed against the OLD `rawURL` first — same reason as

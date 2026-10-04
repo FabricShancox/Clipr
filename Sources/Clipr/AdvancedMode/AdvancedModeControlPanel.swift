@@ -2,7 +2,7 @@ import Cocoa
 import SwiftUI
 
 /// Observable state the floating control panel renders — owned by `AdvancedModeControlPanel` and
-/// updated by `AppDelegate` as steps land and the session pauses/resumes.
+/// updated by `AdvancedModeController` as steps land and the session pauses/resumes.
 final class AdvancedModeControlState: ObservableObject {
     @Published var stepCount = 0
     @Published var isPaused = false

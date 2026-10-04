@@ -1,6 +1,6 @@
 import Cocoa
 
-/// Owns the click-capture lifecycle and the Review windows it opens, so `AppDelegate` only has
+/// Owns the click-capture lifecycle and the Review windows it opens, so `AdvancedModeController` only has
 /// to decide what UI to show for each outcome (status item state, alerts) rather than also
 /// tracking window bookkeeping itself.
 final class AdvancedModeCoordinator {
@@ -30,7 +30,7 @@ final class AdvancedModeCoordinator {
         set { clickCaptureManager.captureCursor = newValue }
     }
 
-    /// Windows of any still-open Review sessions — folded into `AppDelegate.currentOwnWindowIDs`
+    /// Windows of any still-open Review sessions — folded into `AdvancedModeController.currentOwnWindowIDs`
     /// so Advanced Mode never captures its own Review window as if it were a step.
     var reviewWindows: [NSWindow?] { openReviewWindows.map(\.window) }
 

@@ -1,6 +1,6 @@
 import Cocoa
 
-/// Extracts `CGWindowID`s from a list of (possibly-absent) windows — used by `AppDelegate` to
+/// Extracts `CGWindowID`s from a list of (possibly-absent) windows — used by `AdvancedModeController` to
 /// build the self-exclusion set Advanced Mode checks each click against, so Clipr never captures
 /// its own menu bar, Preferences, editor, or Review windows as if they were a step the user
 /// clicked through.
