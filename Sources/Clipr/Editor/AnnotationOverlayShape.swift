@@ -145,13 +145,14 @@ struct AnnotationOverlayShape: View {
                 .fill(Color(white: 0.12))
                 .frame(width: displayFrame.width, height: displayFrame.height)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
-        } else if let cg = baseImage.bitmap,
-           let pixelated = Pixelation.pixelatedRegion(of: cg, in: displayFrame.scaled(by: baseImage.pixelScale)) {
+        } else if let (pixelated, visible) = PixelatedPreviewCache.shared.preview(of: baseImage, in: displayFrame) {
+            // Drawn over the on-canvas part only, matching the renderer: a redaction hanging off
+            // the edge used to have its clipped region stretched across the whole frame.
             Image(decorative: pixelated, scale: 1)
                 .resizable()
                 .interpolation(.none)
-                .frame(width: displayFrame.width, height: displayFrame.height)
-                .position(x: displayFrame.midX, y: displayFrame.midY)
+                .frame(width: visible.width, height: visible.height)
+                .position(x: visible.midX, y: visible.midY)
         } else {
             Rectangle()
                 .fill(Color(white: 0.5))

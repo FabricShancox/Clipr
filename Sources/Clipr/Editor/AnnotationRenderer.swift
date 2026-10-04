@@ -140,8 +140,13 @@ struct AnnotationRenderer {
     /// bottom-left/y-up space, hence the flip to locate the region; drawing the result back at
     /// `frame` lands it upright again. Fully opaque by construction — the previous flat box was
     /// 90% opaque and let a tenth of the original pixels through into the export.
-    private static func drawRedaction(over frame: CGRect, in context: CGContext, canvasSize: CGSize) {
-        guard let snapshot = context.makeImage() else { return }
+    private static func drawRedaction(over requested: CGRect, in context: CGContext, canvasSize: CGSize) {
+        // Only the on-canvas part is pixelated, and drawn back exactly there. Sampling the clipped
+        // region but drawing it into the whole frame stretched the blocks out of line with what
+        // they covered.
+        let frame = requested.intersection(CGRect(origin: .zero, size: canvasSize))
+        guard !frame.isNull, frame.width > 0, frame.height > 0,
+              let snapshot = context.makeImage() else { return }
         // The snapshot is in pixels; `frame` and `canvasSize` are in points.
         let scale = canvasSize.width > 0 ? CGFloat(snapshot.width) / canvasSize.width : 1
         let topDown = CGRect(
