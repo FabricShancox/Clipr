@@ -42,8 +42,8 @@ final class HTMLGuideWriterTests: XCTestCase {
 
     func testWidthFollowsImageSize() {
         let html = HTMLGuideWriter.write(doc(), images: images, mode: .embedded)
-        XCTAssertTrue(html.contains("alt=\"Step 1\" style=\"width:100%\""))
-        XCTAssertTrue(html.contains("alt=\"Step 2\" style=\"width:60%\""))
+        XCTAssertTrue(html.contains("alt=\"Step 1\" style=\"width:100%;max-width:10px"))
+        XCTAssertTrue(html.contains("alt=\"Step 2\" style=\"width:60%;max-width:10px"))
         XCTAssertTrue(html.contains("<div class=\"shot missing\" style=\"width:40%\">Image unavailable</div>"))
     }
 
@@ -56,7 +56,7 @@ final class HTMLGuideWriterTests: XCTestCase {
     func testLinkedImagesUsePositionalPaths() {
         let html = HTMLGuideWriter.write(doc(), images: images, mode: .linked(prefix: "images/"))
         XCTAssertTrue(html.contains("<img class=\"shot\" src=\"images/step-01.png\" alt=\"Step 1\""))
-        XCTAssertTrue(html.contains("<img class=\"zoom\" src=\"images/step-01-zoom.jpg\" alt=\"Step 1 close-up\" style=\"width:30%\">"))
+        XCTAssertTrue(html.contains("<img class=\"zoom\" src=\"images/step-01-zoom.jpg\" alt=\"Step 1 close-up\" style=\"width:30%;max-width:4px;--w:30%\">"))
         XCTAssertFalse(html.contains("data:"))
     }
 
@@ -83,5 +83,24 @@ final class HTMLGuideWriterTests: XCTestCase {
             let activeAttribute = try! NSRegularExpression(pattern: "<[^>]*(\\son[a-z]+\\s*=|javascript:)[^>]*>")
             XCTAssertNil(activeAttribute.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)), "\(mode)")
         }
+    }
+
+    func testImagesAreNeverEnlargedPastTheirPixelWidth() {
+        let wide = GuideImage(data: Data([1]), pixelWidth: 300, pixelHeight: 100, kind: .png)
+        let html = HTMLGuideWriter.write(doc(captions: ["A"]), images: RenderedImages(steps: [1: wide]), mode: .embedded)
+        XCTAssertTrue(html.contains("max-width:300px"))
+    }
+
+    func testFailedCloseUpIsOmittedNotShownAsPlaceholder() {
+        let html = HTMLGuideWriter.write(doc(captions: ["A"]), images: RenderedImages(steps: [1: png]), mode: .embedded)
+        XCTAssertFalse(html.contains("class=\"zoom"))
+        XCTAssertFalse(html.contains("close-up"))
+    }
+
+    func testContentSecurityPolicyOnlyForEmbedded() {
+        let embedded = HTMLGuideWriter.write(doc(), images: images, mode: .embedded)
+        XCTAssertTrue(embedded.contains("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">"))
+        let linked = HTMLGuideWriter.write(doc(), images: images, mode: .linked(prefix: "images/"))
+        XCTAssertFalse(linked.contains("Content-Security-Policy"))
     }
 }

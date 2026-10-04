@@ -32,7 +32,7 @@ enum GuideFormat: String, CaseIterable, Identifiable {
     /// The save panel's starting name: the title made safe for a filename, "Guide" when nothing
     /// usable is left of it.
     func suggestedFileName(for title: String) -> String {
-        let base = FilenameGenerator.sanitizedBaseName(title) ?? "Guide"
+        let base = FilenameGenerator.sanitizedBaseName(CaptionMarkup.stripBidi(title)) ?? "Guide"
         return fileExtension.map { "\(base).\($0)" } ?? base
     }
 }

@@ -21,6 +21,7 @@ enum HTMLGuideWriter {
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        \(contentSecurityPolicy(for: mode))
         <title>\(CaptionMarkup.escapeHTML(doc.title))</title>
         <style>
         \(css)
@@ -38,6 +39,13 @@ enum HTMLGuideWriter {
         return html
     }
 
+    /// No script, network or frames: only inline styles and data-URI images. Linked mode points at
+    /// files beside the HTML (file:// has no reliable `'self'`), so it carries no policy.
+    static func contentSecurityPolicy(for mode: HTMLImageMode) -> String {
+        guard mode == .embedded else { return "" }
+        return "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">"
+    }
+
     private static func stepHTML(_ step: GuideStep, images: RenderedImages, mode: HTMLImageMode) -> String {
         let number = step.number
         var html = "<section class=\"step\">\n"
@@ -50,8 +58,9 @@ enum HTMLGuideWriter {
         html += "<div class=\"figure\">\n"
         html += imageHTML(images.steps[number], step: number, zoom: false, alt: "Step \(number)",
                           width: step.imageSize.widthPercent, mode: mode)
-        if step.zoom != nil {
-            html += imageHTML(images.zooms[number], step: number, zoom: true, alt: "Step \(number) close-up",
+        // A close-up that failed to render is left out (the exporter warns), not shown as a placeholder.
+        if step.zoom != nil, let zoom = images.zooms[number] {
+            html += imageHTML(zoom, step: number, zoom: true, alt: "Step \(number) close-up",
                               width: zoomWidthPercent, mode: mode)
         }
         html += "</div>\n</section>\n"
@@ -70,7 +79,7 @@ enum HTMLGuideWriter {
         case .linked(let prefix):
             src = CaptionMarkup.escapeHTML(prefix + GuideImage.fileName(step: step, zoom: zoom, kind: image.kind))
         }
-        return "<img class=\"\(role)\" src=\"\(src)\" alt=\"\(alt)\" style=\"width:\(width)%\">\n"
+        return "<img class=\"\(role)\" src=\"\(src)\" alt=\"\(alt)\" style=\"width:\(width)%;max-width:\(image.pixelWidth)px;--w:\(width)%\">\n"
     }
 
     /// `break-inside: avoid` keeps each step on one page when WebKit prints the PDF; the print-only
@@ -92,7 +101,9 @@ enum HTMLGuideWriter {
     code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: #f2f2f4; padding: 1px 4px; border-radius: 4px; }
     @media print {
       .guide { max-width: none; padding: 0; }
-      .figure img { max-height: 200mm; object-fit: contain; object-position: left top; }
+      .figure { flex-wrap: nowrap; }
+      .figure > * { flex: 0 1 auto; min-width: 0; }
+      .figure img { width: auto !important; max-width: var(--w); max-height: 215mm; }
     }
     """
 }

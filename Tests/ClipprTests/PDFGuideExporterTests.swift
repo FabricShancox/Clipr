@@ -75,6 +75,27 @@ final class PDFGuideExporterTests: XCTestCase {
         for number in 1...30 { XCTAssertTrue(text.contains("Heading \(number) end"), "step \(number)") }
     }
 
+    func testTallImagesWithCloseUpsNeverSplitSteps() async throws {
+        let tall = testImage(width: 400, height: 1200) { NSColor.systemOrange.set(); NSRect(x: 0, y: 0, width: 400, height: 1200).fill() }
+        let image = try XCTUnwrap(GuideImages.encode(try XCTUnwrap(tall.bitmap)))
+        let steps = (1...30).map {
+            GuideStep(number: $0, caption: "Heading \($0) end", appName: nil, imageSize: .full,
+                      image: .file(URL(fileURLWithPath: "/unused.png")), zoom: .file(URL(fileURLWithPath: "/unused.png")))
+        }
+        var images = RenderedImages()
+        for step in steps { images.steps[step.number] = image; images.zooms[step.number] = image }
+        let html = HTMLGuideWriter.write(GuideDocument(title: "Tall", date: Date(), steps: steps), images: images, mode: .embedded)
+        let (url, error) = await export(html)
+        XCTAssertNil(error)
+        let pdf = try XCTUnwrap(PDFDocument(url: url))
+        // One step per page at most (the title shares page 1): a split step would add pages.
+        XCTAssertLessThanOrEqual(pdf.pageCount, 31)
+        for number in 1...30 {
+            let page = (0..<pdf.pageCount).first { pdf.page(at: $0)?.string?.contains("Heading \(number) end") == true }
+            XCTAssertNotNil(page, "step \(number)")
+        }
+    }
+
     func testTimeoutReportsTimedOut() async throws {
         let (_, error) = await export(try guideHTML(steps: 3), timeout: 0.001)
         XCTAssertEqual(error as? PDFExportError, .timedOut)

@@ -77,4 +77,14 @@ final class MarkdownGuideWriterTests: XCTestCase {
         try? FileManager.default.createDirectory(at: other.appendingPathComponent("images"), withIntermediateDirectories: true)
         XCTAssertTrue(MarkdownGuideWriter.hasExistingGuide(in: other), "an images folder alone also needs the Replace prompt")
     }
+
+    func testFailedCloseUpIsOmitted() {
+        let step = GuideStep(number: 1, caption: "A", appName: nil, imageSize: .full,
+                             image: .file(URL(fileURLWithPath: "/unused.png")), zoom: .file(URL(fileURLWithPath: "/unused-zoom.png")))
+        let image = GuideImage(data: Data([1]), pixelWidth: 10, pixelHeight: 5, kind: .png)
+        let md = MarkdownGuideWriter.write(GuideDocument(title: "T", date: Date(), steps: [step]),
+                                           images: RenderedImages(steps: [1: image]))
+        XCTAssertFalse(md.contains("close-up"))
+        XCTAssertFalse(md.contains("unavailable"))
+    }
 }

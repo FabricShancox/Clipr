@@ -101,6 +101,7 @@ final class GuideDocumentTests: XCTestCase {
         XCTAssertEqual(GuideFormat.pdf.suggestedFileName(for: "Set up / VPN"), "Set up - VPN.pdf")
         XCTAssertEqual(GuideFormat.html.suggestedFileName(for: "  "), "Guide.html")
         XCTAssertEqual(GuideFormat.gif.suggestedFileName(for: "Demo"), "Demo.gif")
+        XCTAssertEqual(GuideFormat.pdf.suggestedFileName(for: "A\u{202E}B\u{2066}C\u{2069}"), "ABC.pdf")
         XCTAssertEqual(GuideFormat.markdown.suggestedFileName(for: "Demo"), "Demo")
     }
 

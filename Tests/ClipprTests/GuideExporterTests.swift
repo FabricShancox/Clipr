@@ -196,4 +196,20 @@ final class GuideExporterTests: XCTestCase {
         XCTAssertEqual(GuideWarning.summary([.missingImage(step: 2), .missingImage(step: 5), .damagedAnnotations(step: 3)]),
                        "Steps 2, 5: image unavailable — exported with a placeholder.\nStep 3: annotations couldn't be read — exported without them.")
     }
+
+    func testFailedCloseUpWarnsAndIsDropped() async throws {
+        let image = png
+        let somewhere = GuideImageRef.file(URL(fileURLWithPath: "/unused.png"))
+        let zoomRef = GuideImageRef.file(URL(fileURLWithPath: "/unused-zoom.png"))
+        let step = GuideStep(number: 1, caption: "A", appName: nil, imageSize: .full, image: somewhere, zoom: zoomRef)
+        let exporter = GuideExporter(renderImage: { ref, _ in
+            ref == zoomRef ? GuideImageRender(image: nil, sidecarDamaged: false) : GuideImageRender(image: image, sidecarDamaged: false)
+        }, workRoot: work)
+        let destination = out.appendingPathComponent("Guide.html")
+        let warnings = try await exporter.export(GuideDocument(title: "T", date: Date(), steps: [step]),
+                                                 options: ExportOptions(format: .html, title: "T", includeZoom: true), to: destination)
+        XCTAssertEqual(warnings, [.missingCloseUp(step: 1)])
+        XCTAssertFalse(try String(contentsOf: destination, encoding: .utf8).contains("Image unavailable"))
+        XCTAssertEqual(GuideWarning.summary(warnings), "Step 1: close-up couldn't be rendered — exported without it.")
+    }
 }

@@ -13,9 +13,9 @@ enum MarkdownGuideWriter {
             let number = step.number
             lines.append("## \(number). \(CaptionMarkup.markdown(step.caption, fallbackNumber: number))")
             lines.append(imageLine(images.steps[number], step: number, zoom: false, alt: "Step \(number)", size: step.imageSize))
-            if step.zoom != nil {
+            if step.zoom != nil, let zoom = images.zooms[number] {
                 lines.append("")
-                lines.append(imageLine(images.zooms[number], step: number, zoom: true, alt: "Step \(number) close-up", size: .full))
+                lines.append(imageLine(zoom, step: number, zoom: true, alt: "Step \(number) close-up", size: .full))
             }
             lines.append("")
         }

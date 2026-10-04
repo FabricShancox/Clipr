@@ -57,8 +57,10 @@ enum GIFGuideExporter {
         ] as CFDictionary
         for (step, image) in zip(doc.steps, frames) {
             let caption = CaptionMarkup.plainText(step.caption, fallbackNumber: step.number)
-            guard let frame = renderFrame(image, caption: caption, canvas: canvas) else { throw GIFError.encodeFailed }
-            CGImageDestinationAddImage(destination, frame, frameProperties)
+            try autoreleasepool {
+                guard let frame = renderFrame(image, caption: caption, canvas: canvas) else { throw GIFError.encodeFailed }
+                CGImageDestinationAddImage(destination, frame, frameProperties)
+            }
         }
         guard CGImageDestinationFinalize(destination) else { throw GIFError.encodeFailed }
     }
