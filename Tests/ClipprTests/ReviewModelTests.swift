@@ -1,5 +1,6 @@
 // Tests/ClipprTests/ReviewModelTests.swift
 import XCTest
+import Cocoa
 @testable import Clipr
 
 @MainActor
@@ -472,5 +473,78 @@ final class ReviewModelTests: XCTestCase {
         model.flush()
         XCTAssertEqual(model.refreshToken, before + 1)
         XCTAssertEqual(captions(model.manifest), ["b", "a", "c"])
+    }
+
+    // MARK: Replace image
+
+    private func setClickData(step index: Int) throws -> UUID {
+        var m = SessionManifestStore.load(from: folder)
+        m.steps[index].clickPoint = CGPoint(x: 5, y: 6)
+        m.steps[index].zoomFile = FilenameGenerator.zoomName(fromStep: m.steps[index].file)
+        try SessionManifestStore.save(m, in: folder)
+        FileManager.default.createFile(atPath: folder.appendingPathComponent(m.steps[index].zoomFile!).path, contents: Data([9]))
+        FileManager.default.createFile(atPath: folder.appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: m.steps[index].file)).path, contents: Data([8]))
+        return m.steps[index].id
+    }
+
+    private func newImage() -> NSImage {
+        testImage(width: 8, height: 5) { NSColor.green.set(); NSRect(x: 0, y: 0, width: 8, height: 5).fill() }
+    }
+
+    private func fileData(_ name: String) -> Data? { try? Data(contentsOf: folder.appendingPathComponent(name)) }
+
+    func testReplaceImageWritesNewPNGTrashesOldAndClearsClickData() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        model.replaceImage(for: id, with: newImage())
+        let step = onDisk.steps[1]
+        XCTAssertEqual(step.file, "Step_02.png")
+        XCTAssertEqual(step.caption, "b")
+        XCTAssertNil(step.clickPoint)
+        XCTAssertNil(step.zoomFile)
+        XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
+        XCTAssertNil(fileData("Step_02_zoom.png"))
+        XCTAssertNil(fileData("Step_02_annotations.json"))
+        XCTAssertEqual(model.undoManager.undoActionName, "Replace Image")
+    }
+
+    func testUndoRedoReplaceImage() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        let before = model.refreshToken
+        model.replaceImage(for: id, with: newImage())
+        XCTAssertGreaterThan(model.refreshToken, before)
+        model.undoManager.undo()
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        XCTAssertEqual(fileData("Step_02_zoom.png"), Data([9]))
+        XCTAssertEqual(fileData("Step_02_annotations.json"), Data([8]))
+        XCTAssertEqual(onDisk.steps[1].clickPoint, CGPoint(x: 5, y: 6))
+        XCTAssertEqual(onDisk.steps[1].zoomFile, "Step_02_zoom.png")
+        model.undoManager.redo()
+        XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
+        XCTAssertNil(onDisk.steps[1].clickPoint)
+        XCTAssertNil(fileData("Step_02_zoom.png"))
+        model.undoManager.undo()
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+    }
+
+    func testReplaceImageWriteFailureLeavesOriginal() throws {
+        let id = try setClickData(step: 1)
+        let model = ReviewModel(folder: folder, files: fakeFiles, writeImage: { _, _ in throw CocoaError(.fileWriteUnknown) }, captionDelay: 0.05)
+        model.replaceImage(for: id, with: newImage())
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        XCTAssertEqual(fileData("Step_02_zoom.png"), Data([9]))
+        XCTAssertEqual(onDisk.steps[1].clickPoint, CGPoint(x: 5, y: 6))
+        XCTAssertEqual(model.banner, "Couldn't replace the image for Step_02.png")
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    func testReplaceImageBlockedWhenReadOnly() throws {
+        var m = SessionManifestStore.load(from: folder)
+        m.version = SessionManifestStore.currentVersion + 1
+        try SessionManifestStore.save(m, in: folder)
+        let model = makeModel()
+        model.replaceImage(for: model.manifest.steps[0].id, with: newImage())
+        XCTAssertEqual(fileData("Step_01.png"), Data([1]))
     }
 }

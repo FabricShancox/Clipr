@@ -68,3 +68,8 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] View toggle (List / Large / Guide) and ⌘1 / ⌘2 / ⌘3 switch layouts; images in Large and Guide are sharp.
 - [ ] Drag-reorder, ⌫, ⌘Z and caption editing work the same in all three layouts.
 - [ ] Close and reopen Review → it opens in the last chosen layout.
+- [ ] Edit's arrow (or right-click a row) → Retake Screenshot… → Review hides, capture overlay appears; drag an area → Review returns with the new image in that step; caption kept.
+- [ ] Retake, then press Esc in the overlay → nothing changes.
+- [ ] Replace with File… → pick a PNG/JPEG/HEIC → the step shows the new image; the old PNG, annotations and zoom are in the Trash.
+- [ ] After a replace, ⌘Z → original image (with its marker) back; ⇧⌘Z → new image again.
+- [ ] Read-only session → Retake / Replace items are disabled.

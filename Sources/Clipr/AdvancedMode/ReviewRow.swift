@@ -10,6 +10,8 @@ struct ReviewRow: View {
     @ObservedObject var model: ReviewModel
     @Binding var editingID: UUID?
     let onOpenEditor: (StepRecord) -> Void
+    let onRetake: (StepRecord) -> Void
+    let onReplaceWithFile: (StepRecord) -> Void
 
     @State private var draft = ""
     @State private var suppressNextDraftChange = false
@@ -20,6 +22,7 @@ struct ReviewRow: View {
     var body: some View {
         content
             .padding(.vertical, layout == .list ? 6 : 10)
+            .contextMenu { imageActions }
         .onChange(of: editingID) { _, newValue in
             if newValue == step.id {
                 model.beginCaptionEdit(for: step.id)
@@ -109,9 +112,28 @@ struct ReviewRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Clicking "Edit" opens the image editor; its arrow offers replacing the image instead.
     private var editButton: some View {
-        Button("Edit") { onOpenEditor(step) }
-            .padding(.top, 2)
+        Menu {
+            imageActions
+        } label: {
+            Text("Edit")
+        } primaryAction: {
+            onOpenEditor(step)
+        }
+        .menuStyle(.borderedButton)
+        .fixedSize()
+        .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private var imageActions: some View {
+        Button("Edit Image…") { onOpenEditor(step) }
+        Divider()
+        Button("Retake Screenshot…") { onRetake(step) }
+            .disabled(model.isReadOnly)
+        Button("Replace with File…") { onReplaceWithFile(step) }
+            .disabled(model.isReadOnly)
     }
 
     @ViewBuilder

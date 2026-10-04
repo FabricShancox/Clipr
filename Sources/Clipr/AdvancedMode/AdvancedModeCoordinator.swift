@@ -98,6 +98,10 @@ final class AdvancedModeCoordinator {
 
     /// Writes every open Review's pending caption (and its editors' pending saves) now. Quit calls
     /// this: termination doesn't close windows, so their close-time flush would never run.
+    /// Runs a capture for Review's "Retake Screenshot…" and hands back the image. Set by
+    /// `AppDelegate`, which owns the capture manager.
+    var captureReplacement: ((@escaping (NSImage?) -> Void) -> Void)?
+
     func flushOpenReviews() {
         for review in openReviewWindows { review.flush() }
     }
@@ -109,7 +113,13 @@ final class AdvancedModeCoordinator {
             return existing
         }
         // The coordinator is only ever called on the main thread.
-        let review = MainActor.assumeIsolated { ReviewWindowController(sessionFolder: sessionFolder, storage: storage) }
+        let review = MainActor.assumeIsolated { ReviewWindowController(
+            sessionFolder: sessionFolder, storage: storage,
+            captureReplacement: { [weak self] done in
+                guard let capture = self?.captureReplacement else { return done(nil) }
+                capture(done)
+            }
+        ) }
         openReviewWindows.append(review)
         // ReviewWindowController has no onFinished-style closure (unlike EditorWindowController),
         // so its close is observed externally via NSWindow.willCloseNotification instead.

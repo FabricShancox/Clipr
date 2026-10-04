@@ -29,6 +29,22 @@ final class CaptureManager {
         self.storage = storage
     }
 
+    /// Set while Review is retaking a step: the next capture is handed back here instead of being
+    /// saved as a new screenshot, copied, or opened in the editor.
+    private var replacementCompletion: ((NSImage?) -> Void)?
+
+    /// Runs the normal capture overlay and returns the image (nil if cancelled or failed) without
+    /// saving it anywhere.
+    func captureImage(completion: @escaping (NSImage?) -> Void) {
+        guard PermissionsManager.hasScreenRecordingPermission() else {
+            PermissionsManager.requestScreenRecordingPermission()
+            completion(nil)
+            return
+        }
+        replacementCompletion = completion
+        beginCapture()
+    }
+
     func beginCapture() {
         guard PermissionsManager.hasScreenRecordingPermission() else {
             PermissionsManager.requestScreenRecordingPermission()
@@ -40,6 +56,7 @@ final class CaptureManager {
             } catch {
                 NSLog("Clipr capture failed: \(error)")
                 onCaptureFailed?(error)
+                deliverReplacement(nil)
                 return
             }
             CaptureOverlayWindow.showAll(frozenScreens: frozenScreens) { [weak self] result in
@@ -71,6 +88,10 @@ final class CaptureManager {
                     CaptureOverlayWindow.restoreHiddenWindows()
                     frozenScreens = [:]
                 }
+                if await MainActor.run(body: { replacementCompletion != nil }) {
+                    await MainActor.run { deliverReplacement(image) }
+                    return
+                }
                 guard let image else { return }
                 let date = Date()
                 let rawURL = try storage.saveRawCapture(image, date: date)
@@ -84,9 +105,17 @@ final class CaptureManager {
                     CaptureOverlayWindow.restoreHiddenWindows()
                     frozenScreens = [:]
                     onCaptureFailed?(error)
+                    deliverReplacement(nil)
                 }
             }
         }
+    }
+
+    @MainActor
+    private func deliverReplacement(_ image: NSImage?) {
+        guard let completion = replacementCompletion else { return }
+        replacementCompletion = nil
+        completion(image)
     }
 
     /// The frozen still of `screen`, or a live shot if it has none (a display plugged in

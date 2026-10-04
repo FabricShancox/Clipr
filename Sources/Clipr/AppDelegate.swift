@@ -41,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureManager.onCaptureFailed = { [weak self] error in
             self?.showCaptureFailure(error)
         }
+        advancedMode.captureReplacement = { [weak self] done in
+            guard let self else { return done(nil) }
+            self.captureManager.captureImage(completion: done)
+        }
         advancedMode.onStepCaptured = { [weak self] count in
             self?.statusItemController.setAdvancedModeStepCount(count)
             self?.advancedModePanel?.state.stepCount = count

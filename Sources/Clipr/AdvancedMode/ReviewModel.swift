@@ -1,5 +1,5 @@
 // Sources/Clipr/AdvancedMode/ReviewModel.swift
-import Foundation
+import AppKit
 
 /// Everything Review can change about a session, applied as manifest edits that save at once and
 /// undo by swapping the previous manifest back (plus moving files out of / back from the Trash for
@@ -20,6 +20,7 @@ final class ReviewModel: ObservableObject {
 
     private let files: StepFiles
     private let save: (SessionManifest, URL) throws -> Void
+    private let writeImage: (NSImage, URL) throws -> Void
     private let captionDelay: TimeInterval
     private var pendingCaption: (id: UUID, text: String?)?
     private var captionWork: DispatchWorkItem?
@@ -48,11 +49,13 @@ final class ReviewModel: ObservableObject {
         folder: URL,
         files: StepFiles = StepFiles(),
         save: @escaping (SessionManifest, URL) throws -> Void = SessionManifestStore.saveSafely,
+        writeImage: @escaping (NSImage, URL) throws -> Void = StepFiles.writePNG,
         captionDelay: TimeInterval = 0.5
     ) {
         self.folder = folder
         self.files = files
         self.save = save
+        self.writeImage = writeImage
         self.captionDelay = captionDelay
         let loaded = SessionManifestStore.loadForReview(from: folder)
         manifest = loaded.manifest
@@ -233,6 +236,62 @@ final class ReviewModel: ObservableObject {
         selection = Set(restored.map(\.record.id))
         let ids = Set(restored.map(\.record.id))
         registerUndo("Delete Steps") { $0.delete(ids: ids) }
+    }
+
+    // MARK: Replace image
+
+    /// Swaps a step's image for a retake or a chosen file. The old image and everything derived
+    /// from it (annotations, zoom crop, edited preview) go to the Trash, and the click point and
+    /// zoom are cleared because they describe the old image. The step keeps its filename, place
+    /// and caption.
+    func replaceImage(for id: UUID, with image: NSImage) {
+        guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        flushPendingCaption()
+        let failure = "Couldn't replace the image for \(step.file)"
+        let old: TrashedStep
+        do { old = try files.trash(step.file, in: folder) } catch { banner = failure; return }
+        do {
+            try writeImage(image, url(for: step))
+        } catch {
+            // Put the original back so a failed write never leaves the step without an image.
+            try? files.restore(old)
+            banner = failure
+            return
+        }
+        applyImageFields(clickPoint: nil, zoomFile: nil, for: id)
+        registerUndo("Replace Image") { $0.swapImage(for: id, restoring: old, record: step) }
+    }
+
+    /// Undo and redo of a replacement: the current image set goes to the Trash and `trashed` comes
+    /// back, with the click data that belongs to it. Each swap registers the opposite swap.
+    private func swapImage(for id: UUID, restoring trashed: TrashedStep, record: StepRecord) {
+        guard let current = manifest.steps.first(where: { $0.id == id }) else { return }
+        let currentFiles: TrashedStep
+        do { currentFiles = try files.trash(current.file, in: folder) } catch {
+            banner = "Couldn't replace the image for \(current.file)"
+            return
+        }
+        do {
+            try files.restore(trashed)
+        } catch {
+            try? files.restore(currentFiles)
+            banner = "Couldn't restore \(current.file) — it's no longer in the Trash"
+            return
+        }
+        applyImageFields(clickPoint: record.clickPoint, zoomFile: record.zoomFile, for: id)
+        registerUndo("Replace Image") { $0.swapImage(for: id, restoring: currentFiles, record: current) }
+    }
+
+    private func applyImageFields(clickPoint: CGPoint?, zoomFile: String?, for id: UUID) {
+        guard let index = manifest.steps.firstIndex(where: { $0.id == id }) else { return }
+        manifest.steps[index].clickPoint = clickPoint
+        manifest.steps[index].zoomFile = zoomFile
+        _ = persist()
+        for url in StepFiles.companions(of: manifest.steps[index].file, in: folder) + [url(for: manifest.steps[index])] {
+            ThumbnailCache.shared.remove(url)
+        }
+        ThumbnailCache.shared.remove(folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: manifest.steps[index].file)))
+        refreshToken += 1
     }
 
     // MARK: Reload

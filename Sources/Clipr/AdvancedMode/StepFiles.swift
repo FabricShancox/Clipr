@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 enum StepFilesError: Error, Equatable {
     case trashedFileMissing(String)
@@ -95,5 +95,15 @@ struct StepFiles {
             }
             throw error
         }
+    }
+
+    /// A replacement step image, written as PNG at its own point size so Retina images keep every
+    /// pixel (the same convention as capture: see `NSImage+PixelScale.swift`).
+    static func writePNG(_ image: NSImage, to url: URL) throws {
+        guard let bitmap = image.bitmap else { throw CocoaError(.fileWriteUnknown) }
+        let rep = NSBitmapImageRep(cgImage: bitmap)
+        rep.size = image.size
+        guard let data = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
+        try data.write(to: url, options: .atomic)
     }
 }

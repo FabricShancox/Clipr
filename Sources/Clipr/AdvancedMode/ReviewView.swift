@@ -4,6 +4,8 @@ import SwiftUI
 struct ReviewView: View {
     @ObservedObject var model: ReviewModel
     let onOpenEditor: (StepRecord) -> Void
+    let onRetake: (StepRecord) -> Void
+    let onReplaceWithFile: (StepRecord) -> Void
     let onShowInFinder: () -> Void
 
     @State private var editingID: UUID?
@@ -70,7 +72,8 @@ struct ReviewView: View {
     private var list: some View {
         List(selection: $model.selection) {
             ForEach(Array(model.manifest.steps.enumerated()), id: \.element.id) { index, step in
-                ReviewRow(number: index + 1, step: step, layout: layout, model: model, editingID: $editingID, onOpenEditor: onOpenEditor)
+                ReviewRow(number: index + 1, step: step, layout: layout, model: model, editingID: $editingID, onOpenEditor: onOpenEditor,
+                          onRetake: onRetake, onReplaceWithFile: onReplaceWithFile)
                     .tag(step.id)
             }
             .onMove { model.move(fromOffsets: $0, toOffset: $1) }

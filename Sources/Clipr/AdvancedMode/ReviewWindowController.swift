@@ -1,9 +1,11 @@
 import Cocoa
 import SwiftUI
+import UniformTypeIdentifiers
 
 final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     private let storage: StorageManager
     private let model: ReviewModel
+    private let captureReplacement: (@escaping (NSImage?) -> Void) -> Void
     let sessionFolder: URL
     // Keeps each opened EditorWindowController alive until it finishes; without this,
     // the local `editor` in openEditor(for:) would be deallocated as soon as that
@@ -13,8 +15,9 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
     @MainActor
-    init(sessionFolder: URL, storage: StorageManager) {
+    init(sessionFolder: URL, storage: StorageManager, captureReplacement: @escaping (@escaping (NSImage?) -> Void) -> Void) {
         self.storage = storage
+        self.captureReplacement = captureReplacement
         self.sessionFolder = sessionFolder
         model = ReviewModel(folder: sessionFolder)
         let window = NSWindow(
@@ -30,6 +33,8 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = NSHostingView(rootView: ReviewView(
             model: model,
             onOpenEditor: { [weak self] step in self?.openEditor(for: step) },
+            onRetake: { [weak self] step in self?.retake(step) },
+            onReplaceWithFile: { [weak self] step in self?.replaceWithFile(step) },
             onShowInFinder: { NSWorkspace.shared.activateFileViewerSelecting([sessionFolder]) }
         ))
         window.center()
@@ -69,6 +74,30 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// A caption typed in the last half-second must still be saved.
     func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated { model.flush() }
+    }
+
+    /// The capture overlay hides Clipr's windows (this one included) while it's up and restores
+    /// them afterwards, so the user can capture whatever was behind Review.
+    private func retake(_ step: StepRecord) {
+        captureReplacement { [weak self] image in
+            guard let self else { return }
+            if let image { MainActor.assumeIsolated { self.model.replaceImage(for: step.id, with: image) } }
+            self.present()
+        }
+    }
+
+    private func replaceWithFile(_ step: StepRecord) {
+        let panel = NSOpenPanel()
+        panel.title = "Replace Image"
+        panel.prompt = "Replace"
+        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
+        panel.allowsMultipleSelection = false
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            guard let image = NSImage(contentsOf: url) else { return }
+            MainActor.assumeIsolated { self.model.replaceImage(for: step.id, with: image) }
+        }
     }
 
     private func openEditor(for step: StepRecord) {
