@@ -477,7 +477,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// it's reassigned, so a very recent edit that hadn't reached its debounce yet isn't lost.
     private func loadCapture(_ url: URL, previousAnnotations: [AnnotationObject]) {
         persist(previousAnnotations)
-        guard let newImage = NSImage(contentsOf: url) else { return }
+        // Header-checked before the full decode — see `DecodeLimits`.
+        guard case .loaded(let newImage) = DecodeLimits.loadImage(at: url) else {
+            NSSound.beep()
+            return
+        }
         image = newImage
         rawURL = url
         window?.contentView = makeContentView()

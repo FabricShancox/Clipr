@@ -153,7 +153,12 @@ final class StorageManager {
         let url = annotationsURL(forRaw: rawURL)
         guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
         do {
-            return .loaded(try JSONDecoder().decode([AnnotationObject].self, from: Data(contentsOf: url)))
+            // Size-checked before reading and range-checked after decoding — see `DecodeLimits`.
+            let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard bytes <= DecodeLimits.maxSidecarBytes else { throw SidecarLimitError.tooLarge(bytes: bytes) }
+            let annotations = try JSONDecoder().decode([AnnotationObject].self, from: Data(contentsOf: url))
+            guard DecodeLimits.areAcceptable(annotations) else { throw SidecarLimitError.outOfRange }
+            return .loaded(annotations)
         } catch {
             return .corrupt(error)
         }

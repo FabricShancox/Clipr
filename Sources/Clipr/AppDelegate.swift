@@ -105,7 +105,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.title = "Open Image in Clipr"
-        guard panel.runModal() == .OK, let url = panel.url, let image = NSImage(contentsOf: url) else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let image: NSImage
+        switch DecodeLimits.loadImage(at: url) {
+        case .loaded(let loaded):
+            image = loaded
+        case .unreadable:
+            showOpenImageFailure(url, reason: "It isn't an image Clipr can read.")
+            return
+        case .tooLarge(let width, let height):
+            showOpenImageFailure(url, reason: "It is \(width) × \(height) pixels, which is too large to edit.")
+            return
+        }
         do {
             let editable = try storage.importForEditing(url, image: image)
             openEditor(image: image, rawURL: editable)
@@ -117,6 +128,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.alertStyle = .warning
             alert.runModal()
         }
+    }
+
+    private func showOpenImageFailure(_ url: URL, reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't open \(url.lastPathComponent)"
+        alert.informativeText = reason
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     private func registerHotkeys() {
