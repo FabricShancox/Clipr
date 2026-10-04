@@ -24,7 +24,22 @@ final class CaptureGeometryTests: XCTestCase {
         let corner = CaptureGeometry.clampedCanvasCorner(
             CGPoint(x: 100_000, y: 100_000), fixed: CGPoint(x: 10, y: 10), imageSize: CGSize(width: 6000, height: 6000), pixelScale: 2
         )
-        XCTAssertEqual(corner, CGPoint(x: 10 + 8192, y: 10 + 8192))
+        let width = (corner.x - 10) * 2, height = (corner.y - 10) * 2
+        XCTAssertLessThanOrEqual(width, 16_384)
+        XCTAssertLessThanOrEqual(height, 16_384)
+        XCTAssertLessThanOrEqual(Int(width) * Int(height), DecodeLimits.maxImagePixels, "the result must reopen")
+        XCTAssertEqual(width, height, accuracy: 1, "shrunk evenly")
+        XCTAssertGreaterThan(Int(width) * Int(height), DecodeLimits.maxImagePixels - 40_000, "but no further than needed")
+    }
+
+    func testTheCanvasPixelCountStaysWithinTheDecodeLimitForAWideDrag() {
+        // 16,384 × 15,000 is within the per-side limit but 245 MP in all.
+        let corner = CaptureGeometry.clampedCanvasCorner(
+            CGPoint(x: -16_384, y: 15_000), fixed: .zero, imageSize: CGSize(width: 6000, height: 6000), pixelScale: 1
+        )
+        XCTAssertLessThan(corner.x, 0, "direction kept")
+        XCTAssertLessThanOrEqual(Int(-corner.x) * Int(corner.y), DecodeLimits.maxImagePixels)
+        XCTAssertEqual(-corner.x / corner.y, 16_384 / 15_000, accuracy: 0.001)
     }
 
     func testAnOrdinaryDragIsUnchanged() {

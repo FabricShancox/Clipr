@@ -17,14 +17,25 @@ struct CaptureGeometry {
     static let maxCanvasPixels: CGFloat = 16_384
 
     /// A dragged canvas corner held within reach of the opposite (`fixed`) one: at most four times
-    /// the image's size, and never more than `maxCanvasPixels` on a side. Unbounded, a corner
-    /// dragged far outward at 5% zoom asked for a context many gigabytes large.
+    /// the image's size, never more than `maxCanvasPixels` on a side, and never more pixels in all
+    /// than `DecodeLimits.maxImagePixels` — otherwise the saved result couldn't be opened again.
+    /// Unbounded, a corner dragged far outward at 5% zoom asked for a context many gigabytes large.
     static func clampedCanvasCorner(_ point: CGPoint, fixed: CGPoint, imageSize: CGSize, pixelScale: CGFloat) -> CGPoint {
-        let limit = maxCanvasPixels / max(pixelScale, 1)
+        let scale = max(pixelScale, 1)
+        let limit = maxCanvasPixels / scale
         let maxWidth = min(imageSize.width * 4, limit)
         let maxHeight = min(imageSize.height * 4, limit)
-        let dx = min(max(point.x - fixed.x, -maxWidth), maxWidth)
-        let dy = min(max(point.y - fixed.y, -maxHeight), maxHeight)
+        var dx = min(max(point.x - fixed.x, -maxWidth), maxWidth)
+        var dy = min(max(point.y - fixed.y, -maxHeight), maxHeight)
+        let pixels = abs(dx) * scale * abs(dy) * scale
+        let maxPixels = CGFloat(DecodeLimits.maxImagePixels)
+        if pixels > maxPixels {
+            // Shrunk evenly, keeping the drag's proportions, and rounded down to whole pixels so
+            // the product stays within the limit.
+            let factor = (maxPixels / pixels).squareRoot()
+            dx = (abs(dx) * scale * factor).rounded(.down) / scale * (dx < 0 ? -1 : 1)
+            dy = (abs(dy) * scale * factor).rounded(.down) / scale * (dy < 0 ? -1 : 1)
+        }
         return CGPoint(x: fixed.x + dx, y: fixed.y + dy)
     }
 
