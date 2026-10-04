@@ -22,6 +22,7 @@ struct PreferencesView: View {
     /// copy-style menu and these toggles always agree.
     @AppStorage private var copyBorder: Bool
     @AppStorage private var copyShadow: Bool
+    @AppStorage private var checkForUpdates: Bool
     @State private var advanced: AdvancedModeSettings
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
 
@@ -42,6 +43,7 @@ struct PreferencesView: View {
         _captureCursor = State(initialValue: settings.captureCursor)
         _copyBorder = AppStorage(wrappedValue: false, SettingsStore.copyBorderKey, store: settings.defaults)
         _copyShadow = AppStorage(wrappedValue: false, SettingsStore.copyShadowKey, store: settings.defaults)
+        _checkForUpdates = AppStorage(wrappedValue: true, SettingsStore.checkForUpdatesAutomaticallyKey, store: settings.defaults)
         _advanced = State(initialValue: settings.advancedMode)
     }
 
@@ -130,6 +132,10 @@ struct PreferencesView: View {
                     get: { launchAtLogin },
                     set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
                 ))
+                Toggle(isOn: $checkForUpdates) {
+                    Text("Check for updates automatically")
+                    Text("Asks GitHub for a newer release at most once a day.")
+                }
             } header: {
                 sectionHeader("Startup")
             }

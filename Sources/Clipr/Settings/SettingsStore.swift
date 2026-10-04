@@ -30,6 +30,9 @@ final class SettingsStore {
     static let copyBorderKey = "copyBorder"
     static let copyShadowKey = "copyShadow"
 
+    /// Read directly by `UpdateChecker`, which has no `SettingsStore` of its own.
+    static let checkForUpdatesAutomaticallyKey = "checkForUpdatesAutomatically"
+
     /// Shared with `ReviewView`'s `@AppStorage`, which reads and writes the same key directly.
     static let reviewLayoutKey = "reviewLayout"
 
@@ -83,6 +86,12 @@ final class SettingsStore {
                 NSLog("Clipr: failed to update login item registration: \(error)")
             }
         }
+    }
+
+    /// Whether Clipr asks GitHub for a newer release at launch (at most once a day). On by default.
+    var checkForUpdatesAutomatically: Bool {
+        get { defaults.object(forKey: Self.checkForUpdatesAutomaticallyKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Self.checkForUpdatesAutomaticallyKey) }
     }
 
     /// Whether the mouse cursor should be included in captures. Off by default — most users

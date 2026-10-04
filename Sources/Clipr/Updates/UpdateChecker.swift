@@ -37,7 +37,9 @@ final class UpdateChecker {
 
     private struct Release: Decodable {
         let tagName: String
-        let htmlURL: URL
+        /// Optional so a malformed value doesn't fail the whole check; it's never opened as-is
+        /// anyway — see `releasePage(for:)`.
+        let htmlURL: URL?
 
         enum CodingKeys: String, CodingKey {
             case tagName = "tag_name"
@@ -55,8 +57,41 @@ final class UpdateChecker {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String).flatMap(AppVersion.init)
     }
 
+    /// The releases page opened when the API's own link isn't one we trust.
+    static let releasesPage = URL(string: "https://github.com/FabricShancox/Clipr/releases")!
+
+    /// The page "Open Release Page" opens for the API's `html_url`.
+    ///
+    /// The link comes from the network, so it is only opened when it is plainly this repository's
+    /// releases page on github.com over https — anything else (a `file://` URL, a custom scheme
+    /// that launches another app, a look-alike host, credentials or `..` in the path) is replaced
+    /// by the fixed releases page. Otherwise a compromised account, API response or intercepted
+    /// connection could make Clipr open anything at all.
+    static func releasePage(for url: URL?) -> URL {
+        guard let url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.host?.lowercased() == "github.com",
+              components.user == nil, components.password == nil, components.port == nil
+        else { return releasesPage }
+        let path = components.path
+        let prefix = "/FabricShancox/Clipr/releases"
+        guard path == prefix || path.hasPrefix(prefix + "/"),
+              !path.split(separator: "/").contains(where: { $0 == ".." || $0 == "." })
+        else { return releasesPage }
+        return url
+    }
+
+    /// Whether the once-a-day launch check may run. On unless the user turned it off in
+    /// Preferences (`SettingsStore.checkForUpdatesAutomatically`).
+    var isAutomaticCheckEnabled: Bool {
+        defaults.object(forKey: SettingsStore.checkForUpdatesAutomaticallyKey) as? Bool ?? true
+    }
+
     /// The launch-time check: at most once a day, and silent unless there's something to install.
+    /// Skipped entirely when automatic checks are off; "Check for Updates…" still works.
     func checkInBackgroundIfDue() {
+        guard isAutomaticCheckEnabled else { return }
         if let last = defaults.object(forKey: Self.lastCheckKey) as? Date,
            Date().timeIntervalSince(last) < Self.checkInterval { return }
         check(userInitiated: false)
@@ -123,7 +158,7 @@ final class UpdateChecker {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(Self.upgradeCommand, forType: .string)
         case .alertSecondButtonReturn:
-            NSWorkspace.shared.open(release.htmlURL)
+            NSWorkspace.shared.open(Self.releasePage(for: release.htmlURL))
         default:
             break
         }
