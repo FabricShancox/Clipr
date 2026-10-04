@@ -352,46 +352,69 @@ final class ClickCaptureManager {
         let settings = self.settings
         let showsCursor = captureCursor
         let imageSource = self.imageSource
-        let task = Task { [weak self] in
+        // Runs off the main thread, where the event tap lives: capture, PNG encode, zoom crop and
+        // every file write happen here. Only claiming the step number and appending to the
+        // manifest hop to the main actor, so steps still land in order.
+        let task = Task.detached { [weak self] in
             // Released however this step ends — written, skipped or failed — so the steps
             // queued behind it are never stuck waiting.
             defer { slot?.done.finish() }
-            var frame: CapturedFrame?
-            if await !skipIf() {
-                do {
-                    frame = try await imageSource.capture(target, showsCursor: showsCursor)
-                } catch {
-                    NSLog("Clipr: advanced mode step capture failed: \(error)")
-                }
-            }
-            let text = if let frame { await caption(frame.appName) } else { String?.none }
+            // Encoded before waiting for the steps ahead, so a queue of fast clicks holds PNG
+            // bytes rather than full-resolution bitmaps.
+            let prepared = await Self.captureAndPrepare(
+                target: target, imageSource: imageSource, showsCursor: showsCursor, skipIf: skipIf,
+                kind: kind, click: click, trail: trail, settings: settings, caption: caption
+            )
             await predecessor?.value
-            guard let self, let frame else { return }
-            await MainActor.run {
-                self.write(frame, kind: kind, click: click, trail: trail, caption: text, settings: settings, folder: folder)
-            }
+            guard let self, let prepared else { return }
+            await self.write(prepared, folder: folder)
         }
         if slot == nil { lastWrite = task }
     }
 
-    /// Main actor only, so the index increment and manifest append can never interleave.
-    private func write(_ frame: CapturedFrame, kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint],
-                       caption: String?, settings: AdvancedModeSettings, folder: URL) {
-        // The folder check drops a step from a session that already stopped (its flush timed
-        // out) and would otherwise land in the next session's manifest.
-        guard manifest != nil, folder == sessionFolder else { return }
-        let index = nextStepIndex
-        nextStepIndex += 1
-        let stepURL: URL
+    /// One step's files, encoded and ready to write.
+    struct PreparedStep {
+        let png: Data
+        let annotations: [AnnotationObject]
+        let zoomPNG: Data?
+        let kind: StepRecord.Kind
+        let caption: String?
+        let clickPoint: CGPoint?
+        let appName: String?
+        let capturedAt: Date
+    }
+
+    /// Captures, captions and encodes a step. The captured bitmap lives only inside this call.
+    private static func captureAndPrepare(
+        target: CaptureTarget, imageSource: StepImageSource, showsCursor: Bool, skipIf: () async -> Bool,
+        kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint], settings: AdvancedModeSettings,
+        caption: (_ appName: String?) async -> String?
+    ) async -> PreparedStep? {
+        guard await !skipIf() else { return nil }
+        let frame: CapturedFrame?
         do {
-            stepURL = try storage.saveStep(frame.image, index: index, in: folder)
+            frame = try await imageSource.capture(target, showsCursor: showsCursor)
         } catch {
-            NSLog("Clipr: advanced mode step save failed: \(error)")
-            return
+            NSLog("Clipr: advanced mode step capture failed: \(error)")
+            return nil
+        }
+        guard let frame else { return nil }
+        let text = await caption(frame.appName)
+        return autoreleasepool {
+            prepare(frame, kind: kind, click: click, trail: trail, caption: text, settings: settings)
+        }
+    }
+
+    /// Pure: the encoded step image, its marker/trail annotations and zoom crop. Nil only if the
+    /// image won't encode.
+    static func prepare(_ frame: CapturedFrame, kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint],
+                        caption: String?, settings: AdvancedModeSettings, capturedAt: Date = Date()) -> PreparedStep? {
+        guard let png = StepFiles.pngData(frame.image) else {
+            NSLog("Clipr: advanced mode step encode failed")
+            return nil
         }
         let size = frame.image.size
         let imagePoint = click.flatMap { StepGeometry.imagePoint(global: $0, captureOrigin: frame.origin, imageSize: size) }
-
         var annotations: [AnnotationObject] = []
         if settings.cursorTrail, kind == .click, let click,
            let path = StepAnnotationFactory.trail(globalPoints: trail + [click], captureOrigin: frame.origin, imageSize: size) {
@@ -400,29 +423,99 @@ final class ClickCaptureManager {
         if settings.clickMarker, let imagePoint {
             annotations.append(StepAnnotationFactory.marker(at: imagePoint, style: settings.markerStyle, imageSize: size))
         }
-        if !annotations.isEmpty {
-            do { try storage.saveAnnotations(annotations, rawURL: stepURL) } catch {
+        var zoomPNG: Data?
+        if settings.zoomOnClick, let imagePoint, let zoom = StepZoom.image(from: frame.image, centeredOn: imagePoint) {
+            zoomPNG = StepFiles.pngData(zoom)
+        }
+        return PreparedStep(png: png, annotations: annotations, zoomPNG: zoomPNG, kind: kind, caption: caption,
+                            clickPoint: imagePoint, appName: frame.appName, capturedAt: capturedAt)
+    }
+
+    /// Called from the write chain, so only one step is ever in here at a time. The step number
+    /// is claimed and the manifest appended on the main actor; the files are written off it.
+    private func write(_ step: PreparedStep, folder: URL) async {
+        // The folder check drops a step from a session that already stopped (its flush timed
+        // out) and would otherwise land in the next session's manifest.
+        let claimed: Int? = await MainActor.run {
+            guard self.manifest != nil, folder == self.sessionFolder else { return nil }
+            defer { self.nextStepIndex += 1 }
+            return self.nextStepIndex
+        }
+        guard let index = claimed else { return }
+        let files: (step: URL, zoom: URL?)
+        do {
+            files = try Self.writeFiles(step, index: index, in: folder)
+        } catch {
+            NSLog("Clipr: advanced mode step save failed: \(error)")
+            return
+        }
+        let record = StepRecord(
+            id: UUID(), file: files.step.lastPathComponent, kind: step.kind, caption: step.caption,
+            clickPoint: step.clickPoint, zoomFile: files.zoom?.lastPathComponent, appName: step.appName,
+            capturedAt: step.capturedAt
+        )
+        let snapshot: SessionManifest? = await MainActor.run {
+            guard self.manifest != nil, folder == self.sessionFolder else { return nil }
+            self.manifest?.steps.append(record)
+            return self.manifest
+        }
+        guard let snapshot else {
+            // The session ended while the files were being written; they belong to no manifest.
+            for url in [files.step, files.zoom].compactMap({ $0 }) + [Self.annotationsURL(for: files.step)] {
+                try? FileManager.default.removeItem(at: url)
+            }
+            return
+        }
+        do {
+            try SessionManifestStore.save(snapshot, in: folder)
+            SessionFolder.restrict(folder.appendingPathComponent(SessionManifestStore.fileName))
+        } catch {
+            NSLog("Clipr: advanced mode manifest save failed: \(error)")
+        }
+        await MainActor.run { self.onStepCaptured?(snapshot.steps.count) }
+    }
+
+    /// PNG → annotations sidecar → zoom, each owner-only, so the manifest never names a file that
+    /// isn't on disk. A sidecar or zoom that fails to write is logged and left out.
+    static func writeFiles(_ step: PreparedStep, index: Int, in folder: URL) throws -> (step: URL, zoom: URL?) {
+        let stepURL = availableStepURL(index: index, in: folder)
+        try step.png.write(to: stepURL, options: .atomic)
+        SessionFolder.restrict(stepURL)
+        if !step.annotations.isEmpty {
+            let sidecar = annotationsURL(for: stepURL)
+            do {
+                try JSONEncoder().encode(step.annotations).write(to: sidecar, options: .atomic)
+                SessionFolder.restrict(sidecar)
+            } catch {
                 NSLog("Clipr: advanced mode marker save failed: \(error)")
             }
         }
-
-        var zoomFile: String?
-        if settings.zoomOnClick, let imagePoint, let zoom = StepZoom.image(from: frame.image, centeredOn: imagePoint) {
-            do { zoomFile = try storage.saveStepZoom(zoom, stepURL: stepURL).lastPathComponent } catch {
+        var zoomURL: URL?
+        if let zoomPNG = step.zoomPNG {
+            let url = folder.appendingPathComponent(FilenameGenerator.zoomName(fromStep: stepURL.lastPathComponent))
+            do {
+                try zoomPNG.write(to: url, options: .atomic)
+                SessionFolder.restrict(url)
+                zoomURL = url
+            } catch {
                 NSLog("Clipr: advanced mode zoom save failed: \(error)")
             }
         }
+        return (stepURL, zoomURL)
+    }
 
-        manifest?.steps.append(StepRecord(
-            id: UUID(), file: stepURL.lastPathComponent, kind: kind, caption: caption,
-            clickPoint: imagePoint, zoomFile: zoomFile, appName: frame.appName, capturedAt: Date()
-        ))
-        if let manifest {
-            do { try SessionManifestStore.save(manifest, in: folder) } catch {
-                NSLog("Clipr: advanced mode manifest save failed: \(error)")
-            }
-            onStepCaptured?(manifest.steps.count)
-        }
+    /// `Step_NN.png`, or `Step_NN_1.png` … if something else already put a file there.
+    private static func availableStepURL(index: Int, in folder: URL) -> URL {
+        let url = folder.appendingPathComponent(FilenameGenerator.stepName(index: index))
+        guard FileManager.default.fileExists(atPath: url.path) else { return url }
+        let base = url.deletingPathExtension().lastPathComponent
+        var suffix = 1
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(base)_\(suffix).png").path) { suffix += 1 }
+        return folder.appendingPathComponent("\(base)_\(suffix).png")
+    }
+
+    private static func annotationsURL(for stepURL: URL) -> URL {
+        stepURL.deletingLastPathComponent().appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: stepURL.lastPathComponent))
     }
 
     private func isFrontmostClipr() -> Bool {

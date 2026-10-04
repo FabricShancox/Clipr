@@ -204,6 +204,31 @@ final class ClickCaptureManagerTests: XCTestCase {
         XCTAssertTrue(StorageManager(baseFolder: folder).loadAnnotations(rawURL: sessionFolder.appendingPathComponent(manifest.steps[0].file)).isEmpty)
     }
 
+    // Security #6: step files are owner-only.
+    func testStepFilesAreOwnerOnly() throws {
+        _ = try manager.start(settings: settings { $0.zoomOnClick = true }, area: nil)
+        manager.handle(.click(CGPoint(x: 300, y: 250)))
+        waitForSteps(1)
+        let (_, sessionFolder) = stop()
+        for name in ["Step_01.png", "Step_01_zoom.png", FilenameGenerator.annotationsName(fromRaw: "Step_01.png"), "session.json"] {
+            let attributes = try FileManager.default.attributesOfItem(atPath: sessionFolder.appendingPathComponent(name).path)
+            XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600, name)
+        }
+    }
+
+    func testPrepareEncodesMarkerAndZoomWithoutTouchingDisk() throws {
+        let image = testImage(width: 400, height: 300) { NSColor.white.set(); NSRect(x: 0, y: 0, width: 400, height: 300).fill() }
+        let frame = CapturedFrame(image: image, origin: CGPoint(x: 100, y: 100), appName: "Safari")
+        let prepared = try XCTUnwrap(ClickCaptureManager.prepare(
+            frame, kind: .click, click: CGPoint(x: 300, y: 250), trail: [], caption: "c",
+            settings: settings { $0.zoomOnClick = true }
+        ))
+        XCTAssertEqual(prepared.clickPoint, CGPoint(x: 200, y: 150))
+        XCTAssertEqual(prepared.annotations.count, 1)
+        XCTAssertNotNil(prepared.zoomPNG)
+        XCTAssertNotNil(NSImage(data: prepared.png))
+    }
+
     func testZoomWrittenAndRecorded() throws {
         _ = try manager.start(settings: settings { $0.zoomOnClick = true }, area: nil)
         manager.handle(.click(CGPoint(x: 300, y: 250)))
