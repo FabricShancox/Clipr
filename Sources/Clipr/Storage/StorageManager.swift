@@ -114,75 +114,6 @@ final class StorageManager {
         return ["_edited", "_zoom", "_annotations"].contains { lower.hasSuffix($0) } ? name + "-imported" : name
     }
 
-    /// Persists the live, editable annotation objects for a capture as a JSON sidecar, so
-    /// reopening it from Recents (or relaunching Clipr entirely) restores actual editable
-    /// annotations rather than only a flattened preview image. Called alongside
-    /// `saveEditedCapture` on every auto-save.
-    ///
-    /// No annotations means no sidecar. Writing `[]` put an `X_annotations.json` beside every
-    /// capture merely viewed in the editor — and beside images opened from elsewhere — and failed
-    /// (logged only) on read-only folders. An empty save instead removes any sidecar left over,
-    /// including stale `[]` files from earlier builds; a missing sidecar already loads as "none".
-    func saveAnnotations(_ annotations: [AnnotationObject], rawURL: URL) throws {
-        let url = annotationsURL(forRaw: rawURL)
-        guard !annotations.isEmpty else {
-            if FileManager.default.fileExists(atPath: url.path) {
-                try FileManager.default.removeItem(at: url)
-            }
-            return
-        }
-        let data = try JSONEncoder().encode(annotations)
-        try Self.createPrivateFolder(url.deletingLastPathComponent())
-        try data.write(to: url, options: .atomic)
-        Self.restrictToOwner(url)
-    }
-
-    /// Outcome of reading a capture's annotation sidecar. `missing` and `corrupt` are deliberately
-    /// distinct: collapsing both to "no annotations" meant an unreadable sidecar looked like a
-    /// never-edited capture, and the next auto-save then overwrote it — destroying the user's
-    /// annotations permanently, with nothing shown to them.
-    enum AnnotationsLoad {
-        /// No sidecar yet — a fresh, never-edited capture.
-        case missing
-        case loaded([AnnotationObject])
-        /// The sidecar exists but could not be decoded. The caller must not let it be overwritten.
-        case corrupt(Error)
-    }
-
-    func readAnnotations(rawURL: URL) -> AnnotationsLoad {
-        let url = annotationsURL(forRaw: rawURL)
-        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
-        do {
-            // Size-checked before reading and range-checked after decoding — see `DecodeLimits`.
-            let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard bytes <= DecodeLimits.maxSidecarBytes else { throw SidecarLimitError.tooLarge(bytes: bytes) }
-            let annotations = try JSONDecoder().decode([AnnotationObject].self, from: Data(contentsOf: url))
-            guard DecodeLimits.areAcceptable(annotations) else { throw SidecarLimitError.outOfRange }
-            return .loaded(annotations)
-        } catch {
-            return .corrupt(error)
-        }
-    }
-
-    /// Moves an unreadable sidecar aside, returning where it went.
-    ///
-    /// Called before the editor opens a capture whose sidecar won't decode, so the next auto-save
-    /// writes a fresh file instead of overwriting one whose contents might still be recoverable by
-    /// hand. Never deletes anything.
-    @discardableResult
-    func quarantineAnnotations(rawURL: URL) -> URL? {
-        let url = annotationsURL(forRaw: rawURL)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let backup = uniqueURL(for: url.appendingPathExtension("bak"))
-        do {
-            try FileManager.default.moveItem(at: url, to: backup)
-            return backup
-        } catch {
-            NSLog("Clipr: could not set aside unreadable annotations for \(rawURL.lastPathComponent): \(error)")
-            return nil
-        }
-    }
-
     /// Moves a file to the Trash. A seam so tests don't fill the real Trash.
     var trashItem: (URL) throws -> Void = { url in
         try FileManager.default.trashItem(at: url, resultingItemURL: nil)
@@ -210,75 +141,6 @@ final class StorageManager {
                 NSLog("Clipr: couldn't move \(url.lastPathComponent) to the Trash: \(error)")
             }
         }
-    }
-
-    /// Renames a capture and the two files keyed off its name — the flattened `_edited.png` and
-    /// the annotations sidecar — returning the raw file's new URL.
-    ///
-    /// A rename must never destroy someone else's capture, so rather than moving each file and
-    /// hoping, this first picks a base name where all three destinations are free (suffixing
-    /// `_1`, `_2`, ... as `write` does for colliding captures) and only then moves. That means no
-    /// `moveItem` here can collide, and nothing is ever deleted to make room. The companions are
-    /// moved only if they exist, since a never-edited capture legitimately has neither.
-    func renameCapture(rawURL: URL, toBaseName baseName: String) throws -> URL {
-        guard let requested = FilenameGenerator.sanitizedBaseName(baseName) else {
-            throw StorageError.invalidFilename(baseName)
-        }
-        let folder = rawURL.deletingLastPathComponent()
-        let ext = rawURL.pathExtension.isEmpty ? "png" : rawURL.pathExtension
-        let currentBase = rawURL.deletingPathExtension().lastPathComponent
-        guard requested != currentBase else { return rawURL }
-
-        let resolved = availableBaseName(requested, ext: ext, in: folder, ignoring: rawURL)
-        let target = folder.appendingPathComponent("\(resolved).\(ext)")
-        try FileManager.default.moveItem(at: rawURL, to: target)
-
-        move(
-            folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: rawURL.lastPathComponent)),
-            to: folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: target.lastPathComponent))
-        )
-        move(annotationsURL(forRaw: rawURL), to: annotationsURL(forRaw: target))
-        return target
-    }
-
-    /// Best-effort move used for a rename's companion files: they may simply not exist, and
-    /// failing to move a sidecar should not strand the raw file under a half-applied rename.
-    private func move(_ from: URL, to: URL) {
-        guard FileManager.default.fileExists(atPath: from.path) else { return }
-        do {
-            try FileManager.default.moveItem(at: from, to: to)
-        } catch {
-            NSLog("Clipr: rename could not move \(from.lastPathComponent): \(error)")
-        }
-    }
-
-    /// First base name whose raw, `_edited` and sidecar paths are all free. The capture's own
-    /// current files are ignored, so a case-only rename ("shot" -> "Shot") isn't mistaken for a
-    /// clash with itself on a case-insensitive volume.
-    private func availableBaseName(_ base: String, ext: String, in folder: URL, ignoring rawURL: URL) -> String {
-        let own = Set([
-            rawURL.lastPathComponent,
-            FilenameGenerator.editedName(fromRaw: rawURL.lastPathComponent),
-            FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent)
-        ].map { $0.lowercased() })
-
-        func taken(_ candidate: String) -> Bool {
-            let raw = "\(candidate).\(ext)"
-            let names = [raw, FilenameGenerator.editedName(fromRaw: raw), FilenameGenerator.annotationsName(fromRaw: raw)]
-            return names.contains { name in
-                !own.contains(name.lowercased())
-                    && FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path)
-            }
-        }
-
-        guard taken(base) else { return base }
-        var suffix = 1
-        while taken("\(base)_\(suffix)") { suffix += 1 }
-        return "\(base)_\(suffix)"
-    }
-
-    private func annotationsURL(forRaw rawURL: URL) -> URL {
-        rawURL.deletingLastPathComponent().appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent))
     }
 
     func copyToClipboard(_ image: NSImage) {
@@ -331,7 +193,7 @@ final class StorageManager {
         return finalURL
     }
 
-    private func uniqueURL(for url: URL) -> URL {
+    func uniqueURL(for url: URL) -> URL {
         // If the file doesn't exist, use the URL as-is
         guard FileManager.default.fileExists(atPath: url.path) else {
             return url
