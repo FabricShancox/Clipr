@@ -57,6 +57,19 @@ final class AdvancedModeController {
         }
     }
 
+    var isRecording: Bool { coordinator.isActive }
+
+    /// Quit while a session records: stop it and wait (at most `timeout`) for its pending steps
+    /// and session.json to be written. Review isn't opened — the app is going away.
+    func stopForQuit(timeout: TimeInterval, completion: @escaping () -> Void) {
+        hotkeys.unregisterStepHotkey()
+        coordinator.stopForQuit(timeout: timeout) { [weak self] in
+            self?.statusItemController.setAdvancedModeActive(false)
+            self?.hidePanel()
+            completion()
+        }
+    }
+
     func reviewLastSession() {
         if let review = coordinator.reviewLastSession() {
             review.present()

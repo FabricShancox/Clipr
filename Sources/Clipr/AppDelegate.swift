@@ -108,11 +108,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quitting abandons every editor's pending 800ms auto-save debounce (and each Review's 0.5s
     /// caption debounce), so the last edit in each open window would be lost silently. Flushing
     /// here writes them synchronously first.
+    ///
+    /// A session still recording is stopped first, and quit waits (bounded) for its last steps and
+    /// session.json — otherwise steps already taken could be lost or left out of the manifest.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         editors.flushPendingSaves()
         advancedMode.flushOpenReviews()
-        return .terminateNow
+        guard advancedModeController.isRecording else { return .terminateNow }
+        var replied = false
+        let reply = {
+            guard !replied else { return }
+            replied = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        advancedModeController.stopForQuit(timeout: Self.quitFlushTimeout) { reply() }
+        // Belt and braces: the stop's own flush is bounded too, but quit must never hang.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quitFlushTimeout + 0.5) { reply() }
+        return .terminateLater
     }
+
+    /// The longest quit waits for a recording session's last steps to be written.
+    private static let quitFlushTimeout: TimeInterval = 3
 
     /// Target for the main menu's Preferences item — see `MainMenu.swift`. A menu item needs an
     /// `@objc` selector.

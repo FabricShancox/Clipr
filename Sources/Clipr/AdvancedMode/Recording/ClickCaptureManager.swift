@@ -30,7 +30,7 @@ final class ClickCaptureManager {
     /// Where the user last clicked: the best guess at the display a shortcut was pressed on.
     private(set) var lastClickPoint: CGPoint?
 
-    private static let stopFlushTimeout: TimeInterval = 10
+    static let stopFlushTimeout: TimeInterval = 10
 
     /// Pausing discards a half-typed burst rather than writing it, so nothing lands while paused.
     /// A click still inside its delay is captured now, showing the screen it was made on rather
@@ -133,7 +133,7 @@ final class ClickCaptureManager {
     /// reporting, so the Review window never opens on a session that's still changing.
     /// A second call while that flush is under way is ignored (the first call's completion
     /// reports the session), so a double-click on Stop can't open Review twice.
-    func stop(completion: @escaping (SessionManifest?, URL?) -> Void) {
+    func stop(flushTimeout: TimeInterval = stopFlushTimeout, completion: @escaping (SessionManifest?, URL?) -> Void) {
         guard let folder = sessionFolder else { return completion(nil, nil) }
         guard !isStopping else { return }
         isStopping = true
@@ -147,7 +147,7 @@ final class ClickCaptureManager {
             // Capped so a hung ScreenCaptureKit call can't leave Stop dead forever. On timeout
             // the session completes with what's written so far; `write` drops any late step
             // because the manifest and session folder are cleared below.
-            if let last, await TaskTimeout.value(of: last, timeout: Self.stopFlushTimeout) == nil {
+            if let last, await TaskTimeout.value(of: last, timeout: flushTimeout) == nil {
                 NSLog("Clipr: advanced mode stop gave up waiting for in-flight steps")
             }
             let final = self.manifest

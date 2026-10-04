@@ -73,6 +73,18 @@ final class AdvancedModeCoordinator {
         }
     }
 
+    /// Quit while recording: finishes the session (pending click, typing burst, in-flight writes
+    /// and session.json) within `timeout`, without opening Review.
+    func stopForQuit(timeout: TimeInterval, completion: @escaping () -> Void) {
+        guard clickCaptureManager.isActive else { return completion() }
+        clickCaptureManager.stop(flushTimeout: timeout) { manifest, folder in
+            if let folder, manifest?.steps.isEmpty ?? true {
+                try? FileManager.default.removeItem(at: folder)
+            }
+            completion()
+        }
+    }
+
     func captureManualStep() { clickCaptureManager.captureManualStep() }
 
     /// The most recent session's steps, read back from disk so it works after a relaunch too.
