@@ -124,10 +124,13 @@ final class AdvancedModeCoordinator {
         openReviewWindows.append(review)
         // ReviewWindowController has no onFinished-style closure (unlike EditorWindowController),
         // so its close is observed externally via NSWindow.willCloseNotification instead.
+        // The observer removes itself, so closing Reviews doesn't leave one behind per window.
         if let window = review.window {
-            NotificationCenter.default.addObserver(
+            let observer = ReviewCloseObserver()
+            observer.token = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification, object: window, queue: .main
             ) { [weak self, weak review] _ in
+                if let token = observer.token { NotificationCenter.default.removeObserver(token) }
                 guard let self, let review else { return }
                 self.openReviewWindows.removeAll { $0 === review }
             }
@@ -138,4 +141,9 @@ final class AdvancedModeCoordinator {
     private static func sameFolder(_ a: URL, _ b: URL) -> Bool {
         a.standardizedFileURL.resolvingSymlinksInPath() == b.standardizedFileURL.resolvingSymlinksInPath()
     }
+}
+
+/// Holds a notification observer's token so the observer's own closure can remove it.
+private final class ReviewCloseObserver: @unchecked Sendable {
+    var token: NSObjectProtocol?
 }
