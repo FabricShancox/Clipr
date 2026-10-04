@@ -97,8 +97,34 @@ struct ReviewRow: View {
             .padding(.top, 4)
     }
 
-    /// The step's image in a 16:10 box, fitted, so every row in a layout has the same shape.
+    /// List: just the thumbnail (its controls are the ⋯ menu beside the caption). Large and
+    /// Guide: the image with its controls on a slim bar directly above its top-right edge —
+    /// aligned to the image, not the row, and never covering the picture.
+    @ViewBuilder
     private var image: some View {
+        if layout == .list {
+            imageBox
+        } else {
+            let showControls = isHovering || isSelected
+            VStack(alignment: .trailing, spacing: 6) {
+                // Full controls when they fit above the image, otherwise a one-letter size menu.
+                ViewThatFits(in: .horizontal) {
+                    toolbarChrome { sizePicker; imageEditMenu }
+                    toolbarChrome { compactSizeMenu; imageEditMenu }
+                }
+                // Space stays reserved while hidden so rows don't jump as the pointer moves;
+                // shown on hover and on selected rows so the rest reads like the finished guide.
+                .opacity(showControls ? 1 : 0)
+                .allowsHitTesting(showControls)
+                .accessibilityHidden(!showControls)
+                imageBox
+            }
+            .onHover { isHovering = $0 }
+        }
+    }
+
+    /// The step's image in a 16:10 box, fitted, so every row in a layout has the same shape.
+    private var imageBox: some View {
         Color.black.opacity(0.25)
             .aspectRatio(16.0 / 10.0, contentMode: .fit)
             .overlay(
@@ -110,44 +136,13 @@ struct ReviewRow: View {
                 .id("\(step.id)-\(model.refreshToken)-\(layout.rawValue)")
             )
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            // The controls act on the image, so they sit on it — leaving the caption the full
-            // width. Shown while the pointer is over the image and on selected rows, so the rest
-            // of the list reads like the finished guide. (List thumbnails are too small for this;
-            // that layout keeps a compact menu beside the caption.)
-            .overlay(alignment: .topTrailing) {
-                if layout != .list, isHovering || isSelected {
-                    GeometryReader { geo in
-                        imageToolbar(compact: geo.size.width < Self.fullToolbarMinImageWidth)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    }
-                }
-            }
-            .onHover { isHovering = $0 }
             .onTapGesture(count: 2) { onOpenEditor(step) }
             .help("Double-click to edit the image")
-    }
-
-    /// Below this image width the full toolbar (~280pt) would cover about half the picture, so
-    /// the size control collapses to a one-letter menu — e.g. a Small step in Guide.
-    private static let fullToolbarMinImageWidth: CGFloat = 560
-
-    @ViewBuilder
-    private func imageToolbar(compact: Bool) -> some View {
-        if compact {
-            toolbarChrome { compactSizeMenu; imageEditMenu }
-        } else {
-            toolbarChrome { sizePicker; imageEditMenu }
-        }
     }
 
     private func toolbarChrome<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         HStack(spacing: 6) { content() }
             .controlSize(.small)
-            .padding(5)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
             .fixedSize()
     }
 
