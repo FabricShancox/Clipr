@@ -1,8 +1,13 @@
 import Cocoa
 import ScreenCaptureKit
 
+/// Main-actor state (the in-progress flag, frozen stills, callbacks). The ScreenCaptureKit
+/// statics and the finished-capture handling are `nonisolated`, so capturing, cropping and
+/// saving stay off the main thread.
+@MainActor
 final class CaptureManager {
-    private let storage: StorageManager
+    /// Only ever read: `handle` saves through it off the main actor, as it always has.
+    nonisolated(unsafe) private let storage: StorageManager
     var onCaptureFinished: ((URL, NSImage) -> Void)?
     /// Fired on the main actor when a capture the user asked for didn't produce anything.
     ///
@@ -44,7 +49,6 @@ final class CaptureManager {
 
     /// Runs the normal capture overlay and returns the image (nil if cancelled, failed or another
     /// capture is already in progress) without saving it anywhere. Completes on the main thread.
-    @MainActor
     func captureImage(completion: @escaping (NSImage?) -> Void) {
         guard PermissionsManager.hasScreenRecordingPermission() else {
             PermissionsManager.requestScreenRecordingPermission()
@@ -55,7 +59,6 @@ final class CaptureManager {
     }
 
     /// Main thread only (it guards on, and sets, `isCapturing`).
-    @MainActor
     func beginCapture(mode: CaptureMode = .normal) {
         guard !isCapturing else {
             if case .replacement(let completion) = mode { completion(nil) }
@@ -92,7 +95,7 @@ final class CaptureManager {
     /// back on the main thread and nothing else happens to it; a normal capture is saved, and a
     /// cancelled one is dropped. Separate from `handle` so the routing can be tested without a
     /// screen.
-    static func deliver(_ image: NSImage?, mode: CaptureMode, save: (NSImage) async throws -> Void) async rethrows {
+    nonisolated static func deliver(_ image: NSImage?, mode: CaptureMode, save: (NSImage) async throws -> Void) async rethrows {
         switch mode {
         case .replacement(let completion):
             await MainActor.run { completion(image) }
@@ -101,7 +104,7 @@ final class CaptureManager {
         }
     }
 
-    private func handle(_ result: CaptureResult, mode: CaptureMode) {
+    private nonisolated func handle(_ result: CaptureResult, mode: CaptureMode) {
         Task {
             do {
                 let image: NSImage?
@@ -145,17 +148,16 @@ final class CaptureManager {
 
     /// The frozen still of `screen`, or a live shot if it has none (a display plugged in
     /// mid-capture).
-    @MainActor
     private func frozenImage(of screen: NSScreen) async throws -> NSImage {
         if let frozen = frozenScreens[screen.displayID] { return frozen }
         return try await Self.captureFullScreen(screen, showsCursor: captureCursor)
     }
 
-    static let snapshotTimeout: Double = 10
+    nonisolated static let snapshotTimeout: Double = 10
 
     /// One `SCShareableContent` query for all displays, rather than one per display before the
     /// overlay could appear — visible latency on two or three monitors.
-    static func snapshotScreens(_ screens: [NSScreen], showsCursor: Bool) async throws -> [CGDirectDisplayID: NSImage] {
+    nonisolated static func snapshotScreens(_ screens: [NSScreen], showsCursor: Bool) async throws -> [CGDirectDisplayID: NSImage] {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         var snapshots: [CGDirectDisplayID: NSImage] = [:]
         for screen in screens {
@@ -165,7 +167,7 @@ final class CaptureManager {
     }
 
     /// `content` reuses an already-fetched shareable-content list; nil fetches a fresh one.
-    static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool, content: SCShareableContent? = nil) async throws -> NSImage {
+    nonisolated static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool, content: SCShareableContent? = nil) async throws -> NSImage {
         let content = if let content { content } else {
             try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         }
@@ -196,7 +198,7 @@ final class CaptureManager {
         return NSImage(bitmap: cgImage, scale: scale)
     }
 
-    private static func crop(_ fullImage: NSImage, to rect: CGRect, scale: CGFloat) throws -> NSImage {
+    private nonisolated static func crop(_ fullImage: NSImage, to rect: CGRect, scale: CGFloat) throws -> NSImage {
         guard let cgImage = fullImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             throw CaptureError.cropFailed
         }
@@ -224,7 +226,7 @@ final class CaptureManager {
         return NSImage(bitmap: cropped, scale: scale)
     }
 
-    static func captureWindow(_ windowInfo: WindowInfo, showsCursor: Bool) async throws -> NSImage {
+    nonisolated static func captureWindow(_ windowInfo: WindowInfo, showsCursor: Bool) async throws -> NSImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let scWindow = content.windows.first(where: { $0.windowID == windowInfo.windowID }) else {
             throw CaptureError.windowNotFound

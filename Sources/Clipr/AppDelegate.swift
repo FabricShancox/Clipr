@@ -1,6 +1,7 @@
 import Cocoa
 import UniformTypeIdentifiers
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let statusItemController = StatusItemController()
     let settings = SettingsStore()
@@ -43,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         advancedMode.captureReplacement = { [weak self] done in
             guard let self else { return done(nil) }
-            MainActor.assumeIsolated { self.captureManager.captureImage(completion: done) }
+            self.captureManager.captureImage(completion: done)
         }
         advancedMode.onStepCaptured = { [weak self] count in
             self?.statusItemController.setAdvancedModeStepCount(count)
@@ -181,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // events — a stuck screen. See `ModalHotkeyGuard`.
         guard !ModalHotkeyGuard.shouldIgnoreNow() else { NSSound.beep(); return }
         if PermissionsManager.hasScreenRecordingPermission() {
-            MainActor.assumeIsolated { captureManager.beginCapture() }
+            captureManager.beginCapture()
             return
         }
         // Not yet granted: fire the OS prompt (a no-op if already permanently denied). It has no
@@ -378,7 +379,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             box.token = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification, object: window, queue: .main
             ) { [weak self] _ in
-                self?.preferencesWindowController = nil
+                // Delivered on the main queue.
+                MainActor.assumeIsolated { self?.preferencesWindowController = nil }
                 if let token = box.token { NotificationCenter.default.removeObserver(token) }
             }
         }
