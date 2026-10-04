@@ -4,6 +4,7 @@ import SwiftUI
 final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     private let storage: StorageManager
     private let model: ReviewModel
+    let sessionFolder: URL
     // Keeps each opened EditorWindowController alive until it finishes; without this,
     // the local `editor` in openEditor(for:) would be deallocated as soon as that
     // function returns, silently breaking its Done/Discard closures (which capture
@@ -14,6 +15,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     init(sessionFolder: URL, storage: StorageManager) {
         self.storage = storage
+        self.sessionFolder = sessionFolder
         model = ReviewModel(folder: sessionFolder)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 640),
@@ -44,6 +46,26 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Saves the session's pending caption (retrying a failed save) and any edits pending in
+    /// image editors opened from it — the same flush `AppDelegate` gives its own editors on quit.
+    func flush() {
+        for editor in openEditors { editor.flushPendingSave() }
+        MainActor.assumeIsolated { model.flush() }
+    }
+
+    /// If the session still can't be saved after a last retry, closing would discard edits that
+    /// exist only in memory, so ask first.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        flush()
+        guard MainActor.assumeIsolated({ model.hasUnsavedChanges }) else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Couldn't save your changes to this session."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Keep Window Open")
+        alert.addButton(withTitle: "Close Anyway")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     /// A caption typed in the last half-second must still be saved.
     func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated { model.flush() }
@@ -64,7 +86,6 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
                 for companion in StepFiles.companions(of: step.file, in: folder) {
                     ThumbnailCache.shared.remove(companion)
                 }
-                ThumbnailCache.shared.remove(folder.appendingPathComponent(step.file))
                 self.model.reload()
             }
         }

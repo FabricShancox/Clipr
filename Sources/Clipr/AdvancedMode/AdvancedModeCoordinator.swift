@@ -66,32 +66,48 @@ final class AdvancedModeCoordinator {
                 try? FileManager.default.removeItem(at: folder)
                 return completion(nil)
             }
-            completion(self.openReview(manifest: manifest, sessionFolder: folder))
+            completion(self.openReview(sessionFolder: folder))
         }
     }
 
     func captureManualStep() { clickCaptureManager.captureManualStep() }
 
     /// The most recent session's steps, read back from disk so it works after a relaunch too.
-    /// `nil` when there's no session folder with any steps in it.
+    /// `nil` when there's no session folder with any steps in it other than the one being recorded.
     func reviewLastSession() -> ReviewWindowController? {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(
-            at: storage.baseFolder, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles
+        // Reviewing the session being recorded would let its edits race the capture's own writes
+        // to session.json.
+        let active = clickCaptureManager.isActive ? clickCaptureManager.currentSessionFolder : nil
+        guard let folder = Self.latestSessionWithSteps(in: storage.baseFolder, excluding: active) else { return nil }
+        return openReview(sessionFolder: folder)
+    }
+
+    /// Newest `Session_` folder under `base` with at least one step, skipping `excluded`.
+    static func latestSessionWithSteps(in base: URL, excluding excluded: URL?) -> URL? {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: base, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles
         ) else { return nil }
         // Session folder names embed a sortable `yyyy-MM-dd_HHmmss` timestamp, so name order is
         // chronological order.
         let sessions = entries
             .filter { $0.lastPathComponent.hasPrefix("Session_") }
+            .filter { excluded == nil || !sameFolder($0, excluded!) }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        for folder in sessions {
-            let manifest = SessionManifestStore.load(from: folder)
-            if !manifest.steps.isEmpty { return openReview(manifest: manifest, sessionFolder: folder) }
-        }
-        return nil
+        return sessions.first { !SessionManifestStore.load(from: $0).steps.isEmpty }
     }
 
-    private func openReview(manifest: SessionManifest, sessionFolder: URL) -> ReviewWindowController {
+    /// Writes every open Review's pending caption (and its editors' pending saves) now. Quit calls
+    /// this: termination doesn't close windows, so their close-time flush would never run.
+    func flushOpenReviews() {
+        for review in openReviewWindows { review.flush() }
+    }
+
+    /// Reuses the Review already open for `sessionFolder`, if any: two windows on one session
+    /// would each save their own copy of the manifest over the other's edits.
+    func openReview(sessionFolder: URL) -> ReviewWindowController {
+        if let existing = openReviewWindows.first(where: { Self.sameFolder($0.sessionFolder, sessionFolder) }) {
+            return existing
+        }
         // The coordinator is only ever called on the main thread.
         let review = MainActor.assumeIsolated { ReviewWindowController(sessionFolder: sessionFolder, storage: storage) }
         openReviewWindows.append(review)
@@ -106,5 +122,9 @@ final class AdvancedModeCoordinator {
             }
         }
         return review
+    }
+
+    private static func sameFolder(_ a: URL, _ b: URL) -> Bool {
+        a.standardizedFileURL.resolvingSymlinksInPath() == b.standardizedFileURL.resolvingSymlinksInPath()
     }
 }
