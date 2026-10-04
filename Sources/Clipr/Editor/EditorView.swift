@@ -9,6 +9,8 @@ import SwiftUI
 /// - `EditorView+Sidebar.swift`: the Recent-captures sidebar.
 /// - `EditorView+Header.swift`: filename + Copy/Share header bar.
 /// - `EditorView+Toolbar.swift`: the tool/color/stroke toolbar and its button styles.
+/// - `EditorView+StampTool.swift` / `EditorView+RedactTool.swift`: the two toolbar slots with
+///   alternatives behind them.
 /// - `EditorView+ColorStrokeBindings.swift`: color/stroke bindings that retarget to a selection.
 /// - `EditorView+TextStyleControls.swift`: font/alignment controls for text annotations.
 /// - `EditorView+Canvas.swift`: the zoomable/scrollable canvas area.
