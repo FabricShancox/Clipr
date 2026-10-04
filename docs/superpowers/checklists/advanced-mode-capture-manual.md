@@ -75,3 +75,19 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] Read-only session → Retake / Replace items are disabled.
 - [ ] Large / Guide: hovering an image (or selecting its row) shows S · M · L · Full and Edit ▾ on a slim bar just above the image's top-right edge (never over the picture); it hides when the pointer leaves an unselected row, and rows don't jump. Captions use the full width.
 - [ ] List: the ⋯ button beside the caption opens Edit Image / Retake / Replace / Image Size.
+
+## Export — clipboard spike
+
+Run on (date, macOS version): pending — to be done by the user (needs signed-in browsers)
+Script: `$TMPDIR/clipr-clipboard-spike.swift` (heading, bold text, one data-URI PNG as HTML + RTF).
+
+| Target | Heading + bold | Image |
+|---|---|---|
+| TextEdit (control) | pending — to be done by the user | pending — to be done by the user |
+| Google Docs (Safari) | pending — to be done by the user | pending — to be done by the user |
+| Notion (web) | pending — to be done by the user | pending — to be done by the user |
+| Confluence (web) | pending — to be done by the user | pending — to be done by the user |
+
+Decision: `GuideClipboard.imagesMayBeDropped` is `false` only if every web target's Image cell is `Kept`; otherwise `true` and the export sheet shows the Copy note.
+
+Outcome: pending — until the spike is run, assume `imagesMayBeDropped = true` (the safe default: the Copy note is shown).
