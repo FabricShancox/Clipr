@@ -233,18 +233,33 @@ struct ReviewRow: View {
     }
 
     /// The size this step's image takes in the finished guide (drawn at that size in Guide;
-    /// shown as a badge in Large).
+    /// shown as a badge in Large). Drawn in SwiftUI rather than as `.segmented` Picker: the
+    /// native control, inside a List row, sets accessibility attributes while the row is being
+    /// updated, which re-enters the row's update and leaves SwiftUI in an attribute cycle it
+    /// never exits — the whole app froze when switching to Large or Guide.
     private var sizePicker: some View {
-        Picker("Image Size", selection: Binding(
-            get: { step.imageSize ?? .full },
-            set: { model.setImageSize($0, for: [step.id]) }
-        )) {
+        let current = step.imageSize ?? .full
+        return HStack(spacing: 0) {
             ForEach(ImageSize.allCases) { size in
-                Text(size.shortLabel).help(size.title).accessibilityLabel(size.title).tag(size)
+                let selected = size == current
+                Button { model.setImageSize(size, for: [step.id]) } label: {
+                    Text(size.shortLabel)
+                        .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                        .frame(minWidth: 24, minHeight: 18)
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(selected ? Color.accentColor : Color.clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(size.title)
+                .accessibilityLabel(size.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        .padding(1)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Image Size")
         .fixedSize()
         .disabled(model.isReadOnly)
         .help("Image size in the guide (⌘+ / ⌘−)")
