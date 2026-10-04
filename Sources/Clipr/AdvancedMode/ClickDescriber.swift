@@ -1,6 +1,6 @@
 // Sources/Clipr/AdvancedMode/ClickDescriber.swift
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 
 protocol ClickDescribing: AnyObject {
     /// What's under `point` (Quartz global). `nil` if Accessibility can't say.

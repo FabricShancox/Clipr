@@ -8,6 +8,7 @@ let package = Package(
         .executableTarget(
             name: "Clipr",
             path: "Sources/Clipr",
+            exclude: ["Resources/Info.plist"],
             linkerSettings: [.linkedFramework("Carbon")]
         ),
         .testTarget(

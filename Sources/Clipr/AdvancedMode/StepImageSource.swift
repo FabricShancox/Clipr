@@ -48,14 +48,13 @@ final class LiveStepImageSource: StepImageSource {
             return CapturedFrame(image: image, origin: window.bounds.origin, appName: appName, marksClick: false)
         case .screenContaining(let point):
             guard let match = await MainActor.run(body: { Self.screen(containing: point) }) else { return nil }
-            let (screen, frame) = match
-            let image = try await Self.captureScreen(screen, showsCursor: showsCursor)
-            return CapturedFrame(image: image, origin: frame.origin, appName: appName)
+            let image = try await Self.captureScreen(match, showsCursor: showsCursor)
+            return CapturedFrame(image: image, origin: match.frame.origin, appName: appName)
         case .area(let area):
             let center = CGPoint(x: area.midX, y: area.midY)
             guard let match = await MainActor.run(body: { Self.screen(containing: center) }) else { return nil }
-            let (screen, frame) = match
-            let full = try await Self.captureScreen(screen, showsCursor: showsCursor)
+            let frame = match.frame
+            let full = try await Self.captureScreen(match, showsCursor: showsCursor)
             let local = area.offsetBy(dx: -frame.minX, dy: -frame.minY)
             guard let cropped = CaptureGeometry.cropped(full, to: local) else { return nil }
             return CapturedFrame(image: cropped.image, origin: CGPoint(x: frame.minX + cropped.rect.minX, y: frame.minY + cropped.rect.minY), appName: appName)
@@ -89,7 +88,7 @@ final class LiveStepImageSource: StepImageSource {
     }
 
     /// A full-display capture for Screen and Fixed-area steps, without Clipr's own windows.
-    static func captureScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
+    static func captureScreen(_ screen: ScreenMatch, showsCursor: Bool) async throws -> NSImage {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
             throw CaptureError.displayNotFound
@@ -102,11 +101,20 @@ final class LiveStepImageSource: StepImageSource {
         let config = SCStreamConfiguration()
         config.showsCursor = showsCursor
         // SCDisplay is in points, the configuration in pixels (see `CaptureManager.captureFullScreen`).
-        let scale = screen.backingScaleFactor
+        let scale = screen.scale
         config.width = Int((CGFloat(display.width) * scale).rounded())
         config.height = Int((CGFloat(display.height) * scale).rounded())
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         return NSImage(bitmap: cgImage, scale: scale)
+    }
+
+    /// What a Screen or Fixed-area step needs of the display it shoots, read on the main actor so
+    /// no `NSScreen` (not `Sendable`) crosses into the capture task.
+    struct ScreenMatch: Sendable {
+        let displayID: CGDirectDisplayID
+        let scale: CGFloat
+        /// The screen's frame in Quartz global top-left coordinates.
+        let frame: CGRect
     }
 
     /// The clicked window's current bounds, if it's still on screen and isn't Clipr's.
@@ -125,11 +133,13 @@ final class LiveStepImageSource: StepImageSource {
     }
 
     @MainActor
-    static func screen(containing point: CGPoint) -> (NSScreen, CGRect)? {
+    static func screen(containing point: CGPoint) -> ScreenMatch? {
         guard let primaryHeight = NSScreen.screens.first?.frame.height else { return nil }
         for screen in NSScreen.screens {
             let frame = StepGeometry.globalTopLeftFrame(ofScreenFrame: screen.frame, primaryScreenHeight: primaryHeight)
-            if frame.contains(point) { return (screen, frame) }
+            if frame.contains(point) {
+                return ScreenMatch(displayID: screen.displayID, scale: screen.backingScaleFactor, frame: frame)
+            }
         }
         return nil
     }
