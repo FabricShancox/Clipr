@@ -36,6 +36,7 @@ final class AdvancedModeController {
             guard let self else { return }
             switch problem {
             case .stepDropped: self.droppedSteps += 1
+            case .stepNotUpdated: self.notUpdatedSteps += 1
             case .manifestNotSaved: self.manifestSaveFailing = true
             }
             self.updateSaveWarning()
@@ -45,12 +46,17 @@ final class AdvancedModeController {
     /// This session's save problems, shown in the panel rather than as alerts so recording
     /// isn't interrupted.
     private var droppedSteps = 0
+    private var notUpdatedSteps = 0
     private var manifestSaveFailing = false
 
     private func updateSaveWarning() {
         var parts: [String] = []
         if droppedSteps > 0 {
             parts.append(droppedSteps == 1 ? "1 step couldn't be saved" : "\(droppedSteps) steps couldn't be saved")
+        }
+        if notUpdatedSteps > 0 {
+            parts.append(notUpdatedSteps == 1 ? "Couldn't update a step — the earlier version was kept"
+                                              : "Couldn't update \(notUpdatedSteps) steps — the earlier versions were kept")
         }
         if manifestSaveFailing { parts.append("Session file not saved") }
         let warning = parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -117,6 +123,7 @@ final class AdvancedModeController {
                                  ignoredKeys: ownHotkeys) {
         case .started:
             droppedSteps = 0
+            notUpdatedSteps = 0
             manifestSaveFailing = false
             statusItemController.setAdvancedModeActive(true)
             showPanel()

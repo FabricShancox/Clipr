@@ -145,6 +145,59 @@ final class ClickCaptureManagerTests: XCTestCase {
     }
 
     // A step whose PNG can't be written is skipped and reported, and doesn't use up its number.
+    // Quit during a Stop: the second stop's completion fires with the first's, not never.
+    func testSecondStopWhileStoppingCompletesWithTheFirst() throws {
+        images.delay = { _ in 0.4 }
+        _ = try manager.start(settings: settings(), area: nil)
+        manager.captureManualStep()
+        let first = expectation(description: "first"), second = expectation(description: "second")
+        var secondSteps = -1
+        manager.stop { _, _ in first.fulfill() }
+        manager.stop { manifest, _ in secondSteps = manifest?.steps.count ?? -1; second.fulfill() }
+        wait(for: [first, second], timeout: 5)
+        XCTAssertEqual(secondSteps, 1)
+    }
+
+    // A queued stop with a short timeout doesn't wait out the running stop's longer flush.
+    func testQueuedStopHonoursItsOwnTimeout() throws {
+        images.delay = { _ in 1.5 }
+        _ = try manager.start(settings: settings(), area: nil)
+        manager.captureManualStep()
+        let first = expectation(description: "first"), second = expectation(description: "second")
+        let began = Date()
+        var secondTook: TimeInterval = 99
+        manager.stop(flushTimeout: 5) { _, _ in first.fulfill() }
+        manager.stop(flushTimeout: 0.2) { _, _ in secondTook = Date().timeIntervalSince(began); second.fulfill() }
+        wait(for: [second], timeout: 5)
+        XCTAssertLessThan(secondTook, 1.0)
+        wait(for: [first], timeout: 8)
+    }
+
+    // A failed session.json save is retried once at stop, so the manifest isn't left behind.
+    func testStopRetriesAFailedManifestSave() throws {
+        let sessionFolder = try manager.start(settings: settings(), area: nil)
+        let blocker = sessionFolder.appendingPathComponent(SessionManifestStore.fileName)
+        try FileManager.default.createDirectory(at: blocker, withIntermediateDirectories: true)
+        let reported = expectation(description: "reported")
+        manager.onSaveProblem = { if $0 == .manifestNotSaved { reported.fulfill() } }
+        manager.captureManualStep()
+        wait(for: [reported], timeout: 5)
+        try FileManager.default.removeItem(at: blocker)
+        let (manifest, _) = stop()
+        XCTAssertEqual(SessionManifestStore.load(from: sessionFolder).steps.map(\.id), manifest.steps.map(\.id))
+        XCTAssertEqual(manifest.steps.count, 1)
+    }
+
+    func testStopSkipsTheFinalSaveWhenNothingFailed() throws {
+        _ = try manager.start(settings: settings(), area: nil)
+        manager.captureManualStep()
+        waitForSteps(1)
+        var saves = 0
+        manager.saveManifest = { saves += 1; try SessionManifestStore.save($0, in: $1) }
+        _ = stop()
+        XCTAssertEqual(saves, 0)
+    }
+
     func testFailedStepWriteIsReportedAndLeavesNoNumberingGap() throws {
         let sessionFolder = try manager.start(settings: settings(), area: nil)
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: sessionFolder.path)
@@ -241,6 +294,24 @@ final class ClickCaptureManagerTests: XCTestCase {
         XCTAssertEqual(manifest.steps[0].clickPoint, CGPoint(x: 43, y: 22), "the second press")
         XCTAssertEqual(SessionManifestStore.load(from: sessionFolder).steps.map(\.id), manifest.steps.map(\.id))
         XCTAssertEqual(SessionManifestStore.rawStepFiles(in: sessionFolder), [FilenameGenerator.stepName(index: 1)])
+    }
+
+    // A replacement that can't be written is reported as such, and the earlier step stays.
+    func testFailedReplacementIsReportedAsNotUpdated() throws {
+        var clock: TimeInterval = 100
+        manager.now = { clock }
+        manager.doubleClickInterval = { 0.5 }
+        let sessionFolder = try manager.start(settings: settings(), area: nil)
+        manager.handle(.click(CGPoint(x: 140, y: 120)))
+        waitForSteps(1)
+        let stepURL = sessionFolder.appendingPathComponent(FilenameGenerator.stepName(index: 1))
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: sessionFolder.path)
+        clock += 0.4
+        manager.handle(.click(CGPoint(x: 143, y: 122), clickCount: 2))
+        waitForProblem(.stepNotUpdated)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: sessionFolder.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stepURL.path))
+        XCTAssertEqual(stop().0.steps.count, 1)
     }
 
     func testSecondPressAfterTheDoubleClickIntervalIsANewStep() throws {

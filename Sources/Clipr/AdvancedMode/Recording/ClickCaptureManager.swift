@@ -27,6 +27,22 @@ final class ClickCaptureManager {
     private var pending: PendingClick?
     private let writes = StepWriteChain()
     private var isStopping = false
+    /// Completions of `stop` calls made while a stop was already under way; all are called when it
+    /// finishes (or, for one with a shorter timeout than the running stop's, when its own runs out).
+    private var queuedStops: [QueuedStop] = []
+    private final class QueuedStop {
+        var completion: ((SessionManifest?, URL?) -> Void)?
+        init(_ completion: @escaping (SessionManifest?, URL?) -> Void) { self.completion = completion }
+        func fire(_ manifest: SessionManifest?, _ folder: URL?) {
+            guard let completion else { return }
+            self.completion = nil
+            completion(manifest, folder)
+        }
+    }
+    /// True from a failed session.json save until a later one succeeds.
+    private var manifestUnsaved = false
+    /// Replaced in tests to observe or fail the final save.
+    var saveManifest: (SessionManifest, URL) throws -> Void = { try SessionManifestStore.save($0, in: $1) }
     /// Where the user last clicked: the best guess at the display a shortcut was pressed on.
     private(set) var lastClickPoint: CGPoint?
 
@@ -134,6 +150,8 @@ final class ClickCaptureManager {
         typing.reset()
         self.ignoredKeys = ignoredKeys
         writes.reset()
+        queuedStops = []
+        manifestUnsaved = false
         isPaused = false
         // Before `sessionFolder` is set, so a failure can't leave `isActive` true with no tap.
         // The folder is still empty then; removed so "Review Last Session" never lands on it.
@@ -154,11 +172,19 @@ final class ClickCaptureManager {
     /// Stops listening, then finishes what the user already did — a click still inside its
     /// delay, a half-typed burst — and waits for every in-flight capture to be written before
     /// reporting, so the Review window never opens on a session that's still changing.
-    /// A second call while that flush is under way is ignored (the first call's completion
-    /// reports the session), so a double-click on Stop can't open Review twice.
+    /// A second call while that flush is under way is queued and reported when the first finishes
+    /// (or when its own `flushTimeout` runs out, if sooner), so a double-click on Stop can't open
+    /// Review twice and a quit during a Stop doesn't wait for its backup timer.
     func stop(flushTimeout: TimeInterval = stopFlushTimeout, completion: @escaping (SessionManifest?, URL?) -> Void) {
         guard let folder = sessionFolder else { return completion(nil, nil) }
-        guard !isStopping else { return }
+        guard !isStopping else {
+            let queued = QueuedStop(completion)
+            queuedStops.append(queued)
+            DispatchQueue.main.asyncAfter(deadline: .now() + flushTimeout) { [weak self] in
+                queued.fire(self?.manifest, self?.sessionFolder)
+            }
+            return
+        }
         isStopping = true
         eventSource.stop()
         if let pending { pending.work.cancel(); fire(pending) }
@@ -174,12 +200,25 @@ final class ClickCaptureManager {
                 NSLog("Clipr: advanced mode stop gave up waiting for in-flight steps")
             }
             let final = self.manifest
+            // A save that failed earlier (or never ran) must not leave session.json behind the
+            // steps on disk; one last manifest-only attempt before the session ends.
+            if let final, self.manifestUnsaved {
+                do {
+                    try self.saveManifest(final, folder)
+                    self.manifestUnsaved = false
+                } catch {
+                    NSLog("Clipr: advanced mode final manifest save failed: \(error)")
+                }
+            }
+            let queued = self.queuedStops
+            self.queuedStops = []
             self.sessionFolder = nil
             self.manifest = nil
             self.writes.reset()
             self.isPaused = false
             self.isStopping = false
             completion(final, folder)
+            queued.forEach { $0.fire(final, folder) }
         }
     }
 
@@ -312,7 +351,7 @@ final class ClickCaptureManager {
             files = try Self.writeFiles(step, index: index, replacing: replaced?.file, in: folder)
         } catch {
             NSLog("Clipr: advanced mode step save failed: \(error)")
-            await MainActor.run { self.onSaveProblem?(.stepDropped) }
+            await MainActor.run { self.onSaveProblem?(replaced == nil ? .stepDropped : .stepNotUpdated) }
             return
         }
         let record = StepRecord(
@@ -340,12 +379,17 @@ final class ClickCaptureManager {
             return
         }
         do {
-            try SessionManifestStore.save(snapshot, in: folder)
+            let save = await MainActor.run { self.saveManifest }
+            try save(snapshot, folder)
+            await MainActor.run { if folder == self.sessionFolder { self.manifestUnsaved = false } }
         } catch {
             // The step's PNG is on disk and in the in-memory manifest, which the next step's save
             // (or Review, which lists the folder) picks up — but it isn't reported as captured.
             NSLog("Clipr: advanced mode manifest save failed: \(error)")
-            await MainActor.run { self.onSaveProblem?(.manifestNotSaved) }
+            await MainActor.run {
+                if folder == self.sessionFolder { self.manifestUnsaved = true }
+                self.onSaveProblem?(.manifestNotSaved)
+            }
             return
         }
         await MainActor.run { self.onStepCaptured?(snapshot.steps.count) }
