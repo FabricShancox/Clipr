@@ -19,6 +19,17 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(store.launchAtLogin)
     }
 
+    /// Preferences and the editor each toggle one part; neither may overwrite the other's.
+    func testCopyStylePartsAreIndependentKeys() {
+        store.copyShadow = true
+        let editorSide = SettingsStore(defaults: defaults)
+        editorSide.copyBorder = true
+        XCTAssertEqual(store.copyStyle, CopyStyle(border: true, shadow: true))
+        editorSide.copyBorder = false
+        XCTAssertTrue(store.copyShadow)
+        XCTAssertTrue(defaults.bool(forKey: SettingsStore.copyShadowKey), "views bind @AppStorage to this key")
+    }
+
     func testCaptureHotkeyPersists() {
         let custom = HotkeyBinding(keyCode: 1, modifiers: HotkeyBinding.Modifier.option.rawValue)
         store.captureHotkey = custom

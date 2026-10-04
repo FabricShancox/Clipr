@@ -3,7 +3,9 @@ import Foundation
 import ServiceManagement
 
 final class SettingsStore {
-    private let defaults: UserDefaults
+    /// Internal (not private) so views can bind `@AppStorage` to the same store — see
+    /// `copyBorderKey`.
+    let defaults: UserDefaults
 
     private enum Key {
         static let captureHotkey = "captureHotkey"
@@ -11,8 +13,6 @@ final class SettingsStore {
         static let saveFolder = "saveFolder"
         static let launchAtLogin = "launchAtLogin"
         static let captureCursor = "captureCursor"
-        static let copyBorder = "copyBorder"
-        static let copyShadow = "copyShadow"
         static let advancedMode = "advancedMode"
         static let exportFormat = "exportFormat"
         static let exportIncludeZoom = "exportIncludeZoom"
@@ -21,6 +21,14 @@ final class SettingsStore {
         /// picks ⌘⇧3 on purpose keeps it.
         static let advancedModeHotkeyMigrated = "advancedModeHotkeyMigratedFromCmdShift3"
     }
+
+    /// The copy-style keys, each its own `Bool`. Preferences and every open editor bind
+    /// `@AppStorage` straight to these, so a change in one shows in the others at once, and each
+    /// toggle writes only its own key. Each used to keep a stale `CopyStyle` copy and write the
+    /// whole struct back, so toggling Border in the editor silently undid a Shadow change made in
+    /// Preferences (and vice versa).
+    static let copyBorderKey = "copyBorder"
+    static let copyShadowKey = "copyShadow"
 
     /// Shared with `ReviewView`'s `@AppStorage`, which reads and writes the same key directly.
     static let reviewLayoutKey = "reviewLayout"
@@ -84,13 +92,20 @@ final class SettingsStore {
         set { defaults.set(newValue, forKey: Key.captureCursor) }
     }
 
-    /// What Copy adds around the image — see `CopyStyle`. Both off by default.
+    /// What Copy adds around the image — see `CopyStyle`. Both off by default. Read-only: each
+    /// part is set on its own (`copyBorder`, `copyShadow`), never as a whole struct.
     var copyStyle: CopyStyle {
-        get { CopyStyle(border: defaults.bool(forKey: Key.copyBorder), shadow: defaults.bool(forKey: Key.copyShadow)) }
-        set {
-            defaults.set(newValue.border, forKey: Key.copyBorder)
-            defaults.set(newValue.shadow, forKey: Key.copyShadow)
-        }
+        CopyStyle(border: copyBorder, shadow: copyShadow)
+    }
+
+    var copyBorder: Bool {
+        get { defaults.bool(forKey: Self.copyBorderKey) }
+        set { defaults.set(newValue, forKey: Self.copyBorderKey) }
+    }
+
+    var copyShadow: Bool {
+        get { defaults.bool(forKey: Self.copyShadowKey) }
+        set { defaults.set(newValue, forKey: Self.copyShadowKey) }
     }
 
     /// All Advanced Mode options — see `AdvancedModeSettings`.

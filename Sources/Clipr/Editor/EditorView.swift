@@ -83,10 +83,8 @@ struct EditorView: View {
     /// them back when it rebuilds the content view for a rename — see `EditorHistory`.
     let onHistoryChanged: (EditorHistory) -> Void
     let onCopy: ([AnnotationObject]) -> Void
-    /// What Copy adds around the image — see `CopyStyle`. Held as state so the header menu
-    /// redraws; every change is written straight back through `onCopyStyleChanged`.
-    @State var copyStyle: CopyStyle
-    let onCopyStyleChanged: (CopyStyle) -> Void
+    /// Where the copy-style settings live — see `CopyStyleMenu`.
+    let settingsDefaults: UserDefaults
     /// Closes the editor window. The capture is already on the clipboard (`CaptureManager` copies
     /// it the moment it's taken) and auto-save keeps the files current, so nothing is lost.
     let onClose: () -> Void

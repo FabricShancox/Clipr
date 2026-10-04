@@ -157,8 +157,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 self.latestHistory = history
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
-            copyStyle: settings.copyStyle,
-            onCopyStyleChanged: { [weak self] style in self?.settings.copyStyle = style },
+            settingsDefaults: settings.defaults,
             onClose: { [weak self] in self?.window?.performClose(nil) },
             onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
             onRevealInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },

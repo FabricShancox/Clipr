@@ -24,15 +24,7 @@ extension EditorView {
             // this is explicitly an export-a-copy action.
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .help("Export a copy as PNG or JPEG (⇧⌘S)")
-            Menu {
-                Toggle("Border", isOn: copyStyleBinding(\.border))
-                Toggle("Drop Shadow", isOn: copyStyleBinding(\.shadow))
-            } label: {
-                Image(systemName: "square.dashed")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("What Copy adds around the image: a border, a drop shadow")
+            CopyStyleMenu(defaults: settingsDefaults)
             Button { onCopy(annotations) } label: {
                 Label("Copy", systemImage: "square.on.square")
             }
@@ -50,13 +42,6 @@ extension EditorView {
         .padding(.vertical, 10)
         .background(EditorColors.s1)
         .foregroundColor(EditorColors.t1)
-    }
-
-    private func copyStyleBinding(_ keyPath: WritableKeyPath<CopyStyle, Bool>) -> Binding<Bool> {
-        Binding(
-            get: { copyStyle[keyPath: keyPath] },
-            set: { copyStyle[keyPath: keyPath] = $0; onCopyStyleChanged(copyStyle) }
-        )
     }
 
     /// Click-to-rename, Finder-style: the name is plain text until clicked, then an inline field.
@@ -109,5 +94,29 @@ extension EditorView {
         let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != currentURL.deletingPathExtension().lastPathComponent else { return }
         onRename?(currentURL, trimmed, annotations)
+    }
+}
+
+/// The header's copy-style menu. Bound directly to the settings keys, like the matching toggles in
+/// Preferences, so both always show the current value and each toggle changes only its own part.
+struct CopyStyleMenu: View {
+    @AppStorage private var border: Bool
+    @AppStorage private var shadow: Bool
+
+    init(defaults: UserDefaults) {
+        _border = AppStorage(wrappedValue: false, SettingsStore.copyBorderKey, store: defaults)
+        _shadow = AppStorage(wrappedValue: false, SettingsStore.copyShadowKey, store: defaults)
+    }
+
+    var body: some View {
+        Menu {
+            Toggle("Border", isOn: $border)
+            Toggle("Drop Shadow", isOn: $shadow)
+        } label: {
+            Image(systemName: "square.dashed")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("What Copy adds around the image: a border, a drop shadow")
     }
 }

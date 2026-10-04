@@ -18,7 +18,10 @@ struct PreferencesView: View {
     @State private var saveFolder: URL
     @State private var launchAtLogin: Bool
     @State private var captureCursor: Bool
-    @State private var copyStyle: CopyStyle
+    /// Bound straight to the settings keys (see `SettingsStore.copyBorderKey`), so an open editor's
+    /// copy-style menu and these toggles always agree.
+    @AppStorage private var copyBorder: Bool
+    @AppStorage private var copyShadow: Bool
     @State private var advanced: AdvancedModeSettings
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
 
@@ -37,7 +40,8 @@ struct PreferencesView: View {
         _saveFolder = State(initialValue: settings.saveFolder)
         _launchAtLogin = State(initialValue: settings.launchAtLogin)
         _captureCursor = State(initialValue: settings.captureCursor)
-        _copyStyle = State(initialValue: settings.copyStyle)
+        _copyBorder = AppStorage(wrappedValue: false, SettingsStore.copyBorderKey, store: settings.defaults)
+        _copyShadow = AppStorage(wrappedValue: false, SettingsStore.copyShadowKey, store: settings.defaults)
         _advanced = State(initialValue: settings.advancedMode)
     }
 
@@ -109,17 +113,11 @@ struct PreferencesView: View {
             }
 
             Section {
-                Toggle(isOn: Binding(
-                    get: { copyStyle.border },
-                    set: { copyStyle.border = $0; settings.copyStyle = copyStyle }
-                )) {
+                Toggle(isOn: $copyBorder) {
                     Text("Add a border")
                     Text("A thin outline around copied images.")
                 }
-                Toggle(isOn: Binding(
-                    get: { copyStyle.shadow },
-                    set: { copyStyle.shadow = $0; settings.copyStyle = copyStyle }
-                )) {
+                Toggle(isOn: $copyShadow) {
                     Text("Add a drop shadow")
                     Text("Makes copied images stand out when pasted into documents.")
                 }
