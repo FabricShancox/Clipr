@@ -13,6 +13,7 @@ extension EditorView {
                 zoomPercent = max(5, zoomPercent - 10)
             } label: { Image(systemName: "minus").frame(width: 22, height: 22).contentShape(Rectangle()) }
                 .help("Zoom out")
+                .accessibilityLabel("Zoom out")
             Text("\(Int(zoomPercent))%")
                 .font(.system(size: 12, weight: .semibold))
                 .frame(width: 40)
@@ -22,6 +23,7 @@ extension EditorView {
                 zoomPercent = min(400, zoomPercent + 10)
             } label: { Image(systemName: "plus").frame(width: 22, height: 22).contentShape(Rectangle()) }
                 .help("Zoom in")
+                .accessibilityLabel("Zoom in")
             Button {
                 // Re-requesting Fit explicitly hands auto-fit-on-resize control back, so a
                 // later window resize keeps tracking it rather than staying locked at whatever

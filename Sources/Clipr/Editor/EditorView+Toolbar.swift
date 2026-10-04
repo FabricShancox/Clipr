@@ -13,14 +13,17 @@ extension EditorView {
                     .disabled(history.undo.isEmpty || isTextEntryActive)
                     .keyboardShortcut("z", modifiers: .command)
                     .help("Undo")
+                    .accessibilityLabel("Undo")
                 Button { redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 30, height: 30).contentShape(Rectangle()) }
                     .disabled(history.redo.isEmpty || isTextEntryActive)
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .help("Redo")
+                    .accessibilityLabel("Redo")
                 Button { deleteSelected() } label: { Image(systemName: "trash").frame(width: 30, height: 30).contentShape(Rectangle()) }
                     .disabled(selectedIDs.isEmpty || isTextEntryActive)
                     .keyboardShortcut(.delete, modifiers: [])
                     .help("Delete selected annotations")
+                    .accessibilityLabel("Delete selected annotations")
             }
             .buttonStyle(.plain)
             .foregroundColor(EditorColors.t1)
@@ -120,6 +123,7 @@ extension EditorView {
             stampAlternativesList
         }
         .help("Stamp — click to place, hold or click the corner to pick the next number or a tick / cross / star (7)")
+        .accessibilityLabel("Stamp (7)")
     }
 
     /// The redact slot, following the same pattern as the stamp slot: click to use it, long press
@@ -157,6 +161,7 @@ extension EditorView {
             .frame(width: 232)
         }
         .help("Redact — click to use, hold or click the corner to choose pixelate or solid (9)")
+        .accessibilityLabel("Redact (9)")
     }
 
     private func redactionStyleOption(_ style: RedactionStyle, symbol: String, title: String) -> some View {
@@ -301,6 +306,8 @@ extension EditorView {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     func colorSwatch(_ swatch: RGBAColor, binding: Binding<RGBAColor>) -> some View {
@@ -313,6 +320,13 @@ extension EditorView {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Self.swatchName(swatch))
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    static func swatchName(_ swatch: RGBAColor) -> String {
+        let names = ["White", "Grey", "Blue", "Purple", "Orange", "Red"]
+        return swatchColors.firstIndex(of: swatch).map { names[$0] + " colour" } ?? "Colour"
     }
 
     /// Each preset is a full, clearly-labeled hit target (not just a tiny dot) — the dot is
