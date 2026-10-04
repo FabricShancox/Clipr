@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/ClickCaptureManager.swift
 import Cocoa
 
 /// Runs one Advanced Mode session: turns tap events into steps according to the settings
@@ -18,21 +17,12 @@ final class ClickCaptureManager {
     private var area: CGRect?
     private var nextStepIndex = 1
     private var trail = CursorTrailRecorder()
-    private var keystrokes = KeystrokeAggregator()
-    /// The focused field at the current burst's first accepted printable key.
-    private var burstStartField: Task<FocusedField, Never>?
-    /// The focused field at the burst's latest accepted printable key. Each read is chained after
-    /// the previous one so the answers arrive in key order.
-    private var burstLastField: Task<FocusedField, Never>?
+    private let typing: TypingBurstTracker
     /// Clipr's own hotkeys. The listen-only tap sees their keyDown before Carbon dispatches them,
     /// so without this every press would also become a "Press ⌘⇧2" typing step.
     private var ignoredKeys: [HotkeyBinding] = []
-    private var idleWork: DispatchWorkItem?
     private var pending: PendingClick?
-    /// The tail of the write chain. Captures run concurrently, but every step awaits the one
-    /// before it before writing, so steps land in the order the user did them even when a slow
-    /// capture finishes after a fast one. `stop` awaits this to know everything is on disk.
-    private var lastWrite: Task<Void, Never>?
+    private let writes = StepWriteChain()
     private var isStopping = false
     /// Where the user last clicked: the best guess at the display a shortcut was pressed on.
     private var lastClickPoint: CGPoint?
@@ -48,7 +38,7 @@ final class ClickCaptureManager {
             guard isPaused != oldValue else { return }
             _ = trail.drain()
             guard isPaused else { return }
-            discardTypingBurst()
+            typing.discard()
             if let pending {
                 pending.work.cancel()
                 self.pending = nil
@@ -74,15 +64,7 @@ final class ClickCaptureManager {
         let trail: [CGPoint]
         let describe: Task<ClickTarget?, Never>?
         let work: DispatchWorkItem
-        let slot: WriteSlot
-    }
-
-    /// A place in the write chain reserved when the user clicked, not when the delayed capture
-    /// fires — otherwise a typing burst that ends inside the click's delay (e.g. on Stop) would
-    /// be written before the click that came first.
-    private struct WriteSlot {
-        let predecessor: Task<Void, Never>?
-        let done: AsyncStream<Void>.Continuation
+        let slot: StepWriteChain.Slot
     }
 
     init(
@@ -99,6 +81,8 @@ final class ClickCaptureManager {
         self.eventSource = eventSource
         self.accessibilityGranted = accessibilityGranted
         self.inputMonitoringGranted = inputMonitoringGranted
+        self.typing = TypingBurstTracker(readFocusedField: { [describer] in await describer.focusedField() })
+        typing.onTyped = { [weak self] in self?.emit($0, fields: $1) }
         eventSource.onEvent = { [weak self] in self?.handle($0) }
     }
 
@@ -118,11 +102,9 @@ final class ClickCaptureManager {
         nextStepIndex = 1
         lastClickPoint = nil
         trail = CursorTrailRecorder()
-        keystrokes = KeystrokeAggregator()
-        burstStartField = nil
-        burstLastField = nil
+        typing.reset()
         self.ignoredKeys = ignoredKeys
-        lastWrite = nil
+        writes.reset()
         isPaused = false
         // Before `sessionFolder` is set, so a failure can't leave `isActive` true with no tap.
         // The folder is still empty then; removed so "Review Last Session" never lands on it.
@@ -152,20 +134,20 @@ final class ClickCaptureManager {
         eventSource.stop()
         if let pending { pending.work.cancel(); fire(pending) }
         pending = nil
-        endTypingBurst()
-        idleWork?.cancel()
-        let last = lastWrite
+        typing.endBurst()
+        typing.cancelIdleCheck()
+        let last = writes.tail
         Task { @MainActor in
             // Capped so a hung ScreenCaptureKit call can't leave Stop dead forever. On timeout
             // the session completes with what's written so far; `write` drops any late step
             // because the manifest and session folder are cleared below.
-            if let last, await Self.value(of: last, timeout: Self.stopFlushTimeout) == nil {
+            if let last, await TaskTimeout.value(of: last, timeout: Self.stopFlushTimeout) == nil {
                 NSLog("Clipr: advanced mode stop gave up waiting for in-flight steps")
             }
             let final = self.manifest
             self.sessionFolder = nil
             self.manifest = nil
-            self.lastWrite = nil
+            self.writes.reset()
             self.isPaused = false
             self.isStopping = false
             completion(final, folder)
@@ -186,9 +168,9 @@ final class ClickCaptureManager {
         case .mouseMoved(let p):
             if settings.cursorTrail { trail.add(p) }
         case .ownClick:
-            endTypingBurst()
+            typing.endBurst()
         case .click(let p, let clickCount, let window):
-            endTypingBurst()
+            typing.endBurst()
             lastClickPoint = p
             var points = trail.drain()
             if let previous = pending {
@@ -208,7 +190,7 @@ final class ClickCaptureManager {
                     fire(previous)
                 }
             }
-            let slot = reserveWriteSlot()
+            let slot = writes.reserve()
             let describe = settings.autoCaptions ? Task { await self.describer.describe(at: p) } : nil
             let work = DispatchWorkItem { [weak self] in
                 guard let self, let pending = self.pending else { return }
@@ -220,12 +202,7 @@ final class ClickCaptureManager {
         case .key(let key):
             guard settings.typingSteps, !typingUnavailable, !isFrontmostClipr(),
                   !ignoredKeys.contains(where: { $0.matches(key) }) else { return }
-            let before = keystrokes.bufferedCharacterCount
-            for typed in keystrokes.handle(key, at: Date()) { emit(typed) }
-            // Only a key the burst actually took as text reads the focused field — not arrows,
-            // Escape, shortcuts or the Return/Tab that ends a burst.
-            if keystrokes.bufferedCharacterCount > before { readFocusedField(startsBurst: before == 0) }
-            scheduleIdleCheck()
+            typing.handle(key)
         }
     }
 
@@ -243,7 +220,7 @@ final class ClickCaptureManager {
     private func fire(_ click: PendingClick) {
         let caption: (String?) async -> String? = { [autoCaptions = settings.autoCaptions, describe = click.describe] appName in
             guard autoCaptions else { return nil }
-            let target = await Self.value(of: describe, timeout: 0.5)
+            let target = await TaskTimeout.value(of: describe, timeout: 0.5)
             return CaptionFormatter.click(target ?? nil, appName: appName)
         }
         // The clicked window's app, not whichever app is frontmost when the capture runs: a click
@@ -254,48 +231,13 @@ final class ClickCaptureManager {
                 slot: click.slot, caption: caption)
     }
 
-    private func endTypingBurst() {
-        idleWork?.cancel()
-        if let typed = keystrokes.endBurst() { emit(typed) }
-    }
-
-    private func discardTypingBurst() {
-        idleWork?.cancel()
-        idleWork = nil
-        keystrokes = KeystrokeAggregator()
-        burstStartField = nil
-        burstLastField = nil
-    }
-
-    /// Read at the key, not at the end of the burst: by the time a Tab or click ends the burst
-    /// it has already reached the app, so a read then would usually see the next field and the
-    /// step would be dropped as a focus change.
-    private func readFocusedField(startsBurst: Bool) {
-        let previous = burstLastField
-        let read = Task { _ = await previous?.value; return await self.describer.focusedField() }
-        if startsBurst { burstStartField = read }
-        burstLastField = read
-    }
-
-    private func scheduleIdleCheck() {
-        idleWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, let typed = self.keystrokes.idleCheck(now: Date()) else { return }
-            self.emit(typed)
-        }
-        idleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + KeystrokeAggregator.idleTimeout, execute: work)
-    }
-
-    private func emit(_ typed: TypingEvent) {
+    private func emit(_ typed: TypingEvent, fields: TypingBurstTracker.FieldReads) {
         switch typed {
         case .shortcut(let keys):
             enqueue(kind: .typing, target: typingTarget(near: lastClickPoint), click: nil, trail: [],
                     caption: { _ in CaptionFormatter.shortcut(keys) })
         case .text(let text):
-            let start = burstStartField, last = burstLastField
-            burstStartField = nil
-            burstLastField = nil
+            let start = fields.start, last = fields.last
             // The aggregator never emits an empty burst; checked here too because an empty
             // typing step would be a screenshot captioned `Type ""`.
             guard !text.isEmpty else { return }
@@ -336,45 +278,22 @@ final class ClickCaptureManager {
         scopeTarget(for: settings.scope == .screen ? point : nil)
     }
 
-    /// Window scope captures the window that was clicked, when it's an app window; a click on the
-    /// Dock, the menu bar, a pop-up menu or the desktop falls back to the frontmost app's window.
     private func scopeTarget(for click: CGPoint?, window: ClickedWindow? = nil) -> CaptureTarget {
-        switch settings.scope {
-        case .window:
-            if let window, window.isCapturable { return .window(window) }
-            return .frontmostWindow
-        case .screen:
-            return .screenContaining(click ?? NSEvent.mouseLocationQuartz)
-        case .fixedArea:
-            return area.map { .area($0) } ?? .frontmostWindow
-        }
-    }
-
-    /// Appends a placeholder to the write chain that completes when `done` is finished.
-    private func reserveWriteSlot() -> WriteSlot {
-        let (stream, done) = AsyncStream<Void>.makeStream()
-        let predecessor = lastWrite
-        // Waits for its predecessor too, so finishing a superseded click's slot early can't
-        // let later steps (or `stop`) skip past a step that's still capturing.
-        lastWrite = Task {
-            for await _ in stream {}
-            await predecessor?.value
-        }
-        return WriteSlot(predecessor: predecessor, done: done)
+        .forScope(settings.scope, click: click, window: window, area: area)
     }
 
     /// `slot` is the click's reserved place in the chain; every other step joins at the end now.
     private func enqueue(
         kind: StepRecord.Kind, target: CaptureTarget, resolveTarget: (() async -> CaptureTarget)? = nil,
         click: CGPoint?, appName: String? = nil, trail: [CGPoint],
-        slot: WriteSlot? = nil,
+        slot: StepWriteChain.Slot? = nil,
         skipIf: @escaping () async -> Bool = { false }, caption: @escaping (_ appName: String?) async -> String?
     ) {
         guard let folder = sessionFolder else {
             slot?.done.finish()
             return
         }
-        let predecessor = slot.map(\.predecessor) ?? lastWrite
+        let predecessor = writes.predecessor(for: slot)
         let settings = self.settings
         let showsCursor = captureCursor
         let imageSource = self.imageSource
@@ -395,72 +314,7 @@ final class ClickCaptureManager {
             guard let self, let prepared else { return }
             await self.write(prepared, folder: folder)
         }
-        if slot == nil { lastWrite = task }
-    }
-
-    /// One step's files, encoded and ready to write.
-    struct PreparedStep {
-        let png: Data
-        let annotations: [AnnotationObject]
-        let zoomPNG: Data?
-        let kind: StepRecord.Kind
-        let caption: String?
-        let clickPoint: CGPoint?
-        let appName: String?
-        let capturedAt: Date
-    }
-
-    /// Captures, captions and encodes a step. The captured bitmap lives only inside this call.
-    private static func captureAndPrepare(
-        target: CaptureTarget, resolveTarget: (() async -> CaptureTarget)?, imageSource: StepImageSource,
-        showsCursor: Bool, skipIf: () async -> Bool,
-        kind: StepRecord.Kind, click: CGPoint?, appName: String?, trail: [CGPoint], settings: AdvancedModeSettings,
-        caption: (_ appName: String?) async -> String?
-    ) async -> PreparedStep? {
-        guard await !skipIf() else { return nil }
-        let target = await resolveTarget?() ?? target
-        let frame: CapturedFrame?
-        do {
-            frame = try await imageSource.capture(target, showsCursor: showsCursor)
-        } catch {
-            NSLog("Clipr: advanced mode step capture failed: \(error)")
-            return nil
-        }
-        guard var frame else { return nil }
-        if let appName { frame.appName = appName }
-        let text = await caption(frame.appName)
-        return autoreleasepool {
-            prepare(frame, kind: kind, click: click, trail: trail, caption: text, settings: settings)
-        }
-    }
-
-    /// Pure: the encoded step image, its marker/trail annotations and zoom crop. Nil only if the
-    /// image won't encode.
-    static func prepare(_ frame: CapturedFrame, kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint],
-                        caption: String?, settings: AdvancedModeSettings, capturedAt: Date = Date()) -> PreparedStep? {
-        guard let png = ImageEncoding.png(frame.image) else {
-            NSLog("Clipr: advanced mode step encode failed")
-            return nil
-        }
-        // A capture that had to fall back to another window doesn't show the click: no marker,
-        // trail or close-up pointing at the wrong thing.
-        let click = frame.marksClick ? click : nil
-        let size = frame.image.size
-        let imagePoint = click.flatMap { StepGeometry.imagePoint(global: $0, captureOrigin: frame.origin, imageSize: size) }
-        var annotations: [AnnotationObject] = []
-        if settings.cursorTrail, kind == .click, let click,
-           let path = StepAnnotationFactory.trail(globalPoints: trail + [click], captureOrigin: frame.origin, imageSize: size) {
-            annotations.append(path)
-        }
-        if settings.clickMarker, let imagePoint {
-            annotations.append(StepAnnotationFactory.marker(at: imagePoint, style: settings.markerStyle, imageSize: size))
-        }
-        var zoomPNG: Data?
-        if settings.zoomOnClick, let imagePoint, let zoom = StepZoom.image(from: frame.image, centeredOn: imagePoint) {
-            zoomPNG = ImageEncoding.png(zoom)
-        }
-        return PreparedStep(png: png, annotations: annotations, zoomPNG: zoomPNG, kind: kind, caption: caption,
-                            clickPoint: imagePoint, appName: frame.appName, capturedAt: capturedAt)
+        writes.append(task, reserved: slot)
     }
 
     /// Called from the write chain, so only one step is ever in here at a time. The step number
@@ -507,106 +361,7 @@ final class ClickCaptureManager {
         await MainActor.run { self.onStepCaptured?(snapshot.steps.count) }
     }
 
-    /// PNG → annotations sidecar → zoom, each owner-only, so the manifest never names a file that
-    /// isn't on disk. A sidecar or zoom that fails to write is logged and left out.
-    static func writeFiles(_ step: PreparedStep, index: Int, in folder: URL) throws -> (step: URL, zoom: URL?) {
-        let stepURL = availableStepURL(index: index, in: folder)
-        try step.png.write(to: stepURL, options: .atomic)
-        SessionFolder.restrict(stepURL)
-        if !step.annotations.isEmpty {
-            let sidecar = annotationsURL(for: stepURL)
-            do {
-                try JSONEncoder().encode(step.annotations).write(to: sidecar, options: .atomic)
-                SessionFolder.restrict(sidecar)
-            } catch {
-                NSLog("Clipr: advanced mode marker save failed: \(error)")
-            }
-        }
-        var zoomURL: URL?
-        if let zoomPNG = step.zoomPNG {
-            let url = folder.appendingPathComponent(FilenameGenerator.zoomName(fromStep: stepURL.lastPathComponent))
-            do {
-                try zoomPNG.write(to: url, options: .atomic)
-                SessionFolder.restrict(url)
-                zoomURL = url
-            } catch {
-                NSLog("Clipr: advanced mode zoom save failed: \(error)")
-            }
-        }
-        return (stepURL, zoomURL)
-    }
-
-    /// `Step_NN.png`, or `Step_NN_1.png` … if something else already put a file there.
-    private static func availableStepURL(index: Int, in folder: URL) -> URL {
-        let url = folder.appendingPathComponent(FilenameGenerator.stepName(index: index))
-        guard FileManager.default.fileExists(atPath: url.path) else { return url }
-        let base = url.deletingPathExtension().lastPathComponent
-        var suffix = 1
-        while FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(base)_\(suffix).png").path) { suffix += 1 }
-        return folder.appendingPathComponent("\(base)_\(suffix).png")
-    }
-
-    private static func annotationsURL(for stepURL: URL) -> URL {
-        stepURL.deletingLastPathComponent().appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: stepURL.lastPathComponent))
-    }
-
     private func isFrontmostClipr() -> Bool {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-    }
-
-    /// `task`'s value, or `nil` if it takes longer than `timeout` — a slow AX read falls back to
-    /// the generic caption instead of holding the step back, and a hung capture can't hold up
-    /// `stop` forever. A race of two unstructured tasks
-    /// rather than a task group: a group waits for every child before returning, and awaiting
-    /// `task.value` ignores cancellation, so a group would never actually cut a slow read short.
-    private static func value<T>(of task: Task<T, Never>?, timeout: TimeInterval) async -> T? {
-        guard let task else { return nil }
-        return await withCheckedContinuation { continuation in
-            let first = FirstResult()
-            Task {
-                let value = await task.value
-                if first.claim() { continuation.resume(returning: .some(value)) }
-            }
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                if first.claim() { continuation.resume(returning: nil) }
-            }
-        }
-    }
-}
-
-/// Lets exactly one of two racing tasks resume a continuation.
-private final class FirstResult: @unchecked Sendable {
-    private let lock = NSLock()
-    private var claimed = false
-
-    func claim() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if claimed { return false }
-        claimed = true
-        return true
-    }
-}
-
-private extension NSEvent {
-    /// `NSEvent.mouseLocation` is AppKit space; steps work in Quartz global space.
-    static var mouseLocationQuartz: CGPoint {
-        let p = NSEvent.mouseLocation
-        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        return CGPoint(x: p.x, y: primaryHeight - p.y)
-    }
-}
-
-extension HotkeyBinding {
-    /// Same key and exactly the same ⌃⌥⇧⌘ modifiers. Carbon modifier bits mapped to `KeyModifiers`.
-    func matches(_ key: KeyInput) -> Bool {
-        guard UInt32(key.keyCode) == keyCode else { return false }
-        var expected: KeyModifiers = []
-        if modifiers & Modifier.command.rawValue != 0 { expected.insert(.command) }
-        if modifiers & Modifier.shift.rawValue != 0 { expected.insert(.shift) }
-        if modifiers & Modifier.option.rawValue != 0 { expected.insert(.option) }
-        if modifiers & Modifier.control.rawValue != 0 { expected.insert(.control) }
-        return key.modifiers == expected
     }
 }
