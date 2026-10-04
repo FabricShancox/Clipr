@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/ReviewRow.swift
 import SwiftUI
 
 /// One step in the Review list: number, thumbnail, caption (rendered, or an inline editor) and
@@ -22,8 +21,6 @@ struct ReviewRow: View {
     @State private var editMenuAnchor = RowMenuAnchor()
 
     private var isSelected: Bool { model.selection.contains(step.id) }
-
-    private var isEditing: Bool { editingID == step.id }
 
     private static let largeDetailsMinWidth: CGFloat = 180
     /// What else shares a Large row with the image and caption: the number badge, the gaps
@@ -110,12 +107,10 @@ struct ReviewRow: View {
         } else {
             let showControls = isHovering || isSelected
             VStack(alignment: .trailing, spacing: 6) {
-                // Full controls when they fit above the image, otherwise a one-letter size menu.
-                // Both variants are drawn in SwiftUI (no native control), so measuring both is cheap.
-                ViewThatFits(in: .horizontal) {
-                    toolbarChrome { sizePicker; imageEditMenu }
-                    toolbarChrome { compactSizeMenu; imageEditMenu }
-                }
+                ReviewRowImageToolbar(
+                    step: step, model: model, imageActionsAnchor: imageActionsAnchor, sizeMenuAnchor: sizeMenuAnchor,
+                    imageActionEntries: { imageActionEntries }, onOpenEditor: onOpenEditor
+                )
                 // Space stays reserved while hidden so rows don't jump as the pointer moves;
                 // shown on hover and on selected rows so the rest reads like the finished guide.
                 // Hidden by opacity only: the controls stay in the accessibility tree, since
@@ -145,12 +140,6 @@ struct ReviewRow: View {
             .help("Double-click to edit the image")
     }
 
-    private func toolbarChrome<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 6) { content() }
-            .controlSize(.small)
-            .fixedSize()
-    }
-
     /// The row's menus are popped up from SwiftUI-drawn buttons as native `NSMenu`s — see
     /// `RowMenuEntry` for why there is no `Menu` (an `NSPopUpButton`) in a List row.
     private var imageActionEntries: [RowMenuEntry] {
@@ -166,60 +155,6 @@ struct ReviewRow: View {
         return RowMenu.sizes(current: step.imageSize ?? .full, isReadOnly: model.isReadOnly) { size in
             model.setImageSize(size, for: targets)
         }
-    }
-
-    /// A split button: "Edit" opens the editor, the arrow shows Retake and Replace.
-    private var imageEditMenu: some View {
-        HStack(spacing: 0) {
-            Button { onOpenEditor(step) } label: {
-                Text("Edit")
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 8)
-                    .frame(minHeight: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Edit the image")
-            .accessibilityLabel("Edit Image")
-            Divider().frame(height: 12)
-            Button { RowMenu.popUp(imageActionEntries, anchor: imageActionsAnchor) } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .frame(width: 16, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Edit, retake or replace the image")
-            .background(RowMenuAnchorView(anchor: imageActionsAnchor))
-            .accessibilityLabel("Image actions")
-        }
-        .padding(1)
-        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
-        .fixedSize()
-    }
-
-    private var compactSizeMenu: some View {
-        let current = step.imageSize ?? .full
-        return Button { RowMenu.popUp(RowMenu.sizes(current: current, isReadOnly: model.isReadOnly) { size in
-            model.setImageSize(size, for: [step.id])
-        }, anchor: sizeMenuAnchor) } label: {
-            HStack(spacing: 3) {
-                Text(current.shortLabel).font(.system(size: 11))
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-            }
-            .padding(.horizontal, 7)
-            .frame(minHeight: 18)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(RowMenuAnchorView(anchor: sizeMenuAnchor))
-        .padding(1)
-        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
-        .fixedSize()
-        .disabled(model.isReadOnly)
-        .help("Image size in the guide (⌘+ / ⌘−)")
-        .accessibilityLabel("Image Size")
-        .accessibilityValue(current.title)
     }
 
     /// List layout: one small ⋯ menu beside the caption (Edit Image first), since the thumbnail
@@ -244,7 +179,10 @@ struct ReviewRow: View {
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 6) {
-            caption
+            ReviewRowCaption(
+                step: step, layout: layout, model: model, editingID: $editingID,
+                draft: $draft, suppressNextDraftChange: $suppressNextDraftChange, fieldFocused: $fieldFocused
+            )
             HStack(spacing: 6) {
                 if let app = step.appName {
                     Text(app)
@@ -279,39 +217,6 @@ struct ReviewRow: View {
             .disabled(model.isReadOnly || model.stepsInEditor.contains(step.id))
     }
 
-    /// The size this step's image takes in the finished guide (drawn at that size in Guide;
-    /// shown as a badge in Large). Drawn in SwiftUI rather than as `.segmented` Picker: the
-    /// native control, inside a List row, sets accessibility attributes while the row is being
-    /// updated, which re-enters the row's update and leaves SwiftUI in an attribute cycle it
-    /// never exits — the whole app froze when switching to Large or Guide.
-    private var sizePicker: some View {
-        let current = step.imageSize ?? .full
-        return HStack(spacing: 0) {
-            ForEach(ImageSize.allCases) { size in
-                let selected = size == current
-                Button { model.setImageSize(size, for: [step.id]) } label: {
-                    Text(size.shortLabel)
-                        .font(.system(size: 11, weight: selected ? .semibold : .regular))
-                        .frame(minWidth: 24, minHeight: 18)
-                        .foregroundStyle(selected ? Color.white : Color.primary)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(selected ? Color.accentColor : Color.clear))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(size.title)
-                .accessibilityLabel(size.title)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-        .padding(1)
-        .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Image Size")
-        .fixedSize()
-        .disabled(model.isReadOnly)
-        .help("Image size in the guide (⌘+ / ⌘−)")
-    }
-
     /// Acts on the whole selection when the clicked row is part of it, as Finder's context menu
     /// does; otherwise on the clicked step alone.
     private var imageSizeMenu: some View {
@@ -328,70 +233,11 @@ struct ReviewRow: View {
         .disabled(model.isReadOnly)
     }
 
-    @ViewBuilder
-    private var caption: some View {
-        if isEditing {
-            TextField("Add a caption", text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...4)
-                .focused($fieldFocused)
-                .onChange(of: draft) { _, text in
-                    // Setting the initial draft when editing begins isn't a user edit.
-                    if suppressNextDraftChange { suppressNextDraftChange = false; return }
-                    model.editCaption(text, for: step.id)
-                }
-                .onSubmit { finishEditing(commit: true) }
-                .onExitCommand { finishEditing(commit: false) }
-                .onChange(of: fieldFocused) { _, focused in
-                    if !focused, isEditing { finishEditing(commit: true) }
-                }
-        } else {
-            Group {
-                if let text = step.caption {
-                    Text(CaptionText.rendered(text))
-                } else {
-                    Text("Add a caption").foregroundStyle(.tertiary)
-                }
-            }
-            .font(layout == .list ? .body : .title3)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture { if !model.isReadOnly { editingID = step.id } }
-        }
-    }
-
-    /// Esc asks the model to restore the caption as it was when the edit session began, including
-    /// undoing any debounced save that already landed while typing.
-    private func finishEditing(commit: Bool) {
-        editingID = nil
-        if commit { model.commitCaption(draft, for: step.id) } else { model.cancelCaptionEdit(for: step.id) }
-    }
-
     private var kindLabel: String {
         switch step.kind {
         case .click: return "Click"
         case .typing: return "Typing"
         case .manual: return "Manual"
-        }
-    }
-}
-
-extension ImageSize {
-    var title: String {
-        switch self {
-        case .small: return "Small"
-        case .medium: return "Medium"
-        case .large: return "Large"
-        case .full: return "Full"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .small: return "S"
-        case .medium: return "M"
-        case .large: return "L"
-        case .full: return "Full"
         }
     }
 }
