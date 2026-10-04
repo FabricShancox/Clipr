@@ -49,27 +49,32 @@ extension EditorView {
     }
 
     func undo() {
+        let before = annotations
         guard let previous = history.popUndo(from: annotations) else { return }
         annotations = previous
-        afterHistoryJump()
+        afterHistoryJump(from: before)
     }
 
     func redo() {
+        let before = annotations
         guard let next = history.popRedo(from: annotations) else { return }
         annotations = next
-        afterHistoryJump()
+        afterHistoryJump(from: before)
     }
 
     /// Undo and redo can remove whatever was selected or being edited. A selection left holding
     /// vanished ids kept the color, stroke and nudge controls live, and each of those "edits" of
     /// nothing used to wipe the redo stack. The numbered stamp also follows what's actually on
-    /// the canvas, so undoing stamp 3 offers 3 again rather than skipping to 4.
-    private func afterHistoryJump() {
+    /// the canvas, so undoing stamp 3 offers 3 again rather than skipping to 4 — but only when the
+    /// jump actually changed the stamps, so a "Next" number picked by hand survives undoing a box.
+    private func afterHistoryJump(from before: [AnnotationObject]) {
         selectedIDs = selectedIDs.pruned(to: annotations)
         if let id = editingTextID, !annotations.contains(where: { $0.id == id }) {
             editingTextID = nil
         }
-        setNextStampNumber(Clipr.nextStampNumber(after: annotations))
+        if Clipr.nextStampNumber(after: before) != Clipr.nextStampNumber(after: annotations) {
+            setNextStampNumber(Clipr.nextStampNumber(after: annotations))
+        }
     }
 
     func deleteSelected() {
