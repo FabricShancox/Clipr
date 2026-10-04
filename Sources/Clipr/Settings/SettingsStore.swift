@@ -17,6 +17,9 @@ final class SettingsStore {
         static let exportFormat = "exportFormat"
         static let exportIncludeZoom = "exportIncludeZoom"
         static let exportGIFFrameSeconds = "exportGIFFrameSeconds"
+        /// Set once the ⌘⇧3 -> ⌃⇧⌘S Advanced Mode default migration has run, so a user who later
+        /// picks ⌘⇧3 on purpose keeps it.
+        static let advancedModeHotkeyMigrated = "advancedModeHotkeyMigratedFromCmdShift3"
     }
 
     /// Shared with `ReviewView`'s `@AppStorage`, which reads and writes the same key directly.
@@ -24,6 +27,18 @@ final class SettingsStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        migrateAdvancedModeHotkey()
+    }
+
+    /// The old Advanced Mode default, ⌘⇧3, is macOS's "save picture of screen" shortcut, which
+    /// usually wins — so the hotkey silently didn't work, or dropped a screenshot on every toggle.
+    /// Anyone still on it moves to the new default, once.
+    private func migrateAdvancedModeHotkey() {
+        guard !defaults.bool(forKey: Key.advancedModeHotkeyMigrated) else { return }
+        if let stored: HotkeyBinding = decoded(Key.advancedModeHotkey), stored == .legacyDefaultAdvancedMode {
+            encode(HotkeyBinding.defaultAdvancedMode, forKey: Key.advancedModeHotkey)
+        }
+        defaults.set(true, forKey: Key.advancedModeHotkeyMigrated)
     }
 
     var captureHotkey: HotkeyBinding {

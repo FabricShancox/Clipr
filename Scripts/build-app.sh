@@ -31,5 +31,21 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Clipr.icns"
 rm -rf "$(dirname "$ICONSET")"
 
 # Signing has to come last: it seals the bundle, so anything copied in afterwards invalidates it.
-codesign --force --deep --sign - "$APP"
-echo "Built $APP"
+#
+# Hardened runtime (`--options runtime`) makes dyld ignore DYLD_* variables, so no other process
+# can inject a library into Clipr and borrow its Accessibility, Input Monitoring and Screen
+# Recording grants. It works with the ad-hoc identity too. No entitlements are needed: Carbon
+# hotkeys, event taps and ScreenCaptureKit are gated by TCC, not entitlements, and WKWebView's
+# JIT runs in WebKit's own WebContent process, not in Clipr's.
+#
+# CLIPR_SIGN_IDENTITY picks a real identity (e.g. "Developer ID Application: Name (TEAMID)"), which
+# keeps TCC grants across updates and is required for notarisation — see docs/notarization.md.
+# `--deep` is deprecated and unnecessary: the bundle has a single executable.
+IDENTITY="${CLIPR_SIGN_IDENTITY:--}"
+SIGN_ARGS=(--force --options runtime --sign "$IDENTITY")
+if [[ "$IDENTITY" != "-" ]]; then
+    SIGN_ARGS+=(--timestamp)
+fi
+codesign "${SIGN_ARGS[@]}" "$APP"
+codesign --verify --strict "$APP"
+echo "Built $APP (signed: ${IDENTITY/#-/ad-hoc}, hardened runtime)"
