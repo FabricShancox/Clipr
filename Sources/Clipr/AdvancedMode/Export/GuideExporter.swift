@@ -1,74 +1,4 @@
-// Sources/Clipr/AdvancedMode/Export/GuideExporter.swift
 import AppKit
-
-/// Something that went wrong with one step but didn't stop the export.
-enum GuideWarning: Equatable {
-    case missingImage(step: Int)
-    case damagedAnnotations(step: Int)
-    case missingCloseUp(step: Int)
-
-    /// The alert text listing affected steps, or nil when there's nothing to report.
-    static func summary(_ warnings: [GuideWarning]) -> String? {
-        let missing = warnings.compactMap { if case .missingImage(let step) = $0 { return step } else { return nil } }
-        let damaged = warnings.compactMap { if case .damagedAnnotations(let step) = $0 { return step } else { return nil } }
-        let closeUps = warnings.compactMap { if case .missingCloseUp(let step) = $0 { return step } else { return nil } }
-        var lines: [String] = []
-        if !missing.isEmpty { lines.append("\(stepList(missing)): image unavailable — exported with a placeholder.") }
-        if !damaged.isEmpty { lines.append("\(stepList(damaged)): annotations couldn't be read — image left out to avoid exposing redacted content.") }
-        if !closeUps.isEmpty { lines.append("\(stepList(closeUps)): close-up couldn't be rendered — exported without it.") }
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
-    }
-
-    private static func stepList(_ steps: [Int]) -> String {
-        (steps.count == 1 ? "Step " : "Steps ") + steps.map(String.init).joined(separator: ", ")
-    }
-}
-
-enum GuideExportError: LocalizedError, Equatable {
-    case cancelled
-    case destinationNotWritable(String)
-    case writeFailed(String)
-    case pdfFailed
-    case clipboardFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .cancelled: return "Export cancelled."
-        case .destinationNotWritable(let reason): return "Couldn't write to the chosen location. \(reason)"
-        case .writeFailed(let reason): return "Couldn't finish the export. \(reason)"
-        case .pdfFailed: return "Couldn't create the PDF. Try exporting as HTML instead."
-        case .clipboardFailed: return "Couldn't copy the guide to the clipboard."
-        }
-    }
-}
-
-/// Set from the main actor when the user cancels, read by the background render loop.
-final class CancelFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = false
-
-    var isSet: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
-    }
-
-    func set() {
-        lock.lock()
-        value = true
-        lock.unlock()
-    }
-}
-
-/// The new guide.md couldn't be placed and the user's old `images/` couldn't be put back either:
-/// the old images stay in the hidden backup folder, which is named so the user can find it.
-struct ImagesRestoreError: LocalizedError, Equatable {
-    let backup: URL
-
-    var errorDescription: String? {
-        "The guide couldn't be placed, and your old images couldn't be put back. They were kept at “\(backup.path)”."
-    }
-}
 
 /// Runs one export: renders step images off the main thread (reporting progress per step and
 /// stopping before the next step once cancelled), writes the output into a work folder, and only
@@ -140,13 +70,7 @@ struct GuideExporter {
         }.value
 
         if format == .clipboard {
-            // HTML, RTF and RTFD are all built off the main thread; only the pasteboard write is here.
-            let payload = try await Task.detached(priority: .userInitiated) { [images] in
-                try GuideClipboard.payload(doc, images: images, isCancelled: isCancelled)
-            }.value
-            images = RenderedImages()
-            if isCancelled() { throw GuideExportError.cancelled }
-            guard copyToClipboard(payload) else { throw GuideExportError.clipboardFailed }
+            try await copyGuide(doc, images: &images, isCancelled: isCancelled)
             return warnings
         }
         guard let destination else { throw GuideExportError.writeFailed("No destination was chosen.") }
@@ -161,6 +85,38 @@ struct GuideExporter {
 
         // Markdown is assembled in a folder whose contents (guide.md, images/) are moved across.
         let output = work.url.appendingPathComponent(format == .markdown ? "Guide" : destination.lastPathComponent)
+        try await writeOutput(doc, images: &images, options: options, to: output, isCancelled: isCancelled)
+        _ = images
+        if isCancelled() { throw GuideExportError.cancelled }
+        do {
+            if work.onDestinationVolume {
+                try Self.moveIntoPlace(output, format: format, destination: destination)
+            } else {
+                try Self.copyAcrossAndPlace(output, format: format, destination: destination)
+            }
+        } catch {
+            throw GuideExportError.destinationNotWritable(error.localizedDescription)
+        }
+        return warnings
+    }
+
+    /// HTML, RTF and RTFD are all built off the main thread; only the pasteboard write is here.
+    /// `images` is emptied as soon as the payload is built.
+    private func copyGuide(_ doc: GuideDocument, images: inout RenderedImages,
+                           isCancelled: @escaping @Sendable () -> Bool) async throws {
+        let payload = try await Task.detached(priority: .userInitiated) { [images] in
+            try GuideClipboard.payload(doc, images: images, isCancelled: isCancelled)
+        }.value
+        images = RenderedImages()
+        if isCancelled() { throw GuideExportError.cancelled }
+        guard copyToClipboard(payload) else { throw GuideExportError.clipboardFailed }
+    }
+
+    /// Writes the PDF, HTML, Markdown or GIF to `output` in the work folder. `images` is emptied as
+    /// soon as what it feeds is built.
+    private func writeOutput(_ doc: GuideDocument, images: inout RenderedImages, options: ExportOptions,
+                             to output: URL, isCancelled: @escaping @Sendable () -> Bool) async throws {
+        let format = options.format
         if format == .pdf {
             let html = await Task.detached(priority: .userInitiated) { [images] in
                 HTMLGuideWriter.write(doc, images: images, mode: .embedded)
@@ -184,19 +140,8 @@ struct GuideExporter {
             }.value
             images = RenderedImages()
         }
-        _ = images
-        if isCancelled() { throw GuideExportError.cancelled }
-        do {
-            if work.onDestinationVolume {
-                try Self.moveIntoPlace(output, format: format, destination: destination)
-            } else {
-                try Self.copyAcrossAndPlace(output, format: format, destination: destination)
-            }
-        } catch {
-            throw GuideExportError.destinationNotWritable(error.localizedDescription)
-        }
-        return warnings
     }
+
     /// Each step's image at the width its format needs, plus the warnings for steps whose image is
     /// missing or whose annotations couldn't be read. GIF frames use the canvas width and skip close-ups.
     nonisolated static func renderImages(
@@ -246,94 +191,6 @@ struct GuideExporter {
         try text.withUTF8 { buffer in
             guard let base = buffer.baseAddress else { return try Data().write(to: url) }
             try Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: base), count: buffer.count, deallocator: .none).write(to: url)
-        }
-    }
-
-    /// A folder to assemble the output in, and whether moving out of it is a same-volume rename.
-    struct WorkFolder {
-        let url: URL
-        let onDestinationVolume: Bool
-    }
-
-    /// The system's replacement folder on the destination's volume; failing that (network and FAT
-    /// drives), a hidden folder beside the destination — for Markdown, inside the chosen folder, which
-    /// may itself be a volume's root; and only if that can't be made either, the system temp folder,
-    /// from which `copyAcrossAndPlace` copies the output over before renaming it into place.
-    private func makeWorkFolder(for destination: URL, format: GuideFormat) throws -> WorkFolder {
-        let fileManager = FileManager.default
-        if let workRoot {
-            let folder = workRoot.appendingPathComponent("ClipprExport-\(UUID().uuidString)", isDirectory: true)
-            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-            return WorkFolder(url: folder, onDestinationVolume: true)
-        }
-        if let folder = try? replacementDirectory(destination) {
-            return WorkFolder(url: folder, onDestinationVolume: true)
-        }
-        let parent = format == .markdown ? destination : destination.deletingLastPathComponent()
-        let sibling = parent.appendingPathComponent(Self.stagingPrefix + UUID().uuidString, isDirectory: true)
-        if (try? fileManager.createDirectory(at: sibling, withIntermediateDirectories: false)) != nil {
-            return WorkFolder(url: sibling, onDestinationVolume: true)
-        }
-        let folder = fileManager.temporaryDirectory.appendingPathComponent("ClipprExport-\(UUID().uuidString)", isDirectory: true)
-        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-        return WorkFolder(url: folder, onDestinationVolume: false)
-    }
-
-    /// For output built on another volume: copies it to a hidden item beside the destination first,
-    /// then renames that into place, so the destination's own name never holds a half-copied file.
-    /// The hidden copy is always removed.
-    nonisolated static func copyAcrossAndPlace(_ output: URL, format: GuideFormat, destination: URL) throws {
-        let parent = format == .markdown ? destination : destination.deletingLastPathComponent()
-        let staged = parent.appendingPathComponent(stagingPrefix + UUID().uuidString + (format == .markdown ? "" : "-" + destination.lastPathComponent))
-        defer { try? FileManager.default.removeItem(at: staged) }
-        try FileManager.default.copyItem(at: output, to: staged)
-        try moveIntoPlace(staged, format: format, destination: destination)
-    }
-
-    /// Replaces what's at the destination only now that the output is complete. For Markdown the
-    /// destination is the chosen folder: the old `images/` is set aside while the new one moves in,
-    /// and put back if guide.md then can't be placed, so a failed export leaves the folder as it was
-    /// (an old guide.md never ends up beside new images, nor a new one beside missing images). If the
-    /// old images can't be put back, they are left in the backup and the error says where.
-    nonisolated static func moveIntoPlace(_ output: URL, format: GuideFormat, destination: URL,
-                                          placeGuide: (URL, URL) throws -> Void = { try place($0, at: $1) },
-                                          restoreImages: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }) throws {
-        guard format == .markdown else { return try place(output, at: destination) }
-        let fileManager = FileManager.default
-        let imagesTarget = destination.appendingPathComponent(MarkdownGuideWriter.imagesFolder)
-        let backup = destination.appendingPathComponent(".images-backup-\(UUID().uuidString)")
-        let hadImages = fileManager.fileExists(atPath: imagesTarget.path)
-        if hadImages { try fileManager.moveItem(at: imagesTarget, to: backup) }
-        func restore() throws {
-            guard hadImages else { return }
-            do {
-                try restoreImages(backup, imagesTarget)
-            } catch {
-                throw ImagesRestoreError(backup: backup)
-            }
-        }
-        do {
-            try fileManager.moveItem(at: output.appendingPathComponent(MarkdownGuideWriter.imagesFolder), to: imagesTarget)
-        } catch {
-            try restore()
-            throw error
-        }
-        do {
-            try placeGuide(output.appendingPathComponent(MarkdownGuideWriter.fileName),
-                           destination.appendingPathComponent(MarkdownGuideWriter.fileName))
-        } catch {
-            try? fileManager.removeItem(at: imagesTarget)
-            try restore()
-            throw error
-        }
-        if hadImages { try? fileManager.removeItem(at: backup) }
-    }
-
-    nonisolated private static func place(_ item: URL, at target: URL) throws {
-        if FileManager.default.fileExists(atPath: target.path) {
-            _ = try FileManager.default.replaceItemAt(target, withItemAt: item)
-        } else {
-            try FileManager.default.moveItem(at: item, to: target)
         }
     }
 }

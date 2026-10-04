@@ -1,17 +1,6 @@
-// Sources/Clipr/AdvancedMode/Export/PDFGuideExporter.swift
 import AppKit
 import PDFKit
 import WebKit
-
-enum PDFExportError: Error, Equatable {
-    case loadFailed
-    case timedOut
-    case printFailed
-    /// `export` was called a second time on the same exporter.
-    case alreadyUsed
-    /// `cancel()` was called.
-    case cancelled
-}
 
 /// Prints the guide's embedded HTML through WebKit straight to a PDF file, so pagination follows
 /// the template's `break-inside: avoid` and the PDF matches the HTML export exactly.

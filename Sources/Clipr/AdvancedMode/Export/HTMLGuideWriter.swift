@@ -1,13 +1,6 @@
 // Sources/Clipr/AdvancedMode/Export/HTMLGuideWriter.swift
 import Foundation
 
-/// How the HTML refers to step images: inline data URIs (one self-contained file, also what the
-/// PDF and the clipboard use) or relative paths under `prefix`.
-enum HTMLImageMode: Equatable {
-    case embedded
-    case linked(prefix: String)
-}
-
 /// The one guide template behind HTML, PDF and the clipboard. Light theme and the system font
 /// stack only, so it looks the same printed, opened in a browser and pasted into a docs tool.
 enum HTMLGuideWriter {
