@@ -162,18 +162,25 @@ final class ClickCaptureManager {
             if settings.cursorTrail { trail.add(p) }
         case .ownClick:
             endTypingBurst()
-        case .click(let p):
+        case .click(let p, let clickCount):
             endTypingBurst()
             var points = trail.drain()
             if let previous = pending {
-                // A second click inside the delay replaces the first (double-click, fast
-                // clicking); its trail is kept so the path still starts where the user began.
-                // Its write slot is released and a fresh one taken below, after the typing
-                // burst this click just ended, so that typing is written before the click.
                 previous.work.cancel()
-                previous.describe?.cancel()
-                previous.slot.done.finish()
-                points = previous.trail + points
+                pending = nil
+                if Self.isRepeatClick(clickCount: clickCount, at: p, after: previous.point) {
+                    // The second press of a double-click replaces the first; its trail is kept
+                    // so the path still starts where the user began. Its write slot is released
+                    // and a fresh one taken below, after any typing burst this click just ended,
+                    // so that typing is written before the click.
+                    previous.describe?.cancel()
+                    previous.slot.done.finish()
+                    points = previous.trail + points
+                } else {
+                    // A click on something else (a checkbox, then OK) is a step of its own:
+                    // capture the earlier one now rather than lose it.
+                    fire(previous)
+                }
             }
             let slot = reserveWriteSlot()
             let describe = settings.autoCaptions ? Task { await self.describer.describe(at: p) } : nil
@@ -194,6 +201,15 @@ final class ClickCaptureManager {
             if keystrokes.bufferedCharacterCount > before { readFocusedField(startsBurst: before == 0) }
             scheduleIdleCheck()
         }
+    }
+
+    /// Points a double-click's second press may drift from the first and still be the same click.
+    static let doubleClickSlop: CGFloat = 6
+
+    /// The second press of a double-click (or triple-click) on the same spot, as opposed to a
+    /// quick click on another control.
+    static func isRepeatClick(clickCount: Int, at point: CGPoint, after previous: CGPoint) -> Bool {
+        clickCount > 1 && hypot(point.x - previous.x, point.y - previous.y) <= doubleClickSlop
     }
 
     // MARK: Steps

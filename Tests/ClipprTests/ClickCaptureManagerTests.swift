@@ -150,18 +150,35 @@ final class ClickCaptureManagerTests: XCTestCase {
         manager.handle(.mouseMoved(CGPoint(x: 110, y: 110)))
         manager.handle(.mouseMoved(CGPoint(x: 130, y: 110)))
         manager.handle(.click(CGPoint(x: 140, y: 120)))
-        manager.handle(.mouseMoved(CGPoint(x: 160, y: 120)))
-        manager.handle(.click(CGPoint(x: 170, y: 130)))
+        manager.handle(.mouseMoved(CGPoint(x: 142, y: 121)))
+        manager.handle(.click(CGPoint(x: 142, y: 122), clickCount: 2))   // the double-click's second press
         waitForSteps(1)
         let (manifest, sessionFolder) = stop()
         XCTAssertEqual(manifest.steps.count, 1)
-        XCTAssertEqual(manifest.steps[0].clickPoint, CGPoint(x: 70, y: 30))
+        XCTAssertEqual(manifest.steps[0].clickPoint, CGPoint(x: 42, y: 22))
         let annotations = StorageManager(baseFolder: folder).loadAnnotations(rawURL: sessionFolder.appendingPathComponent(manifest.steps[0].file))
         let trail = annotations.first { if case .freehand = $0.kind { return true }; return false }
         guard case .freehand(let pts)? = trail?.kind else { return XCTFail("no trail") }
         // Starts at the first move (kept across the coalesced click) and ends on the final click.
         XCTAssertEqual(pts.first, CGPoint(x: 10, y: 290))
-        XCTAssertEqual(pts.last, CGPoint(x: 70, y: 270))
+        XCTAssertEqual(pts.last, CGPoint(x: 42, y: 278))
+    }
+
+    // M1: a second click on a different control inside the delay is a step of its own.
+    func testSecondClickElsewhereInsideDelayKeepsBothSteps() throws {
+        _ = try manager.start(settings: settings { $0.captureDelay = 1.5 }, area: nil)
+        manager.handle(.click(CGPoint(x: 150, y: 160)))   // ticks a checkbox
+        manager.handle(.click(CGPoint(x: 300, y: 250)))   // then OK, well inside the delay
+        let steps = stop().0.steps
+        XCTAssertEqual(steps.map(\.clickPoint), [CGPoint(x: 50, y: 60), CGPoint(x: 200, y: 150)])
+    }
+
+    // M1: a repeat press far from the first isn't the same double-click either.
+    func testRepeatClickCountFarAwayIsNotADoubleClick() throws {
+        _ = try manager.start(settings: settings { $0.captureDelay = 1.5 }, area: nil)
+        manager.handle(.click(CGPoint(x: 150, y: 160)))
+        manager.handle(.click(CGPoint(x: 300, y: 250), clickCount: 2))
+        XCTAssertEqual(stop().0.steps.count, 2)
     }
 
     func testClickOutsideImageHasNoMarkerOrZoom() throws {
@@ -257,9 +274,17 @@ final class ClickCaptureManagerTests: XCTestCase {
         _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
         manager.handle(.click(CGPoint(x: 150, y: 160)))
         manager.handle(.key(KeyInput(characters: "J", baseCharacters: "j", keyCode: 0, modifiers: [.shift], isSecure: false)))
-        manager.handle(.click(CGPoint(x: 170, y: 170)))   // inside the first click's delay
+        manager.handle(.click(CGPoint(x: 151, y: 161), clickCount: 2))   // a double-click, inside the delay
         waitForSteps(2)
         XCTAssertEqual(stop().0.steps.map(\.kind), [.typing, .click])
+    }
+
+    func testTypingBetweenTwoSeparateClicksIsWrittenBetweenThem() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        manager.handle(.click(CGPoint(x: 150, y: 160)))
+        manager.handle(.key(KeyInput(characters: "J", baseCharacters: "j", keyCode: 0, modifiers: [.shift], isSecure: false)))
+        manager.handle(.click(CGPoint(x: 170, y: 170)))   // inside the first click's delay, elsewhere
+        XCTAssertEqual(stop().0.steps.map(\.kind), [.click, .typing, .click])
     }
 
     // Finding 1: a Tab or click reaches the app before the burst ends, so a read issued after
@@ -301,12 +326,12 @@ final class ClickCaptureManagerTests: XCTestCase {
 
     // Finding 2: a superseded click's slot must still wait for the step before it.
     func testSupersededClickWaitsForInFlightManualStep() throws {
-        let secondClick = CGPoint(x: 171.5, y: 173.25)
+        let secondClick = CGPoint(x: 151.5, y: 161.25)
         images.delay = { $0 == .screenContaining(secondClick) ? 0 : 1 }
         _ = try manager.start(settings: settings { $0.scope = .screen }, area: nil)
         manager.captureManualStep()                       // capture held for 1 s
         manager.handle(.click(CGPoint(x: 150.5, y: 160.25)))
-        manager.handle(.click(secondClick))               // supersedes the first click
+        manager.handle(.click(secondClick, clickCount: 2)) // supersedes the first click
         XCTAssertEqual(stop().0.steps.map(\.kind), [.manual, .click])
     }
 

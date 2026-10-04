@@ -3,7 +3,8 @@ import Cocoa
 import Carbon.HIToolbox
 
 enum SessionEvent: Equatable {
-    case click(CGPoint)
+    /// `clickCount` is the system's click state: 2 for the second press of a double-click.
+    case click(CGPoint, clickCount: Int = 1)
     /// A click on Clipr itself (menu-bar icon, control panel). Never a step, but it still ends a
     /// typing burst so text typed just before pressing Stop isn't lost.
     case ownClick
@@ -80,7 +81,8 @@ final class SessionEventTap: SessionEventSource {
             // Resolved at click time: by the time a delayed capture runs, the menu or panel that
             // was clicked may be gone. See `WindowPicker.ownerPIDOfWindow`.
             let isOwn = WindowPicker.ownerPIDOfWindow(at: event.location) == ProcessInfo.processInfo.processIdentifier
-            onEvent?(isOwn ? .ownClick : .click(event.location))
+            let clickCount = Int(event.getIntegerValueField(.mouseEventClickState))
+            onEvent?(isOwn ? .ownClick : .click(event.location, clickCount: max(1, clickCount)))
         case .mouseMoved, .leftMouseDragged:
             onEvent?(.mouseMoved(event.location))
         case .keyDown:
