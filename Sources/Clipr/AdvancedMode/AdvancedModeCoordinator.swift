@@ -44,10 +44,11 @@ final class AdvancedModeCoordinator {
     var typingUnavailable: Bool { clickCaptureManager.typingUnavailable }
 
     /// Main thread only: `ownWindowIDs` is read by the live image source on the main actor.
-    func start(settings: AdvancedModeSettings, area: CGRect?, ownWindowIDs: Set<CGWindowID>) -> StartOutcome {
+    func start(settings: AdvancedModeSettings, area: CGRect?, ownWindowIDs: Set<CGWindowID>,
+               ignoredKeys: [HotkeyBinding]) -> StartOutcome {
         clickCaptureManager.ownWindowIDs = ownWindowIDs
         do {
-            _ = try clickCaptureManager.start(settings: settings, area: area)
+            _ = try clickCaptureManager.start(settings: settings, area: area, ignoredKeys: ignoredKeys)
             return .started
         } catch ClickCaptureError.accessibilityNotGranted {
             return .accessibilityNotGranted

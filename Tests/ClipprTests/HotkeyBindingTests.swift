@@ -22,6 +22,20 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertEqual(HotkeyBinding(keyCode: 49, modifiers: command).displayString, "⌘Space")
     }
 
+    func testMatchesMapsCarbonModifiersToKeyModifiers() {
+        let key = { (code: UInt16, mods: KeyModifiers) in
+            KeyInput(characters: "", baseCharacters: "", keyCode: code, modifiers: mods, isSecure: false)
+        }
+        XCTAssertTrue(HotkeyBinding.defaultCapture.matches(key(19, [.command, .shift])))
+        XCTAssertFalse(HotkeyBinding.defaultCapture.matches(key(19, [.command])))
+        XCTAssertFalse(HotkeyBinding.defaultCapture.matches(key(19, [.command, .shift, .option])))
+        XCTAssertFalse(HotkeyBinding.defaultCapture.matches(key(20, [.command, .shift])))
+        let all = HotkeyBinding.Modifier.self
+        let ctrlOpt = HotkeyBinding(keyCode: 1, modifiers: all.control.rawValue | all.option.rawValue)
+        XCTAssertTrue(ctrlOpt.matches(key(1, [.control, .option])))
+        XCTAssertFalse(ctrlOpt.matches(key(1, [.control, .shift])))
+    }
+
     func testDefaultsDiffer() {
         XCTAssertNotEqual(HotkeyBinding.defaultCapture, HotkeyBinding.defaultAdvancedMode)
     }

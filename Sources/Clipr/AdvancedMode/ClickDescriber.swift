@@ -1,6 +1,6 @@
 // Sources/Clipr/AdvancedMode/ClickDescriber.swift
+import AppKit
 import ApplicationServices
-import Foundation
 
 protocol ClickDescribing: AnyObject {
     /// What's under `point` (Quartz global). `nil` if Accessibility can't say.
@@ -52,6 +52,16 @@ final class ClickDescriber: ClickDescribing {
                 guard let focused = Self.element(systemWide, kAXFocusedUIElementAttribute) else {
                     return continuation.resume(returning: FocusedField(label: nil, security: .unknown, element: nil))
                 }
+                // Terminals never mark a sudo/ssh/password prompt as an AX secure field, so the
+                // subrole check below can't protect them: any field in a terminal is `unknown`.
+                // The app comes from the focused element's own pid — the process that actually
+                // receives the keys — rather than the frontmost app, which needs the main thread
+                // and could already be a different app by the time this read runs.
+                var pid: pid_t = 0
+                guard AXUIElementGetPid(focused, &pid) == .success,
+                      !Self.isTerminal(bundleID: NSRunningApplication(processIdentifier: pid)?.bundleIdentifier) else {
+                    return continuation.resume(returning: FocusedField(label: nil, security: .unknown, element: focused))
+                }
                 let role = Self.read(focused, kAXRoleAttribute)
                 let subrole = Self.read(focused, kAXSubroleAttribute)
                 let security: FieldSecurity
@@ -66,6 +76,17 @@ final class ClickDescriber: ClickDescribing {
                 ))
             }
         }
+    }
+
+    static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty",
+        "org.alacritty", "com.mitchellh.ghostty", "com.github.wez.wezterm"
+    ]
+
+    /// An unknown app (`nil`) isn't treated as a terminal here; a failed pid lookup is already
+    /// `unknown` on its own path.
+    static func isTerminal(bundleID: String?) -> Bool {
+        bundleID.map(terminalBundleIDs.contains) ?? false
     }
 
     private enum AttributeRead: Equatable {

@@ -19,8 +19,14 @@ final class ClickCaptureManager {
     private var nextStepIndex = 1
     private var trail = CursorTrailRecorder()
     private var keystrokes = KeystrokeAggregator()
-    /// The focused field as the current burst's first key arrived; checked again at burst end.
-    private var typingFieldTask: Task<FocusedField, Never>?
+    /// The focused field at the current burst's first accepted printable key.
+    private var burstStartField: Task<FocusedField, Never>?
+    /// The focused field at the burst's latest accepted printable key. Each read is chained after
+    /// the previous one so the answers arrive in key order.
+    private var burstLastField: Task<FocusedField, Never>?
+    /// Clipr's own hotkeys. The listen-only tap sees their keyDown before Carbon dispatches them,
+    /// so without this every press would also become a "Press ⌘⇧2" typing step.
+    private var ignoredKeys: [HotkeyBinding] = []
     private var idleWork: DispatchWorkItem?
     private var pending: PendingClick?
     /// The tail of the write chain. Captures run concurrently, but every step awaits the one
@@ -31,7 +37,10 @@ final class ClickCaptureManager {
 
     private static let stopFlushTimeout: TimeInterval = 10
 
-    var isPaused = false
+    /// Pausing discards a half-typed burst rather than writing it, so nothing lands while paused.
+    var isPaused = false {
+        didSet { if isPaused, !oldValue { discardTypingBurst() } }
+    }
     var captureCursor = false
     private(set) var typingUnavailable = false
     var onStepCaptured: ((Int) -> Void)?
@@ -78,7 +87,7 @@ final class ClickCaptureManager {
 
     // MARK: Lifecycle
 
-    func start(settings: AdvancedModeSettings, area: CGRect?) throws -> URL {
+    func start(settings: AdvancedModeSettings, area: CGRect?, ignoredKeys: [HotkeyBinding] = []) throws -> URL {
         guard accessibilityGranted() else {
             PermissionsManager.requestAccessibilityPermission()
             throw ClickCaptureError.accessibilityNotGranted
@@ -92,6 +101,9 @@ final class ClickCaptureManager {
         nextStepIndex = 1
         trail = CursorTrailRecorder()
         keystrokes = KeystrokeAggregator()
+        burstStartField = nil
+        burstLastField = nil
+        self.ignoredKeys = ignoredKeys
         lastWrite = nil
         isPaused = false
         // Before `sessionFolder` is set, so a failure can't leave `isActive` true with no tap.
@@ -173,9 +185,13 @@ final class ClickCaptureManager {
             pending = PendingClick(point: p, trail: points, describe: describe, work: work, slot: slot)
             DispatchQueue.main.asyncAfter(deadline: .now() + settings.effectiveDelay, execute: work)
         case .key(let key):
-            guard settings.typingSteps, !typingUnavailable, !isFrontmostClipr() else { return }
-            if !keystrokes.hasPendingBurst { typingFieldTask = Task { await self.describer.focusedField() } }
+            guard settings.typingSteps, !typingUnavailable, !isFrontmostClipr(),
+                  !ignoredKeys.contains(where: { $0.matches(key) }) else { return }
+            let before = keystrokes.bufferedCharacterCount
             for typed in keystrokes.handle(key, at: Date()) { emit(typed) }
+            // Only a key the burst actually took as text reads the focused field — not arrows,
+            // Escape, shortcuts or the Return/Tab that ends a burst.
+            if keystrokes.bufferedCharacterCount > before { readFocusedField(startsBurst: before == 0) }
             scheduleIdleCheck()
         }
     }
@@ -197,6 +213,24 @@ final class ClickCaptureManager {
         if let typed = keystrokes.endBurst() { emit(typed) }
     }
 
+    private func discardTypingBurst() {
+        idleWork?.cancel()
+        idleWork = nil
+        keystrokes = KeystrokeAggregator()
+        burstStartField = nil
+        burstLastField = nil
+    }
+
+    /// Read at the key, not at the end of the burst: by the time a Tab or click ends the burst
+    /// it has already reached the app, so a read then would usually see the next field and the
+    /// step would be dropped as a focus change.
+    private func readFocusedField(startsBurst: Bool) {
+        let previous = burstLastField
+        let read = Task { _ = await previous?.value; return await self.describer.focusedField() }
+        if startsBurst { burstStartField = read }
+        burstLastField = read
+    }
+
     private func scheduleIdleCheck() {
         idleWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -208,30 +242,27 @@ final class ClickCaptureManager {
     }
 
     private func emit(_ typed: TypingEvent) {
-        let field = typingFieldTask
-        typingFieldTask = nil
         switch typed {
         case .shortcut(let keys):
             enqueue(kind: .typing, target: scopeTarget(for: nil), click: nil, trail: [], caption: { _ in CaptionFormatter.shortcut(keys) })
         case .text(let text):
+            let start = burstStartField, last = burstLastField
+            burstStartField = nil
+            burstLastField = nil
             // The aggregator never emits an empty burst; checked here too because an empty
             // typing step would be a screenshot captioned `Type ""`.
             guard !text.isEmpty else { return }
             // The focused-field check is the second line of defence after `IsSecureEventInputEnabled`
-            // (some password fields don't turn secure input on). It fails closed: the field is
-            // read when the burst starts and again now, and anything short of "the same field,
-            // known not secure, both times" drops the step before anything is captured. Focus
-            // can move mid-burst (Tab is caught, but a click-free focus change isn't), so a
-            // single read could vouch for one field while the text went into a password field.
-            // The second read is chained after the first so the two can't be answered out of order.
-            let end: Task<FocusedField, Never>? = field.map { start in
-                Task { _ = await start.value; return await self.describer.focusedField() }
-            }
+            // (some password fields don't turn secure input on). It fails closed: the field read
+            // at the burst's first key and at its last key must be the same element, known not
+            // secure both times, or the step is dropped before anything is captured. Focus can
+            // move mid-burst without a click or Tab, so one read could vouch for one field while
+            // the text went into a password field.
             enqueue(kind: .typing, target: scopeTarget(for: nil), click: nil, trail: [], skipIf: {
-                guard let field, let end else { return true }
-                return !Self.isSameNonSecureField(await field.value, await end.value)
+                guard let start, let last else { return true }
+                return !Self.isSameNonSecureField(await start.value, await last.value)
             }, caption: { _ in
-                CaptionFormatter.typing(text, fieldLabel: await field?.value.label)
+                CaptionFormatter.typing(text, fieldLabel: await start?.value.label)
             })
         }
     }
@@ -262,7 +293,12 @@ final class ClickCaptureManager {
     private func reserveWriteSlot() -> WriteSlot {
         let (stream, done) = AsyncStream<Void>.makeStream()
         let predecessor = lastWrite
-        lastWrite = Task { for await _ in stream {} }
+        // Waits for its predecessor too, so finishing a superseded click's slot early can't
+        // let later steps (or `stop`) skip past a step that's still capturing.
+        lastWrite = Task {
+            for await _ in stream {}
+            await predecessor?.value
+        }
         return WriteSlot(predecessor: predecessor, done: done)
     }
 
@@ -398,5 +434,18 @@ private extension NSEvent {
         let p = NSEvent.mouseLocation
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         return CGPoint(x: p.x, y: primaryHeight - p.y)
+    }
+}
+
+extension HotkeyBinding {
+    /// Same key and exactly the same ⌃⌥⇧⌘ modifiers. Carbon modifier bits mapped to `KeyModifiers`.
+    func matches(_ key: KeyInput) -> Bool {
+        guard UInt32(key.keyCode) == keyCode else { return false }
+        var expected: KeyModifiers = []
+        if modifiers & Modifier.command.rawValue != 0 { expected.insert(.command) }
+        if modifiers & Modifier.shift.rawValue != 0 { expected.insert(.shift) }
+        if modifiers & Modifier.option.rawValue != 0 { expected.insert(.option) }
+        if modifiers & Modifier.control.rawValue != 0 { expected.insert(.control) }
+        return key.modifiers == expected
     }
 }

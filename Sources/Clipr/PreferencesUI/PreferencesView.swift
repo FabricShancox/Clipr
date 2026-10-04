@@ -99,6 +99,7 @@ struct PreferencesView: View {
                 Toggle("Zoom on click", isOn: advancedBinding(\.zoomOnClick))
                 HStack {
                     Toggle("Typing steps", isOn: advancedBinding(\.typingSteps))
+                        .help("Not recorded in password fields, terminals, or apps that don't report their fields to Accessibility.")
                     Spacer()
                     if advanced.typingSteps && !inputMonitoringGranted {
                         Button("Grant…") {
@@ -114,7 +115,7 @@ struct PreferencesView: View {
                 }
                 HStack {
                     Text("Capture delay")
-                    Slider(value: advancedBinding(\.captureDelay), in: 0...2, step: 0.1)
+                    Slider(value: advancedBinding(\.captureDelay), in: 0.2...2, step: 0.1)
                     Text(String(format: "%.1f s", advanced.captureDelay))
                         .monospacedDigit()
                         .frame(width: 40, alignment: .trailing)

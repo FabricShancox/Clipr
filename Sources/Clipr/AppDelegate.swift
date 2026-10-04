@@ -202,7 +202,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startAdvancedMode(_ advancedSettings: AdvancedModeSettings, area: CGRect?) {
-        switch advancedMode.start(settings: advancedSettings, area: area, ownWindowIDs: currentOwnWindowIDs()) {
+        let ownHotkeys = [settings.captureHotkey, settings.advancedModeHotkey] + [advancedSettings.stepHotkey].compactMap { $0 }
+        switch advancedMode.start(settings: advancedSettings, area: area, ownWindowIDs: currentOwnWindowIDs(),
+                                  ignoredKeys: ownHotkeys) {
         case .started:
             statusItemController.setAdvancedModeActive(true)
             showAdvancedModePanel()

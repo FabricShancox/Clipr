@@ -13,7 +13,11 @@ private final class FakeImages: StepImageSource {
     var ownWindowIDs: Set<CGWindowID> = []
     var targets: [CaptureTarget] = []
     let origin = CGPoint(x: 100, y: 100)
+    /// How long a capture of `target` takes, so a test can hold one step in flight.
+    var delay: (CaptureTarget) -> TimeInterval = { _ in 0 }
     func capture(_ target: CaptureTarget, showsCursor: Bool) async throws -> CapturedFrame? {
+        let seconds = delay(target)
+        if seconds > 0 { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         await MainActor.run { self.targets.append(target) }
         let image = testImage(width: 400, height: 300) { NSColor.white.set(); NSRect(x: 0, y: 0, width: 400, height: 300).fill() }
         return CapturedFrame(image: image, origin: origin, appName: "Safari")
@@ -23,14 +27,41 @@ private final class FakeImages: StepImageSource {
 private final class FakeDescriber: ClickDescribing {
     var target: ClickTarget? = ClickTarget(role: "AXButton", subrole: nil, label: "Save", menuPath: [])
     var field = FocusedField(label: "Name", security: .notSecure, element: nil)
-    /// Answers for successive `focusedField()` calls (burst start, then burst end); `field` once
-    /// it runs out. The manager orders the two reads of one burst, so this order is deterministic.
+    /// Answers for successive `focusedField()` calls; the last one keeps being answered once
+    /// it's reached, so `[start, end]` means "the first key saw `start`, every later key `end`".
+    /// The manager chains a burst's reads, so this order is deterministic. `field` when empty.
     var fields: [FocusedField] = []
+    /// Once set, every read answers this — a stand-in for the next field that a Tab or click
+    /// moved focus to before any read issued after it could run.
+    var afterBoundary: FocusedField?
+    /// Called with the running read count after each `focusedField()` call.
+    var onRead: ((Int) -> Void)?
+    private(set) var readCount = 0
     private let lock = NSLock()
     func describe(at point: CGPoint) async -> ClickTarget? { target }
-    func focusedField() async -> FocusedField {
+    func focusedField() async -> FocusedField { nextField() }
+
+    func passBoundary(to field: FocusedField) {
         lock.lock(); defer { lock.unlock() }
-        return fields.isEmpty ? field : fields.removeFirst()
+        afterBoundary = field
+    }
+
+    private func nextField() -> FocusedField {
+        lock.lock()
+        readCount += 1
+        let count = readCount
+        let answer: FocusedField
+        if let afterBoundary {
+            answer = afterBoundary
+        } else if fields.count > 1 {
+            answer = fields.removeFirst()
+        } else {
+            answer = fields.first ?? field
+        }
+        let onRead = self.onRead
+        lock.unlock()
+        onRead?(count)
+        return answer
     }
 }
 
@@ -227,6 +258,101 @@ final class ClickCaptureManagerTests: XCTestCase {
         manager.handle(.click(CGPoint(x: 170, y: 170)))   // inside the first click's delay
         waitForSteps(2)
         XCTAssertEqual(stop().0.steps.map(\.kind), [.typing, .click])
+    }
+
+    // Finding 1: a Tab or click reaches the app before the burst ends, so a read issued after
+    // it sees the next field. Every read issued while typing answers A, any later one B.
+    func testTypingStepWrittenWhenBurstEndsOnTab() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        typeIntoFieldThenLeave("John")
+        manager.handle(.key(KeyInput(characters: "\t", baseCharacters: "\t", keyCode: 48, modifiers: [], isSecure: false)))
+        waitForSteps(1)
+        let steps = stop().0.steps
+        XCTAssertEqual(steps.map(\.kind), [.typing])
+        XCTAssertEqual(steps.first?.caption, #"Type "John" in **Name**"#)
+    }
+
+    func testTypingStepWrittenBeforeClickWhenBurstEndsOnClick() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        typeIntoFieldThenLeave("John")
+        manager.handle(.click(CGPoint(x: 150, y: 160)))
+        waitForSteps(2)
+        let steps = stop().0.steps
+        XCTAssertEqual(steps.map(\.kind), [.typing, .click])
+        XCTAssertEqual(steps.first?.caption, #"Type "John" in **Name**"#)
+    }
+
+    /// Types `text` into field A, waits until every per-key read has run, then makes later
+    /// reads answer field B — what a real Tab or click does to the focused element.
+    private func typeIntoFieldThenLeave(_ text: String) {
+        let fieldA = AXUIElementCreateApplication(1)
+        describer.field = FocusedField(label: "Name", security: .notSecure, element: fieldA)
+        let readsDone = expectation(description: "\(text.count) focus reads")
+        describer.onRead = { if $0 == text.count { readsDone.fulfill() } }
+        for ch in text {
+            manager.handle(.key(KeyInput(characters: String(ch), baseCharacters: String(ch), keyCode: 0, modifiers: [], isSecure: false)))
+        }
+        wait(for: [readsDone], timeout: 5)
+        describer.onRead = nil
+        describer.passBoundary(to: FocusedField(label: "Email", security: .notSecure, element: AXUIElementCreateApplication(2)))
+    }
+
+    // Finding 2: a superseded click's slot must still wait for the step before it.
+    func testSupersededClickWaitsForInFlightManualStep() throws {
+        let secondClick = CGPoint(x: 171.5, y: 173.25)
+        images.delay = { $0 == .screenContaining(secondClick) ? 0 : 1 }
+        _ = try manager.start(settings: settings { $0.scope = .screen }, area: nil)
+        manager.captureManualStep()                       // capture held for 1 s
+        manager.handle(.click(CGPoint(x: 150.5, y: 160.25)))
+        manager.handle(.click(secondClick))               // supersedes the first click
+        XCTAssertEqual(stop().0.steps.map(\.kind), [.manual, .click])
+    }
+
+    // Finding 3: the tap sees Clipr's own hotkeys before Carbon handles them.
+    func testOwnHotkeyIsNotATypingStep() throws {
+        let stepHotkey = HotkeyBinding(keyCode: 1, modifiers: HotkeyBinding.Modifier.control.rawValue | HotkeyBinding.Modifier.option.rawValue)
+        _ = try manager.start(settings: settings { $0.typingSteps = true; $0.stepHotkey = stepHotkey }, area: nil,
+                              ignoredKeys: [.defaultCapture, .defaultAdvancedMode, stepHotkey])
+        manager.handle(.key(KeyInput(characters: "ß", baseCharacters: "s", keyCode: 1, modifiers: [.control, .option], isSecure: false)))
+        manager.handle(.key(KeyInput(characters: "@", baseCharacters: "2", keyCode: 19, modifiers: [.command, .shift], isSecure: false)))
+        XCTAssertTrue(stop().0.steps.isEmpty)
+    }
+
+    func testShortcutNotMatchingAHotkeyIsStillAStep() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil, ignoredKeys: [.defaultCapture])
+        manager.handle(.key(KeyInput(characters: "2", baseCharacters: "2", keyCode: 19, modifiers: [.command], isSecure: false)))
+        waitForSteps(1)
+        XCTAssertEqual(stop().0.steps.map(\.caption), ["Press **⌘2**"])
+    }
+
+    // Finding 5: only keys that open or extend a burst read the focused field.
+    func testNonPrintableKeysDoNotReadTheFocusedField() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        for code: UInt16 in [123, 124, 125, 126, 53] {   // arrows, Escape
+            manager.handle(.key(KeyInput(characters: "", baseCharacters: "", keyCode: code, modifiers: [], isSecure: false)))
+        }
+        manager.handle(.key(KeyInput(characters: "s", baseCharacters: "s", keyCode: 1, modifiers: [.command], isSecure: false)))
+        manager.handle(.key(KeyInput(characters: "a", baseCharacters: "a", keyCode: 0, modifiers: [], isSecure: false)))
+        manager.handle(.key(KeyInput(characters: "", baseCharacters: "", keyCode: 51, modifiers: [], isSecure: false)))  // ⌫
+        _ = stop()
+        XCTAssertEqual(describer.readCount, 1)   // just the "a"
+    }
+
+    // Finding 7: pausing throws a half-typed burst away instead of writing it.
+    func testPauseDiscardsOpenTypingBurst() throws {
+        _ = try manager.start(settings: settings { $0.typingSteps = true }, area: nil)
+        for ch in "Jo" {
+            manager.handle(.key(KeyInput(characters: String(ch), baseCharacters: String(ch), keyCode: 0, modifiers: [], isSecure: false)))
+        }
+        manager.isPaused = true
+        // Past the idle timeout: the cancelled idle check must not write the burst while paused.
+        let idle = expectation(description: "idle timeout passes")
+        idle.isInverted = true
+        wait(for: [idle], timeout: KeystrokeAggregator.idleTimeout + 0.3)
+        manager.isPaused = false
+        let (manifest, sessionFolder) = stop()
+        XCTAssertTrue(manifest.steps.isEmpty)
+        assertNothingTyped("Jo", in: sessionFolder)
     }
 
     private func typeAndReturn(_ text: String) {
