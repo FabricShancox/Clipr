@@ -115,7 +115,7 @@ final class ReviewModel: ObservableObject {
     /// caption a debounce wrote after this change; the inverse here re-applies only the sizes it
     /// replaced, to whatever the manifest is by then, and registers its own inverse for redo.
     private func applyImageSizes(from target: SessionManifest) {
-        let wanted = Dictionary(uniqueKeysWithValues: target.steps.map { ($0.id, $0.imageSize) })
+        let wanted = Dictionary(target.steps.map { ($0.id, $0.imageSize) }, uniquingKeysWith: { first, _ in first })
         var previous: [(id: UUID, size: ImageSize?)] = []
         for index in manifest.steps.indices {
             let step = manifest.steps[index]
@@ -130,7 +130,7 @@ final class ReviewModel: ObservableObject {
     }
 
     private func restoreImageSizes(_ sizes: [(id: UUID, size: ImageSize?)]) {
-        let wanted = Dictionary(uniqueKeysWithValues: sizes.map { ($0.id, $0.size) })
+        let wanted = Dictionary(sizes.map { ($0.id, $0.size) }, uniquingKeysWith: { first, _ in first })
         var target = manifest
         for index in target.steps.indices {
             if let size = wanted[target.steps[index].id] { target.steps[index].imageSize = size }

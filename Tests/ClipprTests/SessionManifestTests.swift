@@ -32,6 +32,24 @@ final class SessionManifestTests: XCTestCase {
         XCTAssertEqual(SessionManifestStore.load(from: folder), manifest)
     }
 
+    // L7: two records sharing an id (a hand-edited or sync-merged session.json) must not crash
+    // Review; the later one gets a fresh id and keeps everything else.
+    func testDuplicateIDsAreMadeUnique() throws {
+        touch("Step_01.png"); touch("Step_02.png")
+        let first = record("Step_01.png", caption: "A")
+        var second = record("Step_02.png", caption: "B")
+        second = StepRecord(id: first.id, file: second.file, kind: second.kind, caption: second.caption,
+                            clickPoint: second.clickPoint, zoomFile: nil, appName: second.appName,
+                            capturedAt: second.capturedAt, imageSize: .small)
+        try SessionManifestStore.save(SessionManifest(createdAt: Date(timeIntervalSince1970: 0), steps: [first, second]), in: folder)
+        let loaded = SessionManifestStore.load(from: folder)
+        XCTAssertEqual(loaded.steps.map(\.file), ["Step_01.png", "Step_02.png"])
+        XCTAssertEqual(loaded.steps[0].id, first.id)
+        XCTAssertNotEqual(loaded.steps[1].id, first.id)
+        XCTAssertEqual(loaded.steps[1].caption, "B")
+        XCTAssertEqual(loaded.steps[1].imageSize, .small)
+    }
+
     func testMissingManifestReconstructsFromPNGs() {
         touch("Step_10.png"); touch("Step_2.png"); touch("Step_01.png")
         let loaded = SessionManifestStore.load(from: folder)

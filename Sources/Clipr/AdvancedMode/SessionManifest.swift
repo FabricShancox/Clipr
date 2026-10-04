@@ -46,6 +46,12 @@ struct StepRecord: Codable, Identifiable, Equatable {
     /// accepted because the field is cosmetic: an older build that edits a sized session drops
     /// `imageSize` when it saves.
     var imageSize: ImageSize? = nil
+
+    /// The same step under a fresh id.
+    func withNewID() -> StepRecord {
+        StepRecord(id: UUID(), file: file, kind: kind, caption: caption, clickPoint: clickPoint, zoomFile: zoomFile,
+                   appName: appName, capturedAt: capturedAt, imageSize: imageSize)
+    }
 }
 
 /// `steps` order is display order, so steps can be reordered later without renaming files.
@@ -132,6 +138,12 @@ enum SessionManifestStore {
         // A duplicate entry would show one file twice and make reorder/delete ambiguous.
         var seen = Set<String>()
         manifest.steps = manifest.steps.filter { seen.insert($0.file).inserted }
+        // Ids must be unique too: Review keys steps by id. A repeat (a hand-edited or sync-merged
+        // session.json) keeps its file and caption under a fresh id.
+        var seenIDs = Set<UUID>()
+        for index in manifest.steps.indices where !seenIDs.insert(manifest.steps[index].id).inserted {
+            manifest.steps[index] = manifest.steps[index].withNewID()
+        }
         let present = Set(onDisk)
         manifest.steps.removeAll { !present.contains($0.file) }
         let listed = Set(manifest.steps.map(\.file))
