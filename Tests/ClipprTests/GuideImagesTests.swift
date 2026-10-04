@@ -43,17 +43,35 @@ final class GuideImagesTests: XCTestCase {
         try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image).data))
     }
 
-    func testFlattensAnnotationsOntoImage() throws {
+    private func redaction(_ frame: CGRect) -> AnnotationObject {
+        AnnotationObject(id: UUID(), kind: .blur, frame: frame,
+                         color: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1), strokeWidth: 2, redactionStyle: .solid)
+    }
+
+    /// Annotation frames are in points with a bottom-left origin; a bitmap's rows count from the top.
+    /// An off-centre box makes a vertical flip show up as the wrong corner being dark.
+    func testFlattensAnnotationsWithBottomLeftOrigin() throws {
         let url = try writeStep(white(width: 40, height: 40))
-        let box = AnnotationObject(id: UUID(), kind: .blur, frame: CGRect(x: 10, y: 10, width: 20, height: 20),
-                                   color: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1), strokeWidth: 2, redactionStyle: .solid)
-        try StorageManager(baseFolder: folder).saveAnnotations([box], rawURL: url)
+        try StorageManager(baseFolder: folder).saveAnnotations([redaction(CGRect(x: 2, y: 2, width: 10, height: 10))], rawURL: url)
 
         let result = GuideImages.render(.file(url), maxPixelWidth: 1600)
         XCTAssertFalse(result.sidecarDamaged)
         let bitmap = try decode(result.image)
-        XCTAssertLessThan(try XCTUnwrap(bitmap.colorAt(x: 20, y: 20)).brightnessComponent, 0.3, "redaction drawn in the middle")
-        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 2, y: 2)).brightnessComponent, 0.9, "corner untouched")
+        XCTAssertLessThan(try XCTUnwrap(bitmap.colorAt(x: 7, y: 33)).brightnessComponent, 0.3, "box at the bottom-left")
+        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 7, y: 7)).brightnessComponent, 0.9, "top-left untouched")
+        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 33, y: 33)).brightnessComponent, 0.9, "bottom-right untouched")
+    }
+
+    func testFlattensAnnotationsOnRetinaImage() throws {
+        // 40×40 points = 80×80 pixels; the frame is in points, so it covers pixels 4…24 from the left.
+        let url = try writeStep(white(width: 40, height: 40, scale: 2))
+        try StorageManager(baseFolder: folder).saveAnnotations([redaction(CGRect(x: 2, y: 2, width: 10, height: 10))], rawURL: url)
+
+        let bitmap = try decode(GuideImages.render(.file(url), maxPixelWidth: 1600).image)
+        XCTAssertEqual(bitmap.pixelsWide, 80)
+        XCTAssertLessThan(try XCTUnwrap(bitmap.colorAt(x: 14, y: 66)).brightnessComponent, 0.3, "box at the bottom-left")
+        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 14, y: 14)).brightnessComponent, 0.9, "top-left untouched")
+        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 50, y: 66)).brightnessComponent, 0.9, "right of the box untouched")
     }
 
     func testDownsamplesToMaxWidth() throws {
@@ -101,11 +119,34 @@ final class GuideImagesTests: XCTestCase {
     }
 
     func testDamagedSidecarGivesRawImageAndFlag() throws {
-        let url = try writeStep(white(width: 20, height: 20))
+        let blue = testImage(width: 20, height: 20) {
+            NSColor.blue.set()
+            NSRect(x: 0, y: 0, width: 20, height: 20).fill()
+        }
+        let url = try writeStep(blue)
         try Data("not json".utf8).write(to: folder.appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: "Step_01.png")))
         let result = GuideImages.render(.file(url), maxPixelWidth: 1600)
         XCTAssertTrue(result.sidecarDamaged)
         XCTAssertEqual(result.image?.pixelWidth, 20)
+        let bitmap = try decode(result.image)
+        for (x, y) in [(2, 2), (10, 10), (17, 17)] {
+            let color = try XCTUnwrap(bitmap.colorAt(x: x, y: y))
+            XCTAssertGreaterThan(color.blueComponent, 0.9, "raw capture pixels, no annotation drawn")
+            XCTAssertLessThan(color.redComponent, 0.1)
+        }
+    }
+
+    /// JPEG has no alpha, so transparent areas must come out white rather than black.
+    func testJPEGFallbackFlattensTransparencyToWhite() throws {
+        let size = 64
+        let provider = CGDataProvider(data: Data(count: size * size * 4) as CFData)!
+        let clear = CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: size * 4,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let image = try XCTUnwrap(GuideImages.encode(clear, jpegThreshold: 10))
+        XCTAssertEqual(image.kind, .jpeg)
+        let color = try XCTUnwrap(try decode(image).colorAt(x: 32, y: 32))
+        XCTAssertGreaterThan(color.brightnessComponent, 0.95)
     }
 
     func testMissingOrUnreadableImageGivesNil() throws {

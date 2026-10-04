@@ -28,21 +28,55 @@ enum GuideImages {
     }
 
     static func render(_ ref: GuideImageRef, maxPixelWidth: Int, jpegThreshold: Int = GuideImages.jpegThreshold) -> GuideImageRender {
-        guard case .file(let url) = ref, let base = NSImage(contentsOf: url), base.bitmap != nil else {
-            return GuideImageRender(image: nil, sidecarDamaged: false)
+        // A guide renders dozens of full-size captures in a row; the pool frees each one's
+        // bitmaps before the next instead of at the end of the whole export.
+        autoreleasepool {
+            guard case .file(let url) = ref, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  CGImageSourceGetCount(source) > 0 else {
+                return GuideImageRender(image: nil, sidecarDamaged: false)
+            }
+            var annotations: [AnnotationObject] = []
+            var damaged = false
+            switch StorageManager(baseFolder: url.deletingLastPathComponent()).readAnnotations(rawURL: url) {
+            case .loaded(let loaded): annotations = loaded
+            case .corrupt: damaged = true
+            case .missing: break
+            }
+            let scaled: CGImage?
+            if annotations.isEmpty {
+                scaled = thumbnail(source, maxPixelWidth: maxPixelWidth)
+            } else {
+                // Annotations are in points on the full-size image, so flatten first, then shrink.
+                guard let base = NSImage(contentsOf: url), base.bitmap != nil else {
+                    return GuideImageRender(image: nil, sidecarDamaged: damaged)
+                }
+                let flat = AnnotationRenderer.flatten(base: base, annotations: annotations)
+                scaled = flat.bitmap.flatMap { downsampled($0, maxPixelWidth: maxPixelWidth) }
+            }
+            guard let scaled else { return GuideImageRender(image: nil, sidecarDamaged: damaged) }
+            return GuideImageRender(image: encode(scaled, jpegThreshold: jpegThreshold), sidecarDamaged: damaged)
         }
-        var annotations: [AnnotationObject] = []
-        var damaged = false
-        switch StorageManager(baseFolder: url.deletingLastPathComponent()).readAnnotations(rawURL: url) {
-        case .loaded(let loaded): annotations = loaded
-        case .corrupt: damaged = true
-        case .missing: break
+    }
+
+    /// Decodes straight to the target size so a huge capture is never held at full resolution.
+    /// ImageIO bounds the *long* side, so the cap is converted from a width to that.
+    private static func thumbnail(_ source: CGImageSource, maxPixelWidth: Int) -> CGImage? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0
+        else { return nil }
+        guard maxPixelWidth > 0, width > maxPixelWidth else {
+            return CGImageSourceCreateImageAtIndex(source, 0, nil)
         }
-        let flat = annotations.isEmpty ? base : AnnotationRenderer.flatten(base: base, annotations: annotations)
-        guard let bitmap = flat.bitmap, let scaled = downsampled(bitmap, maxPixelWidth: maxPixelWidth) else {
-            return GuideImageRender(image: nil, sidecarDamaged: damaged)
-        }
-        return GuideImageRender(image: encode(scaled, jpegThreshold: jpegThreshold), sidecarDamaged: damaged)
+        // Rounded up so the width is never short of the cap; `downsampled` trims any excess pixel.
+        let longSide = Int((Double(max(width, height)) * Double(maxPixelWidth) / Double(width)).rounded(.up))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: longSide,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return downsampled(image, maxPixelWidth: maxPixelWidth)
     }
 
     /// `image` no wider than `maxPixelWidth` pixels (never enlarged), aspect ratio kept. Pixels,

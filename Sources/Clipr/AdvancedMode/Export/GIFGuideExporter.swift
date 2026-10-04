@@ -10,6 +10,9 @@ enum GIFGuideExporter {
     /// Keeps the caption band readable when every step is a small crop.
     static let minCanvasWidth = 480
     static let captionBandHeight = 72
+    /// A tall capture would otherwise make a GIF many thousands of pixels high; such images are
+    /// scaled down to fit instead, so the whole canvas (image area plus caption band) stays within this.
+    static let maxCanvasHeight = 1200
     /// Image-area height when no step has an image at all.
     static let placeholderHeight = 400
 
@@ -25,14 +28,17 @@ enum GIFGuideExporter {
         let present = images.compactMap { $0 }
         let widest = present.map(\.pixelWidth).max() ?? maxCanvasWidth
         let width = min(maxCanvasWidth, max(minCanvasWidth, widest))
-        let tallest = present.map { fittedSize($0, width: width).height }.max() ?? placeholderHeight
+        let maxImageHeight = maxCanvasHeight - captionBandHeight
+        let tallest = present.map { fittedSize($0, width: width, maxHeight: maxImageHeight).height }.max() ?? placeholderHeight
         return CGSize(width: width, height: tallest + captionBandHeight)
     }
 
-    /// `image` scaled down (never up) to fit `width`.
-    static func fittedSize(_ image: GuideImage, width: Int) -> (width: Int, height: Int) {
-        guard image.pixelWidth > width else { return (image.pixelWidth, image.pixelHeight) }
-        return (width, max(1, Int((Double(image.pixelHeight) * Double(width) / Double(image.pixelWidth)).rounded())))
+    /// `image` scaled down (never up, aspect kept) to fit `width` and, when given, `maxHeight`.
+    static func fittedSize(_ image: GuideImage, width: Int, maxHeight: Int = .max) -> (width: Int, height: Int) {
+        let scale = min(1, Double(width) / Double(image.pixelWidth), Double(maxHeight) / Double(image.pixelHeight))
+        guard scale < 1 else { return (image.pixelWidth, image.pixelHeight) }
+        return (max(1, Int((Double(image.pixelWidth) * scale).rounded())),
+                max(1, Int((Double(image.pixelHeight) * scale).rounded())))
     }
 
     static func export(_ doc: GuideDocument, images: RenderedImages, frameSeconds: Double, to url: URL) throws {
@@ -69,7 +75,7 @@ enum GIFGuideExporter {
         let imageArea = CGRect(x: 0, y: band, width: canvas.width, height: canvas.height - band)
         if let image, let source = CGImageSourceCreateWithData(image.data as CFData, nil),
            let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-            let fitted = fittedSize(image, width: width)
+            let fitted = fittedSize(image, width: width, maxHeight: Int(imageArea.height))
             context.interpolationQuality = .high
             context.draw(decoded, in: CGRect(
                 x: (canvas.width - CGFloat(fitted.width)) / 2,

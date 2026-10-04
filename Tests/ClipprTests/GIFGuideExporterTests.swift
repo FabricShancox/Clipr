@@ -79,4 +79,63 @@ final class GIFGuideExporterTests: XCTestCase {
         XCTAssertEqual(GIFGuideExporter.canvasSize(for: [try solid(width: 300, height: 100)]),
                        CGSize(width: 480, height: 100 + GIFGuideExporter.captionBandHeight))
     }
+
+    private func bitmap(_ frame: CGImage) -> NSBitmapImageRep { NSBitmapImageRep(cgImage: frame) }
+
+    private func brightness(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) throws -> CGFloat {
+        try XCTUnwrap(rep.colorAt(x: x, y: y)).brightnessComponent
+    }
+
+    func testSmallImageIsCentredNotEnlarged() throws {
+        let canvas = GIFGuideExporter.canvasSize(for: [try solid(width: 300, height: 100)])
+        let frame = try XCTUnwrap(GIFGuideExporter.renderFrame(try solid(width: 300, height: 100), caption: "", canvas: canvas))
+        let rep = bitmap(frame)
+        XCTAssertEqual(rep.pixelsWide, 480)
+        // Image area is 100 px tall, so the image fills it; 300 px wide on 480 leaves 90 px each side.
+        let blue = try XCTUnwrap(rep.colorAt(x: 240, y: 50))
+        XCTAssertGreaterThan(blue.blueComponent, 0.8)
+        XCTAssertLessThan(blue.redComponent, 0.5, "image pixel, not margin")
+        XCTAssertEqual(try brightness(rep, 40, 50), 1, accuracy: 0.01, "left margin white")
+        XCTAssertEqual(try brightness(rep, 440, 50), 1, accuracy: 0.01, "right margin white")
+        XCTAssertLessThan(try XCTUnwrap(rep.colorAt(x: 100, y: 50)).redComponent, 0.5, "image starts at x=90")
+    }
+
+    func testCaptionBandIsLightGreyWithText() throws {
+        let canvas = CGSize(width: 480, height: 100 + GIFGuideExporter.captionBandHeight)
+        let frame = try XCTUnwrap(GIFGuideExporter.renderFrame(try solid(width: 300, height: 100), caption: "Click Save", canvas: canvas))
+        let rep = bitmap(frame)
+        let bandTop = 100
+        XCTAssertEqual(try brightness(rep, 4, bandTop + 4), 0.96, accuracy: 0.02)
+        var distinct = Set<Int>()
+        for y in bandTop..<(bandTop + GIFGuideExporter.captionBandHeight) {
+            for x in 0..<480 { distinct.insert(Int(try brightness(rep, x, y) * 50)) }
+        }
+        XCTAssertGreaterThan(distinct.count, 1, "caption text drawn over the band")
+        // Without a caption the band is uniform.
+        let empty = bitmap(try XCTUnwrap(GIFGuideExporter.renderFrame(try solid(width: 300, height: 100), caption: "", canvas: canvas)))
+        var emptyValues = Set<Int>()
+        for y in bandTop..<(bandTop + GIFGuideExporter.captionBandHeight) {
+            for x in stride(from: 0, to: 480, by: 7) { emptyValues.insert(Int(try brightness(empty, x, y) * 50)) }
+        }
+        XCTAssertEqual(emptyValues.count, 1)
+    }
+
+    func testMissingImageDrawsPlaceholder() throws {
+        let canvas = CGSize(width: 1000, height: GIFGuideExporter.placeholderHeight + GIFGuideExporter.captionBandHeight)
+        let frame = try XCTUnwrap(GIFGuideExporter.renderFrame(nil, caption: "Done", canvas: canvas))
+        let rep = bitmap(frame)
+        XCTAssertEqual(try brightness(rep, 500, 10), 1, accuracy: 0.01, "white margin around the box")
+        XCTAssertEqual(try brightness(rep, 40, 40), 0.95, accuracy: 0.02, "light grey placeholder box")
+    }
+
+    func testTallImageIsScaledToKeepCanvasWithinMaxHeight() throws {
+        let tall = try solid(width: 400, height: 5000)
+        let canvas = GIFGuideExporter.canvasSize(for: [tall])
+        XCTAssertLessThanOrEqual(canvas.height, CGFloat(GIFGuideExporter.maxCanvasHeight))
+        let fitted = GIFGuideExporter.fittedSize(tall, width: Int(canvas.width), maxHeight: Int(canvas.height) - GIFGuideExporter.captionBandHeight)
+        XCTAssertEqual(fitted.height, GIFGuideExporter.maxCanvasHeight - GIFGuideExporter.captionBandHeight)
+        XCTAssertEqual(Double(fitted.width) / Double(fitted.height), 400.0 / 5000.0, accuracy: 0.002, "aspect kept")
+        let frame = try XCTUnwrap(GIFGuideExporter.renderFrame(tall, caption: "Tall", canvas: canvas))
+        XCTAssertEqual(frame.height, Int(canvas.height))
+    }
 }
