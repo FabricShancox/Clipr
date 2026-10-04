@@ -17,6 +17,9 @@ struct ReviewRow: View {
     @State private var suppressNextDraftChange = false
     @FocusState private var fieldFocused: Bool
     @State private var isHovering = false
+    @State private var imageActionsAnchor = RowMenuAnchor()
+    @State private var sizeMenuAnchor = RowMenuAnchor()
+    @State private var editMenuAnchor = RowMenuAnchor()
 
     private var isSelected: Bool { model.selection.contains(step.id) }
 
@@ -179,7 +182,7 @@ struct ReviewRow: View {
             .help("Edit the image")
             .accessibilityLabel("Edit Image")
             Divider().frame(height: 12)
-            Button { RowMenu.popUp(imageActionEntries) } label: {
+            Button { RowMenu.popUp(imageActionEntries, anchor: imageActionsAnchor) } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .frame(width: 16, height: 18)
@@ -187,6 +190,7 @@ struct ReviewRow: View {
             }
             .buttonStyle(.plain)
             .help("Edit, retake or replace the image")
+            .background(RowMenuAnchorView(anchor: imageActionsAnchor))
             .accessibilityLabel("Image actions")
         }
         .padding(1)
@@ -198,7 +202,7 @@ struct ReviewRow: View {
         let current = step.imageSize ?? .full
         return Button { RowMenu.popUp(RowMenu.sizes(current: current, isReadOnly: model.isReadOnly) { size in
             model.setImageSize(size, for: [step.id])
-        }) } label: {
+        }, anchor: sizeMenuAnchor) } label: {
             HStack(spacing: 3) {
                 Text(current.shortLabel).font(.system(size: 11))
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
@@ -208,6 +212,7 @@ struct ReviewRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(RowMenuAnchorView(anchor: sizeMenuAnchor))
         .padding(1)
         .background(RoundedRectangle(cornerRadius: 5).fill(Color.secondary.opacity(0.15)))
         .fixedSize()
@@ -221,7 +226,7 @@ struct ReviewRow: View {
     /// is too small to carry the image toolbar.
     private var compactEditMenu: some View {
         Button {
-            RowMenu.popUp(imageActionEntries + [.separator, .submenu("Image Size", enabled: !model.isReadOnly, imageSizeEntries)])
+            RowMenu.popUp(imageActionEntries + [.separator, .submenu("Image Size", enabled: !model.isReadOnly, imageSizeEntries)], anchor: editMenuAnchor)
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 14))
@@ -230,6 +235,7 @@ struct ReviewRow: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(RowMenuAnchorView(anchor: editMenuAnchor))
         .fixedSize()
         .help("Edit, retake, replace or resize the image")
         .accessibilityLabel("Image options")
