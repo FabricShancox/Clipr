@@ -88,5 +88,11 @@ struct HotkeyBinding: Codable, Equatable {
     }
 
     static let defaultCapture = HotkeyBinding(keyCode: 19, modifiers: Modifier.command.rawValue | Modifier.shift.rawValue) // ⌘⇧2
-    static let defaultAdvancedMode = HotkeyBinding(keyCode: 20, modifiers: Modifier.command.rawValue | Modifier.shift.rawValue) // ⌘⇧3
+    /// ⌃⇧⌘S. Not ⌘⇧3, the original default, which is macOS's own "save picture of screen"
+    /// shortcut — see `legacyDefaultAdvancedMode` and `SettingsStore`'s one-time migration.
+    static let defaultAdvancedMode = HotkeyBinding(
+        keyCode: 1, modifiers: Modifier.control.rawValue | Modifier.shift.rawValue | Modifier.command.rawValue
+    )
+    /// ⌘⇧3 — the Advanced Mode default before it was found to collide with the system shortcut.
+    static let legacyDefaultAdvancedMode = HotkeyBinding(keyCode: 20, modifiers: Modifier.command.rawValue | Modifier.shift.rawValue)
 }
