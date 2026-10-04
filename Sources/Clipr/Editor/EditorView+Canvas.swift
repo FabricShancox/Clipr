@@ -9,7 +9,8 @@ extension EditorView {
         HStack(spacing: 2) {
             Button {
                 userSetZoom = true
-                zoomPercent = max(10, zoomPercent - 10)
+                // Floor matches fit's own 5% minimum, so "−" at a small fit never zooms in.
+                zoomPercent = max(5, zoomPercent - 10)
             } label: { Image(systemName: "minus").frame(width: 22, height: 22).contentShape(Rectangle()) }
                 .help("Zoom out")
             Text("\(Int(zoomPercent))%")
