@@ -108,7 +108,7 @@ struct ReviewView: View {
             Button("") { model.moveSelection(by: 1) }
                 .keyboardShortcut(.downArrow, modifiers: .option)
                 .disabled(editingID != nil || model.isReadOnly)
-            // ⌘+ (typed as ⌘= without Shift on most layouts, so both) and ⌘−, as for zoom.
+            // ⌘= covers US layouts, where "+" needs Shift; ⌘+ is kept for layouts with an unshifted "+". ⌘− as for zoom.
             Button("") { model.stepImageSize(by: 1) }
                 .keyboardShortcut("=", modifiers: .command)
                 .disabled(editingID != nil || model.isReadOnly || model.selection.isEmpty)

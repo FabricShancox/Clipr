@@ -101,14 +101,41 @@ final class ReviewModel: ObservableObject {
 
     func setImageSize(_ size: ImageSize?, for ids: Set<UUID>) {
         guard !isReadOnly else { return }
-        // `replace` ignores a manifest equal to the current one, so a no-op leaves nothing to undo.
-        replace(with: ManifestEditor.settingImageSize(size, forSteps: ids, in: manifest), actionName: Self.imageSizeAction)
+        applyImageSizes(from: ManifestEditor.settingImageSize(size, forSteps: ids, in: manifest))
     }
 
     /// ⌘+ / ⌘−: each selected step one size larger or smaller.
     func stepImageSize(by delta: Int) {
         guard !isReadOnly else { return }
-        replace(with: ManifestEditor.steppingImageSize(by: delta, forSteps: selection, in: manifest), actionName: Self.imageSizeAction)
+        applyImageSizes(from: ManifestEditor.steppingImageSize(by: delta, forSteps: selection, in: manifest))
+    }
+
+    /// Takes each step's size from `target` and registers an undo scoped to just those sizes.
+    /// A whole-manifest snapshot (`replace`) would also roll back anything saved since, such as a
+    /// caption a debounce wrote after this change; the inverse here re-applies only the sizes it
+    /// replaced, to whatever the manifest is by then, and registers its own inverse for redo.
+    private func applyImageSizes(from target: SessionManifest) {
+        let wanted = Dictionary(uniqueKeysWithValues: target.steps.map { ($0.id, $0.imageSize) })
+        var previous: [(id: UUID, size: ImageSize?)] = []
+        for index in manifest.steps.indices {
+            let step = manifest.steps[index]
+            guard let new = wanted[step.id], new != step.imageSize else { continue }
+            previous.append((step.id, step.imageSize))
+            manifest.steps[index].imageSize = new
+        }
+        // Nothing changed: nothing to save and nothing to undo.
+        guard !previous.isEmpty else { return }
+        persist()
+        registerUndo(Self.imageSizeAction) { $0.restoreImageSizes(previous) }
+    }
+
+    private func restoreImageSizes(_ sizes: [(id: UUID, size: ImageSize?)]) {
+        let wanted = Dictionary(uniqueKeysWithValues: sizes.map { ($0.id, $0.size) })
+        var target = manifest
+        for index in target.steps.indices {
+            if let size = wanted[target.steps[index].id] { target.steps[index].imageSize = size }
+        }
+        applyImageSizes(from: target)
     }
 
     private static let imageSizeAction = "Change Image Size"
@@ -337,6 +364,9 @@ final class ReviewModel: ObservableObject {
     /// Undo and redo of a replacement: the current image set goes to the Trash and `trashed` comes
     /// back, with the click data that belongs to it. Each swap registers the opposite swap.
     private func swapImage(for id: UUID, restoring trashed: TrashedStep, record: StepRecord) {
+        // undo()/redo() are the only supported entry points: they refuse while the step's editor is
+        // open, and the editor would write its old image back over this swap.
+        assert(!stepsInEditor.contains(id), "swapImage must be reached through undo()/redo(), which refuse while the step's editor is open")
         guard let current = manifest.steps.first(where: { $0.id == id }) else {
             banner = "Couldn't \(undoManager.isRedoing ? "redo" : "undo") — \(record.file) is no longer in this session"
             return

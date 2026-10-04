@@ -42,7 +42,9 @@ struct StepRecord: Codable, Identifiable, Equatable {
     var capturedAt: Date
     /// `nil` means Full. Optional, and never written when nil, so manifests from before sizing
     /// existed decode unchanged and unsized sessions stay exactly what older Clipr wrote. The
-    /// manifest version stays 1: older builds ignore this key rather than misread it.
+    /// manifest version stays 1: older builds ignore this key rather than misread it. The cost,
+    /// accepted because the field is cosmetic: an older build that edits a sized session drops
+    /// `imageSize` when it saves.
     var imageSize: ImageSize? = nil
 }
 
@@ -156,7 +158,13 @@ enum SessionManifestStore {
         guard let data = try? Data(contentsOf: folder.appendingPathComponent(fileName)) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(SessionManifest.self, from: data)
+        guard var manifest = try? decoder.decode(SessionManifest.self, from: data) else { return nil }
+        // Full is always nil (an unknown size from a newer build decodes as .full), so there is one
+        // way to say Full and setting Full on such a step is a no-op rather than a phantom edit.
+        for index in manifest.steps.indices where manifest.steps[index].imageSize == .full {
+            manifest.steps[index].imageSize = nil
+        }
+        return manifest
     }
 
     private static func creationDate(of folder: URL) -> Date {

@@ -162,7 +162,7 @@ final class SessionManifestTests: XCTestCase {
         XCTAssertEqual(ImageSize.allCases.map(\.widthFraction), [0.40, 0.60, 0.80, 1.0])
     }
 
-    func testUnknownImageSizeDecodesAsFullInsteadOfFailing() throws {
+    func testUnknownImageSizeLoadsAsFullStoredAsNilInsteadOfFailing() throws {
         touch("Step_01.png")
         let json = """
         {"version":1,"createdAt":"1970-01-01T00:00:00Z","steps":[{"id":"\(UUID().uuidString)","file":"Step_01.png","kind":"click","caption":"keep","capturedAt":"1970-01-01T00:00:00Z","imageSize":"huge"}]}
@@ -170,7 +170,8 @@ final class SessionManifestTests: XCTestCase {
         try Data(json.utf8).write(to: folder.appendingPathComponent(SessionManifestStore.fileName))
         let loaded = SessionManifestStore.load(from: folder)
         XCTAssertEqual(loaded.steps.first?.caption, "keep")
-        XCTAssertEqual(loaded.steps.first?.imageSize, .full)
+        XCTAssertNil(loaded.steps.first?.imageSize, "Full is always stored as nil")
+        XCTAssertNil(SessionManifestStore.loadForReview(from: folder).manifest.steps.first?.imageSize)
         XCTAssertNil(SessionManifestStore.loadForReview(from: folder).readOnly)
     }
 }

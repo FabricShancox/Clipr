@@ -133,6 +133,7 @@ struct ReviewRow: View {
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.accentColor.opacity(0.18)))
                         .help("Image size: \(size.title)")
+                        .accessibilityLabel("Image size: \(size.title)")
                 }
             }
             .font(.caption)
@@ -173,7 +174,7 @@ struct ReviewRow: View {
             set: { model.setImageSize($0, for: [step.id]) }
         )) {
             ForEach(ImageSize.allCases) { size in
-                Text(size.shortLabel).help(size.title).tag(size)
+                Text(size.shortLabel).help(size.title).accessibilityLabel(size.title).tag(size)
             }
         }
         .pickerStyle(.segmented)

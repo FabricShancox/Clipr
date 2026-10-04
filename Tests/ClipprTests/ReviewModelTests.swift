@@ -826,6 +826,123 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertEqual(sizes(model.manifest), [nil, nil, nil, nil])
     }
 
+    /// Size undo is field-scoped: it must not roll back a caption saved after the size change.
+    func testSizeUndoDoesNotRestoreStaleCaption() async throws {
+        let model = makeModel(captionDelay: 0.05)
+        let a = model.manifest.steps[0].id
+        let b = model.manifest.steps[1].id
+        model.beginCaptionEdit(for: a)
+        model.editCaption("x", for: a)
+        model.commitCaption("x", for: a)
+        model.beginCaptionEdit(for: a)
+        model.editCaption("xy", for: a)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(onDisk.steps[0].caption, "xy")
+        model.setImageSize(.small, for: [b])
+        model.commitCaption("xyz", for: a)
+        model.undo()  // caption session
+        XCTAssertEqual(onDisk.steps[0].caption, "x")
+        XCTAssertEqual(onDisk.steps[1].imageSize, .small)
+        model.undo()  // size
+        XCTAssertEqual(onDisk.steps[0].caption, "x")
+        XCTAssertNil(onDisk.steps[1].imageSize)
+    }
+
+    /// The scenario as reported: the original caption is "x", so one undo of the final edit and one
+    /// of the size land on "x" and nil.
+    func testSizeUndoAfterDebouncedCaptionSaveKeepsOriginalCaption() async throws {
+        var m = SessionManifestStore.load(from: folder)
+        m.steps[0].caption = "x"
+        try SessionManifestStore.save(m, in: folder)
+        let model = makeModel(captionDelay: 0.05)
+        let a = model.manifest.steps[0].id
+        let b = model.manifest.steps[1].id
+        model.beginCaptionEdit(for: a)
+        model.editCaption("xy", for: a)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        model.setImageSize(.small, for: [b])
+        model.commitCaption("xyz", for: a)
+        model.undo()
+        model.undo()
+        XCTAssertEqual(onDisk.steps[0].caption, "x")
+        XCTAssertNil(onDisk.steps[1].imageSize)
+        model.redo()
+        XCTAssertEqual(onDisk.steps[1].imageSize, .small)
+        XCTAssertEqual(onDisk.steps[0].caption, "x")
+    }
+
+    func testMultiStepSizeUndoRedoThroughUndoRedoEntryPoints() {
+        let model = makeModel()
+        let ids = model.manifest.steps.map(\.id)
+        model.setImageSize(.small, for: [ids[0], ids[2]])
+        model.undo()
+        XCTAssertEqual(sizes(onDisk), [nil, nil, nil, nil])
+        model.redo()
+        XCTAssertEqual(sizes(onDisk), [.small, nil, .small, nil])
+        model.undo()
+        XCTAssertEqual(sizes(onDisk), [nil, nil, nil, nil])
+    }
+
+    func testSizeOnUnknownSizeStepRegistersNoUndo() throws {
+        let json = """
+        {"version":1,"createdAt":"1970-01-01T00:00:00Z","steps":[{"id":"\(UUID().uuidString)","file":"Step_01.png","kind":"click","caption":"a","capturedAt":"1970-01-01T00:00:00Z","imageSize":"huge"}]}
+        """
+        try Data(json.utf8).write(to: folder.appendingPathComponent("session.json"))
+        let model = makeModel()
+        model.setImageSize(.full, for: [model.manifest.steps[0].id])
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    // MARK: Image swap mirror
+
+    func testFreshActionClearsRedoSoRedoIsInertWithEditorOpen() throws {
+        let b = try setClickData(step: 1)
+        let model = makeModel()
+        model.replaceImage(for: b, with: newImage())
+        model.undo()
+        model.setImageSize(.small, for: [model.manifest.steps[0].id])
+        model.stepsInEditor = [b]
+        model.redo()
+        XCTAssertNil(model.banner)
+        XCTAssertFalse(model.undoManager.canRedo)
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+    }
+
+    func testFailedSwapUndoThenLaterReplaceRefusalTargetsRightStep() throws {
+        let b = try setClickData(step: 1)
+        let model = makeModel()
+        let c = model.manifest.steps[2].id
+        model.replaceImage(for: b, with: newImage())
+        for url in try FileManager.default.contentsOfDirectory(at: trash, includingPropertiesForKeys: nil) {
+            try FileManager.default.removeItem(at: url)
+        }
+        model.undo()  // trashed original purged: fails, registers nothing
+        XCTAssertNotNil(model.banner)
+        model.replaceImage(for: c, with: newImage())
+        model.stepsInEditor = [c]
+        model.undo()
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
+        model.stepsInEditor = [b]
+        model.undo()  // c's swap is allowed with an editor on b
+        XCTAssertEqual(fileData("Step_03.png"), Data([1]))
+    }
+
+    func testDeleteUndoInterleavedWithReplaceRefusalTargetsRightStep() throws {
+        let b = try setClickData(step: 1)
+        let model = makeModel()
+        let c = model.manifest.steps[2].id
+        model.delete(ids: [c])
+        model.undo()
+        model.replaceImage(for: b, with: newImage())
+        model.stepsInEditor = [c]
+        model.undo()  // b's swap: c's editor must not block it
+        XCTAssertNil(model.banner)
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        model.stepsInEditor = [b]
+        model.redo()
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
+    }
+
     func testImageSizeBlockedWhenReadOnly() throws {
         var m = SessionManifestStore.load(from: folder)
         m.version = SessionManifestStore.currentVersion + 1
