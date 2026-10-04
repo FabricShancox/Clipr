@@ -63,6 +63,12 @@ final class TextDrawingTests: XCTestCase {
         XCTAssertEqual(fitted.frame.height, measuredTextHeight(long, style: .default, width: 160))
     }
 
+    func testEmptyTextMeasuresAtLeastOneLine() {
+        let oneLine = measuredTextHeight("x", style: .default, width: 160)
+        XCTAssertGreaterThan(oneLine, 0)
+        XCTAssertEqual(measuredTextHeight("", style: .default, width: 160), oneLine)
+    }
+
     func testShortTextKeepsALargerUserSizedBox() {
         let frame = CGRect(x: 0, y: 0, width: 300, height: 200)
         XCTAssertEqual(textAnnotation("Hi", frame: frame).fittedToText().frame, frame)
