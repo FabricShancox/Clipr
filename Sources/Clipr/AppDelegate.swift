@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         advancedMode.captureReplacement = { [weak self] done in
             guard let self else { return done(nil) }
-            self.captureManager.captureImage(completion: done)
+            MainActor.assumeIsolated { self.captureManager.captureImage(completion: done) }
         }
         advancedMode.onStepCaptured = { [weak self] count in
             self?.statusItemController.setAdvancedModeStepCount(count)
@@ -162,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// permission otherwise silently does nothing, with no way to recover.
     private func performCapture() {
         if PermissionsManager.hasScreenRecordingPermission() {
-            captureManager.beginCapture()
+            MainActor.assumeIsolated { captureManager.beginCapture() }
             return
         }
         // Not yet granted: fire the OS prompt (a no-op if already permanently denied). It has no
@@ -171,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self else { return }
             if PermissionsManager.hasScreenRecordingPermission() {
-                self.captureManager.beginCapture()
+                MainActor.assumeIsolated { self.captureManager.beginCapture() }
             } else {
                 showPermissionAlert(pane: .screenRecording, message: "Clipr needs Screen Recording access to capture screenshots.")
             }

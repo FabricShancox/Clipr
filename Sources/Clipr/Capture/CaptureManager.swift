@@ -29,43 +29,74 @@ final class CaptureManager {
         self.storage = storage
     }
 
-    /// Set while Review is retaking a step: the next capture is handed back here instead of being
-    /// saved as a new screenshot, copied, or opened in the editor.
-    private var replacementCompletion: ((NSImage?) -> Void)?
+    /// What a capture is for. Each capture carries its own mode from the moment it starts, so a
+    /// screenshot taken with the hotkey can never be handed to a Review retake, and a retake is
+    /// never saved, copied or opened in the editor.
+    enum CaptureMode {
+        case normal
+        case replacement((NSImage?) -> Void)
+    }
 
-    /// Runs the normal capture overlay and returns the image (nil if cancelled or failed) without
-    /// saving it anywhere.
+    /// True from the moment a capture starts until its result has been handled. A second capture
+    /// started meanwhile would replace the overlay and the list of windows it hid, so the first
+    /// capture's windows would never come back; it is ignored instead.
+    private var isCapturing = false
+
+    /// Runs the normal capture overlay and returns the image (nil if cancelled, failed or another
+    /// capture is already in progress) without saving it anywhere. Completes on the main thread.
+    @MainActor
     func captureImage(completion: @escaping (NSImage?) -> Void) {
         guard PermissionsManager.hasScreenRecordingPermission() else {
             PermissionsManager.requestScreenRecordingPermission()
             completion(nil)
             return
         }
-        replacementCompletion = completion
-        beginCapture()
+        beginCapture(mode: .replacement(completion))
     }
 
-    func beginCapture() {
-        guard PermissionsManager.hasScreenRecordingPermission() else {
-            PermissionsManager.requestScreenRecordingPermission()
+    /// Main thread only (it guards on, and sets, `isCapturing`).
+    @MainActor
+    func beginCapture(mode: CaptureMode = .normal) {
+        guard !isCapturing else {
+            if case .replacement(let completion) = mode { completion(nil) }
             return
         }
+        guard PermissionsManager.hasScreenRecordingPermission() else {
+            PermissionsManager.requestScreenRecordingPermission()
+            if case .replacement(let completion) = mode { completion(nil) }
+            return
+        }
+        isCapturing = true
         Task { @MainActor in
             do {
                 frozenScreens = try await Self.snapshotScreens(NSScreen.screens, showsCursor: captureCursor)
             } catch {
                 NSLog("Clipr capture failed: \(error)")
+                isCapturing = false
                 onCaptureFailed?(error)
-                deliverReplacement(nil)
+                if case .replacement(let completion) = mode { completion(nil) }
                 return
             }
             CaptureOverlayWindow.showAll(frozenScreens: frozenScreens) { [weak self] result in
-                self?.handle(result)
+                self?.handle(result, mode: mode)
             }
         }
     }
 
-    private func handle(_ result: CaptureResult) {
+    /// Hands a finished capture to whoever asked for it: a replacement gets the image (or nil)
+    /// back on the main thread and nothing else happens to it; a normal capture is saved, and a
+    /// cancelled one is dropped. Separate from `handle` so the routing can be tested without a
+    /// screen.
+    static func deliver(_ image: NSImage?, mode: CaptureMode, save: (NSImage) async throws -> Void) async rethrows {
+        switch mode {
+        case .replacement(let completion):
+            await MainActor.run { completion(image) }
+        case .normal:
+            if let image { try await save(image) }
+        }
+    }
+
+    private func handle(_ result: CaptureResult, mode: CaptureMode) {
         Task {
             do {
                 let image: NSImage?
@@ -82,40 +113,29 @@ final class CaptureManager {
                     image = nil
                 }
                 // The screenshot has been taken, so Clipr's own windows can come back — see
-                // `CaptureOverlayWindow.hideOwnWindows`. Before `guard let image`, so a cancelled
+                // `CaptureOverlayWindow.hideOwnWindows`. Before delivering, so a cancelled
                 // capture puts them back too rather than leaving the editor hidden for good.
                 await MainActor.run {
                     CaptureOverlayWindow.restoreHiddenWindows()
                     frozenScreens = [:]
+                    isCapturing = false
                 }
-                if await MainActor.run(body: { replacementCompletion != nil }) {
-                    await MainActor.run { deliverReplacement(image) }
-                    return
-                }
-                guard let image else { return }
-                let date = Date()
-                let rawURL = try storage.saveRawCapture(image, date: date)
-                storage.copyToClipboard(image)
-                await MainActor.run {
-                    onCaptureFinished?(rawURL, image)
+                try await Self.deliver(image, mode: mode) { image in
+                    let rawURL = try storage.saveRawCapture(image, date: Date())
+                    storage.copyToClipboard(image)
+                    await MainActor.run { onCaptureFinished?(rawURL, image) }
                 }
             } catch {
                 NSLog("Clipr capture failed: \(error)")
                 await MainActor.run {
                     CaptureOverlayWindow.restoreHiddenWindows()
                     frozenScreens = [:]
+                    isCapturing = false
                     onCaptureFailed?(error)
-                    deliverReplacement(nil)
                 }
+                await Self.deliver(nil, mode: mode, save: { _ in })
             }
         }
-    }
-
-    @MainActor
-    private func deliverReplacement(_ image: NSImage?) {
-        guard let completion = replacementCompletion else { return }
-        replacementCompletion = nil
-        completion(image)
     }
 
     /// The frozen still of `screen`, or a live shot if it has none (a display plugged in
