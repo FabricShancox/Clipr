@@ -69,7 +69,12 @@ final class CaptureManager {
         isCapturing = true
         Task { @MainActor in
             do {
-                frozenScreens = try await Self.snapshotScreens(NSScreen.screens, showsCursor: captureCursor)
+                let screens = NSScreen.screens, showsCursor = captureCursor
+                // Bounded: if ScreenCaptureKit never answers (seen around permission prompts),
+                // `isCapturing` would stay true and every later capture be silently ignored.
+                frozenScreens = try await withTimeout(Self.snapshotTimeout) {
+                    try await Self.snapshotScreens(screens, showsCursor: showsCursor)
+                }
             } catch {
                 NSLog("Clipr capture failed: \(error)")
                 isCapturing = false
@@ -146,16 +151,24 @@ final class CaptureManager {
         return try await Self.captureFullScreen(screen, showsCursor: captureCursor)
     }
 
+    static let snapshotTimeout: Double = 10
+
+    /// One `SCShareableContent` query for all displays, rather than one per display before the
+    /// overlay could appear — visible latency on two or three monitors.
     static func snapshotScreens(_ screens: [NSScreen], showsCursor: Bool) async throws -> [CGDirectDisplayID: NSImage] {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         var snapshots: [CGDirectDisplayID: NSImage] = [:]
         for screen in screens {
-            snapshots[screen.displayID] = try await captureFullScreen(screen, showsCursor: showsCursor)
+            snapshots[screen.displayID] = try await captureFullScreen(screen, showsCursor: showsCursor, content: content)
         }
         return snapshots
     }
 
-    static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    /// `content` reuses an already-fetched shareable-content list; nil fetches a fresh one.
+    static func captureFullScreen(_ screen: NSScreen, showsCursor: Bool, content: SCShareableContent? = nil) async throws -> NSImage {
+        let content = if let content { content } else {
+            try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        }
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
             throw CaptureError.displayNotFound
         }
@@ -225,7 +238,7 @@ final class CaptureManager {
         // display (backingScaleFactor > 1) - the whole window still gets captured, just blurrier
         // than native. Scale by the backing scale factor of whichever screen actually contains the
         // window, so the requested output resolution matches the window's real pixel density.
-        let scale = screenScaleFactor(containing: windowInfo.bounds.origin)
+        let scale = screenScaleFactor(for: windowInfo.bounds)
         config.width = Int((windowInfo.bounds.width * scale).rounded())
         config.height = Int((windowInfo.bounds.height * scale).rounded())
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
