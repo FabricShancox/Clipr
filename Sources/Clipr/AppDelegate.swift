@@ -105,6 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.title = "Open Image in Clipr"
+        // Chosen from the status menu while another app is frontmost: without activating, the
+        // panel (and any alert after it) can open behind that app.
+        NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let image: NSImage
         switch DecodeLimits.loadImage(at: url) {
@@ -186,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = "Capture failed"
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
+        // A capture is started from a hotkey while another app is frontmost.
+        NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
 
@@ -320,6 +325,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + openEditors.map { $0.window }
             + advancedMode.reviewWindows
             + [advancedModePanel])
+    }
+
+    /// Clicking the Dock icon with no windows open used to do nothing. Bring back an editor that's
+    /// still around (e.g. miniaturized), otherwise open Preferences — the one window Clipr can
+    /// always show, and the place to find the capture shortcut.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else { return true }
+        if let editor = frontmostEditor() {
+            editor.window?.deminiaturize(nil)
+            bringToFront(editor)
+        } else {
+            openPreferences()
+        }
+        return false
     }
 
     /// Quitting abandons every editor's pending 800ms auto-save debounce (and each Review's 0.5s
