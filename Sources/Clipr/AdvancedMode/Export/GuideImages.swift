@@ -34,9 +34,11 @@ enum GuideImages {
         autoreleasepool {
             if case .closeUp(let source) = ref { return renderCloseUp(source, maxPixelWidth: maxPixelWidth, jpegThreshold: jpegThreshold) }
             guard case .file(let url) = ref, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  CGImageSourceGetCount(source) > 0 else {
+                  CGImageSourceGetCount(source) > 0, UntrustedImageLimits.isSafeToDecode(source) else {
                 return GuideImageRender(image: nil, sidecarDamaged: false)
             }
+            // Too large to parse safely is treated like unreadable: it may hold a redaction.
+            if UntrustedImageLimits.sidecarTooLarge(forRaw: url) { return GuideImageRender(image: nil, sidecarDamaged: true) }
             var annotations: [AnnotationObject] = []
             switch StorageManager(baseFolder: url.deletingLastPathComponent()).readAnnotations(rawURL: url) {
             case .loaded(let loaded): annotations = loaded
@@ -65,7 +67,9 @@ enum GuideImages {
     /// (a redaction might be among them).
     private static func renderCloseUp(_ source: CloseUpSource, maxPixelWidth: Int, jpegThreshold: Int) -> GuideImageRender {
         let none = GuideImageRender(image: nil, sidecarDamaged: false)
-        guard let base = NSImage(contentsOf: source.step), base.bitmap != nil,
+        guard UntrustedImageLimits.isSafeToDecode(source.step), UntrustedImageLimits.isSafeToDecode(source.capturedZoom),
+              !UntrustedImageLimits.sidecarTooLarge(forRaw: source.step),
+              let base = NSImage(contentsOf: source.step), base.bitmap != nil,
               let captured = NSImage(contentsOf: source.capturedZoom) else { return none }
         let annotations: [AnnotationObject]
         switch StorageManager(baseFolder: source.step.deletingLastPathComponent()).readAnnotations(rawURL: source.step) {

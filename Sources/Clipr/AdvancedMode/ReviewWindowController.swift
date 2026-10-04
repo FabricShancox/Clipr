@@ -136,6 +136,13 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let url = model.url(for: step)
+        // Checked from the header first: a session folder from elsewhere could hold a tiny PNG
+        // that declares billions of pixels.
+        guard UntrustedImageLimits.isSafeToDecode(url),
+              !UntrustedImageLimits.sidecarTooLarge(forRaw: url) else {
+            MainActor.assumeIsolated { model.showBanner("\(step.file) is too large to open") }
+            return
+        }
         guard let image = NSImage(contentsOf: url) else { return }
         // Rename disabled: session.json refers to steps by filename.
         let editor = EditorWindowController(image: image, rawURL: url, storage: storage, allowsRename: false)
