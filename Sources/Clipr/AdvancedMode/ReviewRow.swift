@@ -22,12 +22,18 @@ struct ReviewRow: View {
     private static let largeDetailsMinWidth: CGFloat = 180
     /// What else shares a Large row with the image and caption: the number badge, the gaps
     /// between the three, and the list's own row insets.
-    private static let largeChromeWidth: CGFloat = 26 + 16 * 2 + 40
+    private static let largeChromeWidth: CGFloat = 26 + 16 * 2 + rowInsetWidth
+    /// The list's own horizontal row insets, which a container-relative width still includes.
+    private static let rowInsetWidth: CGFloat = 40
 
     var body: some View {
         content
             .padding(.vertical, layout == .list ? 6 : 10)
-            .contextMenu { imageActions }
+            .contextMenu {
+                imageActions
+                Divider()
+                imageSizeMenu
+            }
         .onChange(of: editingID) { _, newValue in
             if newValue == step.id {
                 model.beginCaptionEdit(for: step.id)
@@ -71,9 +77,16 @@ struct ReviewRow: View {
                 HStack(alignment: .top, spacing: 12) {
                     numberBadge
                     details
+                    sizePicker
                     editButton
                 }
-                image.frame(maxWidth: .infinity)
+                // Guide is the layout that previews the finished document, so only it draws each
+                // step at its own size; List and Large keep rows uniform and show a badge instead.
+                image
+                    .containerRelativeFrame(.horizontal) { width, _ in
+                        max(120, (width - Self.rowInsetWidth) * (step.imageSize ?? .full).widthFraction)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -114,6 +127,13 @@ struct ReviewRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.secondary.opacity(0.18)))
+                if layout != .guide, let size = step.imageSize, size != .full {
+                    Text(size.shortLabel)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                        .help("Image size: \(size.title)")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -144,6 +164,40 @@ struct ReviewRow: View {
             .disabled(model.isReadOnly || model.stepsInEditor.contains(step.id))
         Button("Replace with File…") { onReplaceWithFile(step) }
             .disabled(model.isReadOnly || model.stepsInEditor.contains(step.id))
+    }
+
+    /// Guide layout only: the size this step's image takes in the finished guide.
+    private var sizePicker: some View {
+        Picker("Image Size", selection: Binding(
+            get: { step.imageSize ?? .full },
+            set: { model.setImageSize($0, for: [step.id]) }
+        )) {
+            ForEach(ImageSize.allCases) { size in
+                Text(size.shortLabel).help(size.title).tag(size)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .padding(.top, 2)
+        .disabled(model.isReadOnly)
+        .help("Image size in the guide (⌘+ / ⌘−)")
+    }
+
+    /// Acts on the whole selection when the clicked row is part of it, as Finder's context menu
+    /// does; otherwise on the clicked step alone.
+    private var imageSizeMenu: some View {
+        let targets = model.selection.contains(step.id) ? model.selection : [step.id]
+        let current = step.imageSize ?? .full
+        return Menu("Image Size") {
+            ForEach(ImageSize.allCases) { size in
+                Toggle(size.title, isOn: Binding(
+                    get: { current == size },
+                    set: { _ in model.setImageSize(size, for: targets) }
+                ))
+            }
+        }
+        .disabled(model.isReadOnly)
     }
 
     @ViewBuilder
@@ -190,6 +244,26 @@ struct ReviewRow: View {
         case .click: return "Click"
         case .typing: return "Typing"
         case .manual: return "Manual"
+        }
+    }
+}
+
+extension ImageSize {
+    var title: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        case .full: return "Full"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .small: return "S"
+        case .medium: return "M"
+        case .large: return "L"
+        case .full: return "Full"
         }
     }
 }

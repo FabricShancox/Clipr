@@ -59,4 +59,55 @@ final class ManifestEditorTests: XCTestCase {
         let shorter = ManifestEditor.removing(ids: [shrunk.steps[0].id], from: shrunk).0  // now just ["b"]
         XCTAssertEqual(files(ManifestEditor.restoring(removed, into: shorter)), ["b", "c"])
     }
+    // MARK: Image size
+
+    func testSettingImageSizeSingleAndMulti() {
+        let m = manifest(["a", "b", "c"])
+        let one = ManifestEditor.settingImageSize(.small, forSteps: [m.steps[1].id], in: m)
+        XCTAssertEqual(one.steps.map(\.imageSize), [nil, .small, nil])
+        let two = ManifestEditor.settingImageSize(.medium, forSteps: [m.steps[0].id, m.steps[2].id], in: one)
+        XCTAssertEqual(two.steps.map(\.imageSize), [.medium, .small, .medium])
+    }
+
+    /// Full is stored as nil, the same as a step that was never sized, so "set to Full" on such a
+    /// step is no change at all.
+    func testSettingFullStoresNil() {
+        let m = manifest(["a"])
+        let id = m.steps[0].id
+        XCTAssertEqual(ManifestEditor.settingImageSize(.full, forSteps: [id], in: m), m)
+        let small = ManifestEditor.settingImageSize(.small, forSteps: [id], in: m)
+        XCTAssertNil(ManifestEditor.settingImageSize(.full, forSteps: [id], in: small).steps[0].imageSize)
+        XCTAssertNil(ManifestEditor.settingImageSize(nil, forSteps: [id], in: small).steps[0].imageSize)
+    }
+
+    func testImageSizeUnknownIDIsNoOp() {
+        let m = manifest(["a", "b"])
+        XCTAssertEqual(ManifestEditor.settingImageSize(.small, forSteps: [UUID()], in: m), m)
+        XCTAssertEqual(ManifestEditor.steppingImageSize(by: -1, forSteps: [UUID()], in: m), m)
+        XCTAssertEqual(ManifestEditor.settingImageSize(.small, forSteps: [], in: m), m)
+    }
+
+    func testSteppingImageSizeTreatsNilAsFullAndClamps() {
+        let m = manifest(["a"])
+        let id = m.steps[0].id
+        XCTAssertEqual(ManifestEditor.steppingImageSize(by: 1, forSteps: [id], in: m), m, "Full can't grow")
+        var sizes: [ImageSize?] = []
+        var current = m
+        for _ in 0..<4 {
+            current = ManifestEditor.steppingImageSize(by: -1, forSteps: [id], in: current)
+            sizes.append(current.steps[0].imageSize)
+        }
+        XCTAssertEqual(sizes, [.large, .medium, .small, .small])
+        XCTAssertEqual(ManifestEditor.steppingImageSize(by: 1, forSteps: [id], in: current).steps[0].imageSize, .medium)
+        let large = ManifestEditor.settingImageSize(.large, forSteps: [id], in: m)
+        XCTAssertNil(ManifestEditor.steppingImageSize(by: 1, forSteps: [id], in: large).steps[0].imageSize, "back to Full is nil")
+        XCTAssertEqual(ManifestEditor.steppingImageSize(by: -9, forSteps: [id], in: m).steps[0].imageSize, .small)
+    }
+
+    func testSteppingImageSizeMovesEachSelectedStepFromItsOwnSize() {
+        let m = manifest(["a", "b", "c"])
+        let sized = ManifestEditor.settingImageSize(.small, forSteps: [m.steps[0].id], in: m)
+        let stepped = ManifestEditor.steppingImageSize(by: -1, forSteps: [m.steps[0].id, m.steps[1].id], in: sized)
+        XCTAssertEqual(stepped.steps.map(\.imageSize), [.small, .large, nil])
+    }
 }

@@ -92,6 +92,22 @@ final class ReviewModel: ObservableObject {
         }
     }
 
+    // MARK: Image size
+
+    func setImageSize(_ size: ImageSize?, for ids: Set<UUID>) {
+        guard !isReadOnly else { return }
+        // `replace` ignores a manifest equal to the current one, so a no-op leaves nothing to undo.
+        replace(with: ManifestEditor.settingImageSize(size, forSteps: ids, in: manifest), actionName: Self.imageSizeAction)
+    }
+
+    /// ⌘+ / ⌘−: each selected step one size larger or smaller.
+    func stepImageSize(by delta: Int) {
+        guard !isReadOnly else { return }
+        replace(with: ManifestEditor.steppingImageSize(by: delta, forSteps: selection, in: manifest), actionName: Self.imageSizeAction)
+    }
+
+    private static let imageSizeAction = "Change Image Size"
+
     // MARK: Captions
 
     /// Call when a caption field gains focus; remembers the caption Esc and undo return to.

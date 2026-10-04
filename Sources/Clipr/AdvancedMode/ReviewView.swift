@@ -108,6 +108,16 @@ struct ReviewView: View {
             Button("") { model.moveSelection(by: 1) }
                 .keyboardShortcut(.downArrow, modifiers: .option)
                 .disabled(editingID != nil || model.isReadOnly)
+            // ⌘+ (typed as ⌘= without Shift on most layouts, so both) and ⌘−, as for zoom.
+            Button("") { model.stepImageSize(by: 1) }
+                .keyboardShortcut("=", modifiers: .command)
+                .disabled(editingID != nil || model.isReadOnly || model.selection.isEmpty)
+            Button("") { model.stepImageSize(by: 1) }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(editingID != nil || model.isReadOnly || model.selection.isEmpty)
+            Button("") { model.stepImageSize(by: -1) }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(editingID != nil || model.isReadOnly || model.selection.isEmpty)
             // ⌘1 / ⌘2 / ⌘3, as Finder does for its views.
             ForEach(Array(ReviewLayout.allCases.enumerated()), id: \.element) { index, option in
                 Button("") { layout = option }

@@ -33,6 +33,30 @@ enum ManifestEditor {
         return result
     }
 
+    /// `.full` is stored as `nil`, the same as a never-sized step, so there is one way to say Full
+    /// and "set to Full" on such a step is recognisably no change.
+    static func settingImageSize(_ size: ImageSize?, forSteps ids: Set<UUID>, in m: SessionManifest) -> SessionManifest {
+        let stored = size == .full ? nil : size
+        var result = m
+        for index in result.steps.indices where ids.contains(result.steps[index].id) {
+            result.steps[index].imageSize = stored
+        }
+        return result
+    }
+
+    /// Each step moves from its own size (nil counts as Full) along small < medium < large < full,
+    /// stopping at either end rather than wrapping.
+    static func steppingImageSize(by delta: Int, forSteps ids: Set<UUID>, in m: SessionManifest) -> SessionManifest {
+        let order = ImageSize.allCases
+        var result = m
+        for index in result.steps.indices where ids.contains(result.steps[index].id) {
+            let current = order.firstIndex(of: result.steps[index].imageSize ?? .full) ?? order.count - 1
+            let next = order[min(max(current + delta, 0), order.count - 1)]
+            result.steps[index].imageSize = next == .full ? nil : next
+        }
+        return result
+    }
+
     static func removing(ids: Set<UUID>, from m: SessionManifest) -> (SessionManifest, [RemovedStep]) {
         var removed: [RemovedStep] = []
         var kept: [StepRecord] = []

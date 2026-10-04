@@ -115,4 +115,50 @@ final class SessionManifestTests: XCTestCase {
         m.version = SessionManifestStore.currentVersion + 1
         XCTAssertTrue(SessionManifestStore.isReadOnly(m))
     }
+    // MARK: Image size compatibility
+
+    private func decode(_ json: String) throws -> SessionManifest {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(SessionManifest.self, from: Data(json.utf8))
+    }
+
+    private func manifestJSON(stepExtra: String) -> String {
+        """
+        {"version": 1, "createdAt": "2026-01-01T00:00:00Z", "steps": [
+          {"id": "6F9619FF-8B86-D011-B42D-00C04FC964FF", "file": "Step_01.png", "kind": "click",
+           "capturedAt": "2026-01-01T00:00:00Z"\(stepExtra)}
+        ]}
+        """
+    }
+
+    func testManifestWithImageSizeDecodes() throws {
+        let m = try decode(manifestJSON(stepExtra: #", "imageSize": "medium""#))
+        XCTAssertEqual(m.version, 1)
+        XCTAssertEqual(m.steps[0].imageSize, .medium)
+    }
+
+    func testManifestWithoutImageSizeDecodesAsNil() throws {
+        XCTAssertNil(try decode(manifestJSON(stepExtra: "")).steps[0].imageSize)
+    }
+
+    /// Unsized steps write no key at all, so a session nobody resized is byte-for-byte what an
+    /// older Clipr wrote; sizing keeps version 1 because older builds ignore the unknown key.
+    func testImageSizeRoundTripsAndNilWritesNoKey() throws {
+        touch("Step_01.png"); touch("Step_02.png")
+        var sized = record("Step_01.png")
+        sized.imageSize = .small
+        let m = SessionManifest(createdAt: Date(timeIntervalSince1970: 0), steps: [sized, record("Step_02.png")])
+        try SessionManifestStore.save(m, in: folder)
+        XCTAssertEqual(SessionManifestStore.load(from: folder), m)
+        let text = try String(contentsOf: folder.appendingPathComponent(SessionManifestStore.fileName), encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "imageSize").count - 1, 1)
+        XCTAssertTrue(text.contains(#""version" : 1"#))
+        XCTAssertNil(SessionManifestStore.loadForReview(from: folder).readOnly)
+    }
+
+    func testImageSizeWidthFractions() {
+        XCTAssertEqual(ImageSize.allCases, [.small, .medium, .large, .full])
+        XCTAssertEqual(ImageSize.allCases.map(\.widthFraction), [0.40, 0.60, 0.80, 1.0])
+    }
 }

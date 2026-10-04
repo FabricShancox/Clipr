@@ -720,4 +720,63 @@ final class ReviewModelTests: XCTestCase {
         model.replaceImage(for: id, withPNG: png)
         XCTAssertEqual(fileData("Step_02.png"), png)
     }
+    // MARK: Image size
+
+    private func sizes(_ m: SessionManifest) -> [ImageSize?] { m.steps.map(\.imageSize) }
+
+    func testSetImageSizeSavesAndUndoRedo() {
+        let model = makeModel()
+        let ids = model.manifest.steps.map(\.id)
+        model.setImageSize(.small, for: [ids[0], ids[2]])
+        XCTAssertEqual(sizes(onDisk), [.small, nil, .small, nil])
+        XCTAssertEqual(model.undoManager.undoActionName, "Change Image Size")
+        model.undoManager.undo()
+        XCTAssertEqual(sizes(onDisk), [nil, nil, nil, nil])
+        model.undoManager.redo()
+        XCTAssertEqual(sizes(onDisk), [.small, nil, .small, nil])
+    }
+
+    func testStepImageSizeActsOnSelection() {
+        let model = makeModel()
+        let ids = model.manifest.steps.map(\.id)
+        model.selection = [ids[1]]
+        model.stepImageSize(by: -1)
+        model.stepImageSize(by: -1)
+        XCTAssertEqual(sizes(onDisk), [nil, .medium, nil, nil])
+        model.selection = [ids[1], ids[3]]
+        model.stepImageSize(by: 1)
+        XCTAssertEqual(sizes(onDisk), [nil, .large, nil, nil])
+        model.undoManager.undo()
+        XCTAssertEqual(sizes(onDisk), [nil, .medium, nil, nil])
+        XCTAssertEqual(model.undoManager.undoActionName, "Change Image Size")
+    }
+
+    func testImageSizeNoOpRegistersNoUndo() {
+        let model = makeModel()
+        let id = model.manifest.steps[0].id
+        model.setImageSize(.full, for: [id])
+        model.setImageSize(nil, for: [id])
+        model.selection = [id]
+        model.stepImageSize(by: 1)  // already Full
+        model.selection = []
+        model.stepImageSize(by: -1)  // nothing selected
+        model.setImageSize(.small, for: [UUID()])
+        XCTAssertFalse(model.undoManager.canUndo)
+        XCTAssertEqual(sizes(model.manifest), [nil, nil, nil, nil])
+    }
+
+    func testImageSizeBlockedWhenReadOnly() throws {
+        var m = SessionManifestStore.load(from: folder)
+        m.version = SessionManifestStore.currentVersion + 1
+        try SessionManifestStore.save(m, in: folder)
+        let before = try Data(contentsOf: folder.appendingPathComponent("session.json"))
+        let model = makeModel()
+        let id = model.manifest.steps[0].id
+        model.setImageSize(.small, for: [id])
+        model.selection = [id]
+        model.stepImageSize(by: -1)
+        XCTAssertEqual(sizes(model.manifest), [nil, nil, nil, nil])
+        XCTAssertFalse(model.undoManager.canUndo)
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("session.json")), before)
+    }
 }

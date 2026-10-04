@@ -1,6 +1,23 @@
 import Foundation
 import CoreGraphics
 
+/// How wide a step's image appears in the finished guide, as a share of the width available.
+/// Stored per step so a small dialog needn't fill the page like a full-screen capture.
+enum ImageSize: String, Codable, CaseIterable, Identifiable {
+    case small, medium, large, full
+
+    var id: String { rawValue }
+
+    var widthFraction: CGFloat {
+        switch self {
+        case .small: return 0.40
+        case .medium: return 0.60
+        case .large: return 0.80
+        case .full: return 1.0
+        }
+    }
+}
+
 /// One step of an Advanced Mode session as recorded in `session.json`.
 struct StepRecord: Codable, Identifiable, Equatable {
     enum Kind: String, Codable { case click, typing, manual }
@@ -16,6 +33,10 @@ struct StepRecord: Codable, Identifiable, Equatable {
     var zoomFile: String?
     var appName: String?
     var capturedAt: Date
+    /// `nil` means Full. Optional, and never written when nil, so manifests from before sizing
+    /// existed decode unchanged and unsized sessions stay exactly what older Clipr wrote. The
+    /// manifest version stays 1: older builds ignore this key rather than misread it.
+    var imageSize: ImageSize? = nil
 }
 
 /// `steps` order is display order, so steps can be reordered later without renaming files.
