@@ -56,3 +56,32 @@ final class StepGeometryTests: XCTestCase {
         XCTAssertEqual(reloaded.pixelScale, 2)
     }
 }
+
+/// Which display a Screen-scope typing step shoots.
+final class TypingScreenChoiceTests: XCTestCase {
+    private let left = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
+    private let main = CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+    func testFieldStraddlingTwoScreensPicksTheLargerShare() {
+        let field = CGRect(x: -100, y: 100, width: 400, height: 30) // 100 on left, 300 on main
+        XCTAssertEqual(StepGeometry.screenFrame(forField: field, screens: [main, left], fallbacks: []), main)
+        let mostlyLeft = CGRect(x: -350, y: 100, width: 400, height: 30)
+        XCTAssertEqual(StepGeometry.screenFrame(forField: mostlyLeft, screens: [main, left], fallbacks: []), left)
+    }
+
+    func testFieldWhoseMidpointIsOffScreenStillFindsItsScreen() {
+        // Dragged mostly below the bottom of the main display: midpoint off every screen.
+        let field = CGRect(x: 100, y: 880, width: 300, height: 200)
+        XCTAssertEqual(StepGeometry.screenFrame(forField: field, screens: [main, left], fallbacks: []), main)
+    }
+
+    func testNoOverlapFallsBackToLastClickThenPointer() {
+        let offscreen = CGRect(x: 5000, y: 5000, width: 10, height: 10)
+        let lastClick = CGPoint(x: -500, y: 500)
+        let pointer = CGPoint(x: 10, y: 10)
+        XCTAssertEqual(StepGeometry.screenFrame(forField: offscreen, screens: [main, left], fallbacks: [lastClick, pointer]), left)
+        XCTAssertEqual(StepGeometry.screenFrame(forField: nil, screens: [main, left], fallbacks: [nil, pointer]), main)
+        XCTAssertEqual(StepGeometry.screenFrame(forField: nil, screens: [main, left], fallbacks: [CGPoint(x: 9000, y: 0), pointer]), main)
+        XCTAssertNil(StepGeometry.screenFrame(forField: nil, screens: [main], fallbacks: [nil]))
+    }
+}

@@ -86,6 +86,8 @@ final class ClickCaptureManagerTests: XCTestCase {
             storage: StorageManager(baseFolder: folder), imageSource: images, describer: describer,
             eventSource: source, accessibilityGranted: { true }, inputMonitoringGranted: { true }
         )
+        // Two side-by-side displays, independent of the machine running the tests.
+        manager.screenFrames = { [CGRect(x: 0, y: 0, width: 1920, height: 1080), CGRect(x: 1920, y: 0, width: 1920, height: 1080)] }
     }
 
     override func tearDown() {
@@ -533,6 +535,18 @@ final class ClickCaptureManagerTests: XCTestCase {
         waitForSteps(1)
         _ = stop()
         XCTAssertEqual(images.targets, [.screenContaining(CGPoint(x: 2100, y: 410))])
+    }
+
+    // A field whose midpoint is off every display (here, below them) still captures the display
+    // showing most of it, rather than dropping the step.
+    func testScreenScopeTypingInAFieldWithAnOffscreenMidpointIsKept() throws {
+        describer.field = FocusedField(label: "Name", security: .notSecure, element: nil,
+                                       frame: CGRect(x: 2000, y: 1060, width: 200, height: 100))
+        _ = try manager.start(settings: settings { $0.scope = .screen; $0.typingSteps = true }, area: nil)
+        typeAndReturn("John")
+        waitForSteps(1)
+        _ = stop()
+        XCTAssertEqual(images.targets, [.screenContaining(CGPoint(x: 2100, y: 1070))])
     }
 
     func testScreenScopeShortcutCapturesTheDisplayOfTheLastClick() throws {

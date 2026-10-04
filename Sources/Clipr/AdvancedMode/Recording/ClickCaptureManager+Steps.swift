@@ -33,11 +33,18 @@ extension ClickCaptureManager {
             // secure both times, or the step is dropped before anything is captured. Focus can
             // move mid-burst without a click or Tab, so one read could vouch for one field while
             // the text went into a password field.
-            // Screen scope: the display the field is on, read with the burst's first key.
+            // Screen scope: the display showing most of the field, read with the burst's first key
+            // (then the last click's display, then the pointer's).
             let fallback = typingTarget(near: lastClickPoint)
+            let lastClick = lastClickPoint, screenFrames = screenFrames
             enqueue(kind: .typing, target: fallback, resolveTarget: {
-                guard case .screenContaining = fallback, let frame = await start?.value.frame else { return fallback }
-                return .screenContaining(CGPoint(x: frame.midX, y: frame.midY))
+                guard case .screenContaining = fallback else { return fallback }
+                let field = await start?.value.frame
+                let point = await MainActor.run {
+                    StepGeometry.typingCapturePoint(forField: field, screens: screenFrames(),
+                                                    fallbacks: [lastClick, NSEvent.mouseLocationQuartz])
+                }
+                return point.map { .screenContaining($0) } ?? fallback
             }, click: nil, trail: [], skipIf: {
                 guard let start, let last else { return true }
                 return !Self.isSameNonSecureField(await start.value, await last.value)
@@ -55,6 +62,15 @@ extension ClickCaptureManager {
         case (nil, nil): return true
         case let (x?, y?): return CFEqual(x, y)
         default: return false
+        }
+    }
+
+    /// Every display's frame in Quartz global coordinates.
+    @MainActor
+    static func quartzScreenFrames() -> [CGRect] {
+        guard let primaryHeight = NSScreen.screens.first?.frame.height else { return [] }
+        return NSScreen.screens.map {
+            StepGeometry.globalTopLeftFrame(ofScreenFrame: $0.frame, primaryScreenHeight: primaryHeight)
         }
     }
 

@@ -50,6 +50,9 @@ final class ClickCaptureManager {
         }
     }
     var captureCursor = false
+    /// Every display's frame (Quartz global), read on the main actor when a Screen-scope typing
+    /// step picks its display. Replaced in tests.
+    var screenFrames: @MainActor () -> [CGRect] = { ClickCaptureManager.quartzScreenFrames() }
     private(set) var typingUnavailable = false
     var onStepCaptured: ((Int) -> Void)?
 
