@@ -83,7 +83,7 @@ private struct AdvancedModeControlView: View {
                 .help("Stop and review captured steps")
             }
             .buttonStyle(.borderless)
-            if let warning = state.warning {
+            ForEach([state.warning, state.saveWarning].compactMap { $0 }, id: \.self) { warning in
                 Text(warning)
                     .font(.system(size: 10))
                     .foregroundColor(.orange)

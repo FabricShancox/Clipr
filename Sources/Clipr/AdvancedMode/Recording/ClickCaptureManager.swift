@@ -54,7 +54,11 @@ final class ClickCaptureManager {
     /// step picks its display. Replaced in tests.
     var screenFrames: @MainActor () -> [CGRect] = { ClickCaptureManager.quartzScreenFrames() }
     private(set) var typingUnavailable = false
+    /// Told the session's step count each time a step is on disk and in session.json.
     var onStepCaptured: ((Int) -> Void)?
+    /// Told when a step couldn't be written (it's skipped, and its number reused) or session.json
+    /// couldn't be updated (retried with the next step), so the panel can say so without a modal.
+    var onSaveProblem: ((StepSaveProblem) -> Void)?
 
     var isActive: Bool { sessionFolder != nil }
     var currentSessionFolder: URL? { sessionFolder }
@@ -259,13 +263,13 @@ final class ClickCaptureManager {
     }
 
     /// Called from the write chain, so only one step is ever in here at a time. The step number
-    /// is claimed and the manifest appended on the main actor; the files are written off it.
+    /// is read on the main actor and only consumed once the step's files are written, so a step
+    /// that fails to write leaves no gap in the numbering; the files are written off it.
     private func write(_ step: PreparedStep, folder: URL) async {
         // The folder check drops a step from a session that already stopped (its flush timed
         // out) and would otherwise land in the next session's manifest.
         let claimed: Int? = await MainActor.run {
             guard self.manifest != nil, folder == self.sessionFolder else { return nil }
-            defer { self.nextStepIndex += 1 }
             return self.nextStepIndex
         }
         guard let index = claimed else { return }
@@ -274,6 +278,7 @@ final class ClickCaptureManager {
             files = try Self.writeFiles(step, index: index, in: folder)
         } catch {
             NSLog("Clipr: advanced mode step save failed: \(error)")
+            await MainActor.run { self.onSaveProblem?(.stepDropped) }
             return
         }
         let record = StepRecord(
@@ -283,6 +288,7 @@ final class ClickCaptureManager {
         )
         let snapshot: SessionManifest? = await MainActor.run {
             guard self.manifest != nil, folder == self.sessionFolder else { return nil }
+            self.nextStepIndex = index + 1
             self.manifest?.steps.append(record)
             return self.manifest
         }
@@ -297,7 +303,11 @@ final class ClickCaptureManager {
             try SessionManifestStore.save(snapshot, in: folder)
             SessionFolder.restrict(folder.appendingPathComponent(SessionManifestStore.fileName))
         } catch {
+            // The step's PNG is on disk and in the in-memory manifest, which the next step's save
+            // (or Review, which lists the folder) picks up — but it isn't reported as captured.
             NSLog("Clipr: advanced mode manifest save failed: \(error)")
+            await MainActor.run { self.onSaveProblem?(.manifestNotSaved) }
+            return
         }
         await MainActor.run { self.onStepCaptured?(snapshot.steps.count) }
     }

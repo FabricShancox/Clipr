@@ -23,9 +23,40 @@ final class AdvancedModeController {
         self.statusItemController = statusItemController
         self.hotkeys = hotkeys
         coordinator.onStepCaptured = { [weak self] count in
-            self?.statusItemController.setAdvancedModeStepCount(count)
-            self?.panel?.state.stepCount = count
+            guard let self else { return }
+            self.statusItemController.setAdvancedModeStepCount(count)
+            self.panel?.state.stepCount = count
+            // session.json is current again.
+            if self.manifestSaveFailing {
+                self.manifestSaveFailing = false
+                self.updateSaveWarning()
+            }
         }
+        coordinator.onSaveProblem = { [weak self] problem in
+            guard let self else { return }
+            switch problem {
+            case .stepDropped: self.droppedSteps += 1
+            case .manifestNotSaved: self.manifestSaveFailing = true
+            }
+            self.updateSaveWarning()
+        }
+    }
+
+    /// This session's save problems, shown in the panel rather than as alerts so recording
+    /// isn't interrupted.
+    private var droppedSteps = 0
+    private var manifestSaveFailing = false
+
+    private func updateSaveWarning() {
+        var parts: [String] = []
+        if droppedSteps > 0 {
+            parts.append(droppedSteps == 1 ? "1 step couldn't be saved" : "\(droppedSteps) steps couldn't be saved")
+        }
+        if manifestSaveFailing { parts.append("Session file not saved") }
+        let warning = parts.isEmpty ? nil : parts.joined(separator: " · ")
+        guard panel?.state.saveWarning != warning else { return }
+        panel?.state.saveWarning = warning
+        panel?.fitContent()
     }
 
     func toggle() {
@@ -85,6 +116,8 @@ final class AdvancedModeController {
         switch coordinator.start(settings: advancedSettings, area: area, ownWindowIDs: currentOwnWindowIDs(),
                                  ignoredKeys: ownHotkeys) {
         case .started:
+            droppedSteps = 0
+            manifestSaveFailing = false
             statusItemController.setAdvancedModeActive(true)
             showPanel()
             if coordinator.typingUnavailable {

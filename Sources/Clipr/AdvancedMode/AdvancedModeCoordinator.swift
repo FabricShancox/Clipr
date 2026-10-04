@@ -11,11 +11,13 @@ final class AdvancedModeCoordinator {
     /// Review that opened them, so a reopened Review knows about them and quit still flushes them.
     private var editorRegistries: [String: SessionEditorRegistry] = [:]
     var onStepCaptured: ((Int) -> Void)?
+    var onSaveProblem: ((StepSaveProblem) -> Void)?
 
     init(storage: StorageManager) {
         self.storage = storage
         clickCaptureManager = ClickCaptureManager(storage: storage)
         clickCaptureManager.onStepCaptured = { [weak self] count in self?.onStepCaptured?(count) }
+        clickCaptureManager.onSaveProblem = { [weak self] problem in self?.onSaveProblem?(problem) }
     }
 
     var isPaused: Bool { clickCaptureManager.isPaused }

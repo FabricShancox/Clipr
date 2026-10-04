@@ -138,6 +138,40 @@ final class ClickCaptureManagerTests: XCTestCase {
         XCTAssertTrue(manager.typingUnavailable)
     }
 
+    private func waitForProblem(_ problem: StepSaveProblem) {
+        let reported = expectation(description: "\(problem)")
+        manager.onSaveProblem = { if $0 == problem { reported.fulfill() } }
+        wait(for: [reported], timeout: 5)
+    }
+
+    // A step whose PNG can't be written is skipped and reported, and doesn't use up its number.
+    func testFailedStepWriteIsReportedAndLeavesNoNumberingGap() throws {
+        let sessionFolder = try manager.start(settings: settings(), area: nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: sessionFolder.path)
+        manager.captureManualStep()
+        waitForProblem(.stepDropped)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: sessionFolder.path)
+        manager.captureManualStep()
+        waitForSteps(1)
+        let (manifest, _) = stop()
+        XCTAssertEqual(manifest.steps.map(\.file), [FilenameGenerator.stepName(index: 1)])
+    }
+
+    // A session.json that can't be saved isn't reported as a captured step.
+    func testFailedManifestSaveIsReportedNotCounted() throws {
+        let sessionFolder = try manager.start(settings: settings(), area: nil)
+        try FileManager.default.createDirectory(
+            at: sessionFolder.appendingPathComponent(SessionManifestStore.fileName), withIntermediateDirectories: true)
+        let counted = expectation(description: "counted")
+        counted.isInverted = true
+        let reported = expectation(description: "reported")
+        manager.onStepCaptured = { _ in counted.fulfill() }
+        manager.onSaveProblem = { if $0 == .manifestNotSaved { reported.fulfill() } }
+        manager.captureManualStep()
+        wait(for: [reported, counted], timeout: 2)
+        _ = stop()
+    }
+
     func testClickWritesPNGAnnotationsAndManifestWithCaption() throws {
         _ = try manager.start(settings: settings(), area: nil)
         manager.handle(.click(CGPoint(x: 150, y: 160)))
