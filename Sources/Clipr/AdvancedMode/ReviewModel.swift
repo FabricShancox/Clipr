@@ -36,6 +36,11 @@ final class ReviewModel: ObservableObject {
     /// While a caption field is focused, its debounced saves are not individual undo steps: the
     /// whole session becomes one "Edit Caption" undo when committed, and Esc restores `original`.
     private var captionSession: (id: UUID, original: String?)?
+    /// The step each "Replace Image" group on the undo / redo stack swaps, in stack order. The
+    /// undo manager can't be asked what its top group does, and refusing from inside the handler
+    /// would already have popped the group, so `undo()`/`redo()` check these first.
+    private var imageSwapUndoTargets: [UUID] = []
+    private var imageSwapRedoTargets: [UUID] = []
 
     /// True while edits exist only in memory because saving keeps failing; closing the window
     /// then would lose them.
@@ -264,10 +269,12 @@ final class ReviewModel: ObservableObject {
     func showBanner(_ text: String) { banner = text }
 
     static let editorOpenBanner = "Close the image editor for this step first"
+    static let stepRemovedBanner = "Couldn't replace the image — that step was removed"
 
     /// Swaps a step's image for a retake. See `replaceImage(for:withPNG:)`.
     func replaceImage(for id: UUID, with image: NSImage) {
-        guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        guard !isReadOnly else { return }
+        guard let step = manifest.steps.first(where: { $0.id == id }) else { banner = Self.stepRemovedBanner; return }
         guard let data = StepFiles.pngData(image) else {
             banner = "Couldn't replace the image for \(step.file)"
             return
@@ -283,7 +290,10 @@ final class ReviewModel: ObservableObject {
     /// or write never touches the old image; and the old files are trashed all-or-nothing, so no
     /// stale companion is left to shadow the new image.
     func replaceImage(for id: UUID, withPNG data: Data) {
-        guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        guard !isReadOnly else { return }
+        // A retake or a Replace-with-File decode can finish after the step was deleted; the
+        // user chose an image, so say why nothing happened.
+        guard let step = manifest.steps.first(where: { $0.id == id }) else { banner = Self.stepRemovedBanner; return }
         guard !stepsInEditor.contains(id) else { banner = Self.editorOpenBanner; return }
         flushPendingCaption()
         let failure = "Couldn't replace the image for \(step.file)"
@@ -312,8 +322,10 @@ final class ReviewModel: ObservableObject {
             return
         }
         applyImageFields(clickPoint: nil, zoomFile: nil, for: id)
-        registerUndo("Replace Image") { $0.swapImage(for: id, restoring: old, record: step) }
+        registerUndo(Self.replaceImageAction, imageSwapOf: id) { $0.swapImage(for: id, restoring: old, record: step) }
     }
+
+    private static let replaceImageAction = "Replace Image"
 
     /// When putting an image back fails too, the step is left without one; the banner says where
     /// the image went so the user can recover it by hand.
@@ -327,11 +339,6 @@ final class ReviewModel: ObservableObject {
     private func swapImage(for id: UUID, restoring trashed: TrashedStep, record: StepRecord) {
         guard let current = manifest.steps.first(where: { $0.id == id }) else {
             banner = "Couldn't \(undoManager.isRedoing ? "redo" : "undo") — \(record.file) is no longer in this session"
-            return
-        }
-        guard !stepsInEditor.contains(id) else {
-            banner = Self.editorOpenBanner
-            requeue { $0.swapImage(for: id, restoring: trashed, record: record) }
             return
         }
         // Checked before anything moves: finding out mid-swap would mean trashing the current
@@ -356,21 +363,7 @@ final class ReviewModel: ObservableObject {
             return
         }
         applyImageFields(clickPoint: record.clickPoint, zoomFile: record.zoomFile, for: id)
-        registerUndo("Replace Image") { $0.swapImage(for: id, restoring: currentFiles, record: current) }
-    }
-
-    /// Puts a refused undo (or redo) back on the stack it came from, so it can be tried again
-    /// once the editor is closed rather than being lost. Registered while undoing, a handler
-    /// lands on the redo stack; redoing it straight away runs a handler that registers `action`,
-    /// which — registered while redoing — lands back on the undo stack. Redo is the mirror image.
-    /// Deferred because the undo manager can't start a redo from inside an undo.
-    private func requeue(_ action: @escaping (ReviewModel) -> Void) {
-        let wasUndoing = undoManager.isUndoing
-        registerUndo("Replace Image") { $0.registerUndo("Replace Image", action) }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            if wasUndoing { self.undoManager.redo() } else { self.undoManager.undo() }
-        }
+        registerUndo(Self.replaceImageAction, imageSwapOf: id) { $0.swapImage(for: id, restoring: currentFiles, record: current) }
     }
 
     private func applyImageFields(clickPoint: CGPoint?, zoomFile: String?, for id: UUID) {
@@ -404,6 +397,29 @@ final class ReviewModel: ObservableObject {
         refreshToken += 1
     }
 
+    // MARK: Undo
+
+    /// ⌘Z. Refuses, leaving both stacks untouched, when the next undo would swap the image of a
+    /// step that has an editor open: the editor still holds the old image and would write it back.
+    func undo() {
+        guard undoManager.canUndo else { return }
+        if undoManager.undoActionName == Self.replaceImageAction, let id = imageSwapUndoTargets.last, stepsInEditor.contains(id) {
+            banner = Self.editorOpenBanner
+            return
+        }
+        undoManager.undo()
+    }
+
+    /// ⇧⌘Z. The mirror of `undo()`.
+    func redo() {
+        guard undoManager.canRedo else { return }
+        if undoManager.redoActionName == Self.replaceImageAction, let id = imageSwapRedoTargets.last, stepsInEditor.contains(id) {
+            banner = Self.editorOpenBanner
+            return
+        }
+        undoManager.redo()
+    }
+
     // MARK: Plumbing
 
     /// Registering the inverse from inside the undo handler is what makes redo work for free.
@@ -430,10 +446,25 @@ final class ReviewModel: ObservableObject {
 
     /// Opens a group only for a fresh user action; registrations made while undoing or redoing
     /// belong to the group the undo manager is already replaying.
-    private func registerUndo(_ name: String, _ handler: @escaping (ReviewModel) -> Void) {
+    ///
+    /// `imageSwapOf` records the step an image swap acts on, mirroring where the undo manager puts
+    /// the group: a fresh action goes on the undo stack and clears redo (as the undo manager does),
+    /// one registered while undoing goes on redo, and one registered while redoing back on undo.
+    /// The handler pops its own entry as it runs, so the mirror stays right even when the undo
+    /// manager is driven directly. A swap that fails registers nothing, and pushes nothing.
+    private func registerUndo(_ name: String, imageSwapOf target: UUID? = nil, _ handler: @escaping (ReviewModel) -> Void) {
         let ownGroup = !undoManager.isUndoing && !undoManager.isRedoing
+        if ownGroup { imageSwapRedoTargets.removeAll() }
+        if let target {
+            if undoManager.isUndoing { imageSwapRedoTargets.append(target) } else { imageSwapUndoTargets.append(target) }
+        }
         if ownGroup { undoManager.beginUndoGrouping() }
-        undoManager.registerUndo(withTarget: self, handler: handler)
+        undoManager.registerUndo(withTarget: self) { model in
+            if target != nil {
+                if model.undoManager.isUndoing { _ = model.imageSwapUndoTargets.popLast() } else { _ = model.imageSwapRedoTargets.popLast() }
+            }
+            handler(model)
+        }
         undoManager.setActionName(name)
         if ownGroup { undoManager.endUndoGrouping() }
     }

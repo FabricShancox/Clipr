@@ -96,10 +96,10 @@ struct ReviewView: View {
     /// accessibility: they're invisible stand-ins for menu items, not controls.
     private var shortcuts: some View {
         Group {
-            Button("") { model.undoManager.undo() }
+            Button("") { model.undo() }
                 .keyboardShortcut("z", modifiers: .command)
                 .disabled(editingID != nil)
-            Button("") { model.undoManager.redo() }
+            Button("") { model.redo() }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(editingID != nil)
             Button("") { model.moveSelection(by: -1) }

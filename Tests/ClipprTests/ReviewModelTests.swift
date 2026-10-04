@@ -679,38 +679,99 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertEqual(model.banner, "Close the image editor for this step first")
     }
 
-    /// A refused undo stays available, so it works once the editor is closed.
-    func testUndoReplaceRefusedWhileEditorOpenThenWorksAfterClose() async throws {
+    /// A refused undo never reaches the undo manager, so both stacks are exactly as they were and
+    /// the undo works once the editor is closed.
+    func testUndoReplaceRefusedWhileEditorOpenThenWorksAfterClose() throws {
         let id = try setClickData(step: 1)
         let model = makeModel()
         model.replaceImage(for: id, with: newImage())
         model.stepsInEditor = [id]
-        model.undoManager.undo()
+        model.undo()
         XCTAssertEqual(model.banner, "Close the image editor for this step first")
         XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
-        try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(model.undoManager.canUndo)
+        XCTAssertEqual(model.undoManager.undoActionName, "Replace Image")
         XCTAssertFalse(model.undoManager.canRedo)
         model.stepsInEditor = []
-        model.undoManager.undo()
+        model.undo()
         XCTAssertEqual(fileData("Step_02.png"), Data([1]))
         XCTAssertEqual(onDisk.steps[1].clickPoint, CGPoint(x: 5, y: 6))
+        XCTAssertTrue(model.undoManager.canRedo)
     }
 
-    func testRedoReplaceRefusedWhileEditorOpenStaysRedoable() async throws {
+    func testRedoReplaceRefusedWhileEditorOpenStaysRedoable() throws {
         let id = try setClickData(step: 1)
         let model = makeModel()
         model.replaceImage(for: id, with: newImage())
-        model.undoManager.undo()
+        model.undo()
         model.stepsInEditor = [id]
-        model.undoManager.redo()
+        model.redo()
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
         XCTAssertEqual(fileData("Step_02.png"), Data([1]))
-        try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(model.undoManager.canRedo)
+        XCTAssertEqual(model.undoManager.redoActionName, "Replace Image")
         XCTAssertFalse(model.undoManager.canUndo)
         model.stepsInEditor = []
-        model.undoManager.redo()
+        model.redo()
         XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
+        XCTAssertTrue(model.undoManager.canUndo)
+    }
+
+    /// Only the step being edited is protected: other undos, including another step's image swap,
+    /// go ahead while an editor is open.
+    func testEditorOnOtherStepDoesNotBlockUndo() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        model.replaceImage(for: id, with: newImage())
+        model.move(fromOffsets: [0], toOffset: 4)
+        model.stepsInEditor = [id]
+        model.undo()  // the move: not an image swap
+        XCTAssertNil(model.banner)
+        XCTAssertEqual(captions(onDisk), ["a", "b", "c", "d"])
+        model.undo()  // the replace of the edited step: refused
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
+        model.stepsInEditor = [model.manifest.steps[0].id]
+        model.undo()  // the replace again, now that a different step is in the editor
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        model.redo()
+        model.redo()
+        XCTAssertEqual(captions(onDisk), ["b", "c", "d", "a"])
+        XCTAssertNil(onDisk.steps[0].clickPoint, "step b was re-replaced")
+    }
+
+    /// The target tracking survives several swaps of different steps in a row.
+    func testRefusalTargetsTheTopSwap() throws {
+        let b = try setClickData(step: 1)
+        let model = makeModel()
+        let c = model.manifest.steps[2].id
+        model.replaceImage(for: b, with: newImage())
+        model.replaceImage(for: c, with: newImage())
+        model.stepsInEditor = [b]
+        model.undo()  // c's replace: allowed
+        XCTAssertEqual(fileData("Step_03.png"), Data([1]))
+        model.undo()  // b's replace: refused
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
+        model.stepsInEditor = [c]
+        model.redo()  // c again: refused
+        XCTAssertEqual(fileData("Step_03.png"), Data([1]))
+        model.stepsInEditor = []
+        model.undo()
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        model.redo()
+        model.redo()
+        XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_03.png"))?.size, CGSize(width: 8, height: 5))
+    }
+
+    /// A Replace-with-File decode can finish after its step was deleted; say so instead of
+    /// silently dropping the chosen image.
+    func testReplaceImageForRemovedStepShowsBanner() throws {
+        let model = makeModel()
+        let id = model.manifest.steps[1].id
+        model.delete(ids: [id])
+        let png = try XCTUnwrap(StepFiles.pngData(newImage()))
+        model.replaceImage(for: id, withPNG: png)
+        XCTAssertEqual(model.banner, "Couldn't replace the image — that step was removed")
+        XCTAssertEqual(model.undoManager.undoActionName, "Delete Steps")
     }
 
     func testReplaceWithPNGDataWritesItAsIs() throws {
