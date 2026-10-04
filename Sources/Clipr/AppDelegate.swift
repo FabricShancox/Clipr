@@ -174,6 +174,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `captureManager.beginCapture()` directly — a permanently-denied Screen Recording
     /// permission otherwise silently does nothing, with no way to recover.
     private func performCapture() {
+        // A modal alert, open panel or sheet would sit under the overlay, which then gets no
+        // events — a stuck screen. See `ModalHotkeyGuard`.
+        guard !ModalHotkeyGuard.shouldIgnoreNow() else { NSSound.beep(); return }
         if PermissionsManager.hasScreenRecordingPermission() {
             MainActor.assumeIsolated { captureManager.beginCapture() }
             return
@@ -207,6 +210,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        // Starting puts up an area picker or a recording session over whatever's open; with a
+        // modal dialog up that leaves it unreachable. Stopping (above) is always allowed.
+        guard !ModalHotkeyGuard.shouldIgnoreNow() else { NSSound.beep(); return }
         let advancedSettings = settings.advancedMode
         guard advancedSettings.scope == .fixedArea else {
             return startAdvancedMode(advancedSettings, area: nil)
