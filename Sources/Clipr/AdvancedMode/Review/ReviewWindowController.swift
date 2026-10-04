@@ -10,18 +10,18 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     private let model: ReviewModel
     private let captureReplacement: (@escaping (NSImage?) -> Void) -> Void
     let sessionFolder: URL
-    // Keeps each opened EditorWindowController alive until it finishes; without this,
-    // the local `editor` in openEditor(for:) would be deallocated as soon as that
-    // function returns, silently breaking its Done/Discard closures (which capture
-    // `[weak self]` on the editor controller). Each is paired with the step it edits, so that
-    // step's image can't be replaced while the editor still holds the old one.
-    private var openEditors: [(editor: EditorWindowController, stepID: UUID)] = []
+    /// The session's open image editors, each paired with the step it edits so that step's image
+    /// can't be replaced while the editor still holds the old one. Shared with any later Review of
+    /// the same session (see `SessionEditorRegistry`), so it outlives this window.
+    private let editors: SessionEditorRegistry
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
     @MainActor
     init(sessionFolder: URL, storage: StorageManager, settings: SettingsStore = SettingsStore(),
+         editors: SessionEditorRegistry = SessionEditorRegistry(),
          captureReplacement: @escaping (@escaping (NSImage?) -> Void) -> Void) {
         self.storage = storage
+        self.editors = editors
         self.settings = settings
         self.captureReplacement = captureReplacement
         self.sessionFolder = sessionFolder
@@ -46,6 +46,34 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         ))
         exportFlow = ExportFlowController(window: window, settings: settings)
         window.center()
+        attachEditors()
+    }
+
+    /// Takes over the session's editor registry — including editors left open by an earlier Review
+    /// of this session — so their steps stay locked and finishing one reloads its row here.
+    @MainActor
+    private func attachEditors() {
+        let model = model
+        model.stepsInEditor = editors.stepIDs
+        editors.onStepsInEditorChanged = { ids in MainActor.assumeIsolated { model.stepsInEditor = ids } }
+        editors.onEditorFinished = { stepID in
+            MainActor.assumeIsolated {
+                // Drop every cached decode for this step so the row shows the edited image.
+                if let step = model.manifest.steps.first(where: { $0.id == stepID }) {
+                    for companion in StepFiles.companions(of: step.file, in: model.folder) {
+                        model.thumbnails.remove(companion)
+                    }
+                }
+                model.reload(changedStep: stepID)
+            }
+        }
+    }
+
+    /// The editors stay open (and in the registry) for the next Review of this session; only
+    /// this window stops listening to them.
+    private func detachEditors() {
+        editors.onStepsInEditorChanged = nil
+        editors.onEditorFinished = nil
     }
 
     @available(*, unavailable)
@@ -60,7 +88,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// Saves the session's pending caption (retrying a failed save) and any edits pending in
     /// image editors opened from it — the same flush `AppDelegate` gives its own editors on quit.
     func flush() {
-        for open in openEditors { open.editor.flushPendingSave() }
+        editors.flushAll()
         MainActor.assumeIsolated { model.flush() }
     }
 
@@ -76,6 +104,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// A caption typed in the last half-second must still be saved.
     func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated { model.flush() }
+        detachEditors()
     }
 
     /// Exports what Review shows now: a caption typed in the last half-second, and annotations
@@ -119,8 +148,8 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// One editor per step: a second would load the same sidecar and each would save over the
     /// other's annotations. Asking again brings the open one forward.
     private func openEditor(for step: StepRecord) {
-        if let open = openEditors.first(where: { $0.stepID == step.id }) {
-            WindowPresenter.bringToFront(open.editor)
+        if let open = editors.entry(for: step.id) {
+            open.bringForward()
             return
         }
         let url = model.url(for: step)
@@ -134,26 +163,16 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         guard let image = NSImage(contentsOf: url) else { return }
         // Rename disabled: session.json refers to steps by filename.
         let editor = EditorWindowController(image: image, rawURL: url, storage: storage, allowsRename: false)
-        openEditors.append((editor, step.id))
-        updateStepsInEditor()
-        editor.onFinished = { [weak self, weak editor] in
-            guard let self, let editor else { return }
-            self.openEditors.removeAll { $0.editor === editor }
-            self.updateStepsInEditor()
-            MainActor.assumeIsolated {
-                let folder = self.model.folder
-                // Drop every cached decode for this step so the row shows the edited image.
-                for companion in StepFiles.companions(of: step.file, in: folder) {
-                    self.model.thumbnails.remove(companion)
-                }
-                self.model.reload(changedStep: step.id)
-            }
+        let registry = editors
+        editor.onFinished = { [weak registry, weak editor] in
+            guard let registry, let editor else { return }
+            registry.finished(editor)
         }
+        registry.add(.init(
+            editor: editor, stepID: step.id,
+            flush: { [weak editor] in editor?.flushPendingSave() },
+            bringForward: { [weak editor] in if let editor { WindowPresenter.bringToFront(editor) } }
+        ))
         editor.showWindow(nil)
-    }
-
-    private func updateStepsInEditor() {
-        let ids = Set(openEditors.map(\.stepID))
-        MainActor.assumeIsolated { model.stepsInEditor = ids }
     }
 }

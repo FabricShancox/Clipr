@@ -7,6 +7,9 @@ final class AdvancedModeCoordinator {
     private let clickCaptureManager: ClickCaptureManager
     private let storage: StorageManager
     private var openReviewWindows: [ReviewWindowController] = []
+    /// Image editors opened from Review, per session folder (standardized path). They outlive the
+    /// Review that opened them, so a reopened Review knows about them and quit still flushes them.
+    private var editorRegistries: [String: SessionEditorRegistry] = [:]
     var onStepCaptured: ((Int) -> Void)?
 
     init(storage: StorageManager) {
@@ -105,6 +108,19 @@ final class AdvancedModeCoordinator {
     /// this: termination doesn't close windows, so their close-time flush would never run.
     func flushOpenReviews() {
         for review in openReviewWindows { review.flush() }
+        // Editors whose Review was closed.
+        for registry in editorRegistries.values { registry.flushAll() }
+    }
+
+    /// The editor registry for `sessionFolder`, created on first use. Registries with no editors
+    /// left are dropped along the way.
+    func editorRegistry(for sessionFolder: URL) -> SessionEditorRegistry {
+        editorRegistries = editorRegistries.filter { !$0.value.isEmpty }
+        let key = Self.folderKey(sessionFolder)
+        if let existing = editorRegistries[key] { return existing }
+        let registry = SessionEditorRegistry()
+        editorRegistries[key] = registry
+        return registry
     }
 
     /// Reuses the Review already open for `sessionFolder`, if any: two windows on one session
@@ -116,6 +132,7 @@ final class AdvancedModeCoordinator {
         // The coordinator is only ever called on the main thread.
         let review = MainActor.assumeIsolated { ReviewWindowController(
             sessionFolder: sessionFolder, storage: storage,
+            editors: editorRegistry(for: sessionFolder),
             captureReplacement: { [weak self] done in
                 guard let capture = self?.captureReplacement else { return done(nil) }
                 capture(done)
@@ -139,7 +156,11 @@ final class AdvancedModeCoordinator {
     }
 
     private static func sameFolder(_ a: URL, _ b: URL) -> Bool {
-        a.standardizedFileURL.resolvingSymlinksInPath() == b.standardizedFileURL.resolvingSymlinksInPath()
+        folderKey(a) == folderKey(b)
+    }
+
+    private static func folderKey(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
     }
 }
 
