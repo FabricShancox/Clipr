@@ -92,7 +92,7 @@ final class AdvancedModeCoordinator {
     }
 
     private func openReview(manifest: SessionManifest, sessionFolder: URL) -> ReviewWindowController {
-        let review = ReviewWindowController(manifest: manifest, sessionFolder: sessionFolder, storage: storage)
+        let review = MainActor.assumeIsolated { ReviewWindowController(sessionFolder: sessionFolder, storage: storage) }
         openReviewWindows.append(review)
         // ReviewWindowController has no onFinished-style closure (unlike EditorWindowController),
         // so its close is observed externally via NSWindow.willCloseNotification instead.
