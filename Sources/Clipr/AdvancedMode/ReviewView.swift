@@ -35,8 +35,13 @@ struct ReviewView: View {
                         // `ThumbnailView` rather than `NSImage(contentsOf:)` inline: that read and
                         // fully decoded every step from disk on each body evaluation — including
                         // after every Delete — on the main thread.
-                        ThumbnailView(url: step.url)
-                            .frame(height: 100)
+                        // Fitted and clipped to a fixed box: an unconstrained `.fill` thumbnail spilled
+                        // out of its card and over its neighbours.
+                        ThumbnailView(url: step.url, contentMode: .fit)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 120)
+                            .background(Color.black.opacity(0.25))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) { onOpenEditor(step.url) }
                             .help("Double-click to edit")

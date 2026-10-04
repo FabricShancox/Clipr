@@ -2,17 +2,21 @@ import SwiftUI
 
 struct ThumbnailView: View {
     let url: URL
+    /// `.fill` crops to cover the tile (Recents); `.fit` shows the whole capture (Review, where the
+    /// clicked spot can be anywhere in the image).
+    var contentMode: ContentMode = .fill
     @State private var image: NSImage?
 
-    init(url: URL) {
+    init(url: URL, contentMode: ContentMode = .fill) {
         self.url = url
+        self.contentMode = contentMode
         _image = State(initialValue: ThumbnailCache.shared.image(for: url))
     }
 
     var body: some View {
         Group {
             if let image {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                Image(nsImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else {
                 Rectangle().fill(Color(red: 0x1C / 255.0, green: 0x25 / 255.0, blue: 0x2E / 255.0))
             }
