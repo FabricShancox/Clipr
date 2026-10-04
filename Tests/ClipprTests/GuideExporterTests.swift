@@ -37,7 +37,7 @@ final class GuideExporterTests: XCTestCase {
     }
 
     /// Step 2's image is missing and step 3's sidecar is damaged; every other render succeeds.
-    private func exporter(calls: Calls = Calls(), pdf: @escaping @MainActor (String, URL) async throws -> Void = { _, url in
+    private func exporter(calls: Calls = Calls(), pdf: @escaping @MainActor (String, URL, Int) async throws -> Void = { _, url, _ in
         try Data("%PDF".utf8).write(to: url)
     }, clipboard: @escaping @MainActor (GuideClipboard.Payload) -> Bool = { _ in true }) -> GuideExporter {
         let image = png
@@ -140,11 +140,24 @@ final class GuideExporterTests: XCTestCase {
         XCTAssertTrue(try workIsEmpty())
     }
 
+    // M7: a long session gets longer to print than a short one.
+    func testPDFTimeoutGrowsWithStepCount() async throws {
+        XCTAssertEqual(PDFGuideExporter.timeout(forSteps: 0), PDFGuideExporter.defaultTimeout)
+        XCTAssertGreaterThanOrEqual(PDFGuideExporter.timeout(forSteps: 400), 200)
+        var seen: Int?
+        _ = try await exporter(pdf: { _, url, steps in
+            seen = steps
+            try Data("%PDF".utf8).write(to: url)
+        }).export(doc(sizes: Array(repeating: .full, count: 5)), options: ExportOptions(format: .pdf, title: "T"),
+                  to: out.appendingPathComponent("Guide.pdf"))
+        XCTAssertEqual(seen, 5)
+    }
+
     func testPDFFailureSuggestsHTMLAndLeavesNothing() async throws {
         struct Boom: Error {}
         let destination = out.appendingPathComponent("Guide.pdf")
         do {
-            _ = try await exporter(pdf: { _, _ in throw Boom() }).export(doc(), options: ExportOptions(format: .pdf, title: "T"), to: destination)
+            _ = try await exporter(pdf: { _, _, _ in throw Boom() }).export(doc(), options: ExportOptions(format: .pdf, title: "T"), to: destination)
             XCTFail("expected a failure")
         } catch {
             XCTAssertEqual(error as? GuideExportError, .pdfFailed)
@@ -221,7 +234,7 @@ final class GuideExporterTests: XCTestCase {
     func testStagesBesideTheDestinationWhenTheVolumeHasNoReplacementFolder() async throws {
         struct NoReplacement: Error {}
         var staged: URL?
-        var exporter = exporter(pdf: { _, url in
+        var exporter = exporter(pdf: { _, url, _ in
             staged = url
             try Data("%PDF".utf8).write(to: url)
         })
@@ -265,7 +278,7 @@ final class GuideExporterTests: XCTestCase {
         let image = try XCTUnwrap(GuideImages.encode(try XCTUnwrap(picture.bitmap)))
         var printing = false
         let exporter = GuideExporter(renderImage: { _, _ in GuideImageRender(image: image, sidecarDamaged: false) },
-                                     writePDF: { html, url in
+                                     writePDF: { html, url, _ in
                                          printing = true
                                          try await GuideExporter.printPDF(html, to: url)
                                      }, workRoot: work)

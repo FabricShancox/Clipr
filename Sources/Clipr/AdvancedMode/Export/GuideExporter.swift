@@ -82,7 +82,10 @@ struct GuideExporter {
 
     var renderImage: @Sendable (GuideImageRef, Int) -> GuideImageRender = { GuideImages.render($0, maxPixelWidth: $1) }
     /// Cancelling the calling task cancels the print in flight (see `PDFGuideExporter.cancel()`).
-    var writePDF: @MainActor (String, URL) async throws -> Void = { try await GuideExporter.printPDF($0, to: $1) }
+    /// The third argument is the guide's step count, which sets how long printing may take.
+    var writePDF: @MainActor (String, URL, Int) async throws -> Void = {
+        try await GuideExporter.printPDF($0, to: $1, timeout: PDFGuideExporter.timeout(forSteps: $2))
+    }
     var copyToClipboard: @MainActor (GuideClipboard.Payload) -> Bool = { GuideClipboard.write($0) }
     /// Where work folders are made. Nil: the system's temporary folder on the destination's volume,
     /// so the final move is a rename.
@@ -96,8 +99,8 @@ struct GuideExporter {
 
     /// Prints with a fresh `PDFGuideExporter`; cancelling the calling task cancels that exporter on
     /// the main actor, which stops the load or print at once.
-    static func printPDF(_ html: String, to url: URL) async throws {
-        let pdf = PDFGuideExporter()
+    static func printPDF(_ html: String, to url: URL, timeout: TimeInterval = PDFGuideExporter.defaultTimeout) async throws {
+        let pdf = PDFGuideExporter(timeout: timeout)
         try await withTaskCancellationHandler {
             try await pdf.export(html: html, to: url)
         } onCancel: {
@@ -165,7 +168,7 @@ struct GuideExporter {
             images = RenderedImages()
             if isCancelled() { throw GuideExportError.cancelled }
             do {
-                try await writePDF(html, output)
+                try await writePDF(html, output, doc.steps.count)
             } catch {
                 if isCancelled() || (error as? PDFExportError) == .cancelled { throw GuideExportError.cancelled }
                 throw GuideExportError.pdfFailed

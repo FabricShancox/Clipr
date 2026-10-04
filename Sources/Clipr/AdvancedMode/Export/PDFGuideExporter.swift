@@ -22,6 +22,14 @@ enum PDFExportError: Error, Equatable {
 @MainActor
 final class PDFGuideExporter: NSObject, WKNavigationDelegate {
     nonisolated static let defaultTimeout: TimeInterval = 30
+    /// Extra time per step: a long session is hundreds of pages, and WebKit's load, layout and
+    /// paginated print of them can take far longer than a short guide. The user can still Cancel.
+    nonisolated static let timeoutPerStep: TimeInterval = 0.5
+
+    /// The default for a short guide, growing with the step count so long sessions don't time out.
+    nonisolated static func timeout(forSteps steps: Int) -> TimeInterval {
+        defaultTimeout + timeoutPerStep * TimeInterval(max(0, steps))
+    }
     /// 18 mm in points.
     nonisolated static let marginPoints: CGFloat = 18 / 25.4 * 72
     /// Regions that use US Letter; everywhere else gets A4.
