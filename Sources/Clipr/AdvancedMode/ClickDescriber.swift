@@ -100,8 +100,12 @@ final class ClickDescriber: ClickDescribing {
     }
 
     private static let fieldRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
-    /// Roles whose own AXValue is display text rather than user input.
-    private static let valueLabelRoles: Set<String> = ["AXStaticText", "AXCell", "AXButton", "AXMenuButton", "AXPopUpButton", "AXLink", "AXHeading"]
+    /// Controls whose own AXValue is their visible name.
+    private static let controlValueRoles: Set<String> = ["AXButton", "AXMenuButton", "AXPopUpButton", "AXLink"]
+    /// Roles whose AXValue is on-screen *content* — a message body, a spreadsheet cell, a revealed
+    /// password or recovery code. Used only when short, and never when it looks like a secret.
+    private static let contentValueRoles: Set<String> = ["AXStaticText", "AXCell", "AXHeading"]
+    static let maxContentValueLength = 40
     private static let maxLabelLength = 200
 
     private static func target(for element: AXUIElement) -> ClickTarget {
@@ -126,8 +130,29 @@ final class ClickDescriber: ClickDescribing {
             if !isField, string(titleElement, kAXSubroleAttribute) != "AXSecureTextField",
                let s = string(titleElement, kAXValueAttribute) { return capped(s) }
         }
-        if allowValue, let role, valueLabelRoles.contains(role), let s = string(element, kAXValueAttribute) { return capped(s) }
+        if allowValue, let role, let s = string(element, kAXValueAttribute) { return valueLabel(s, role: role) }
         return nil
+    }
+
+    /// A clicked element's AXValue as its caption label, or nil when it shouldn't be quoted:
+    /// any role outside the allowlists (it may hold what the user typed), content longer than
+    /// `maxContentValueLength`, or anything that looks like a code, key or account number.
+    static func valueLabel(_ value: String, role: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !looksSecret(trimmed) else { return nil }
+        if controlValueRoles.contains(role) { return capped(trimmed) }
+        if contentValueRoles.contains(role), trimmed.count <= maxContentValueLength { return trimmed }
+        return nil
+    }
+
+    /// One-time codes and account numbers (6+ digits in a row, or 12+ in spaced/dashed groups),
+    /// and key- or token-like words (16+ characters mixing letters and digits).
+    static func looksSecret(_ text: String) -> Bool {
+        if text.range(of: #"\d{6,}"#, options: .regularExpression) != nil { return true }
+        if text.range(of: #"(?:\d[ -]?){12,}"#, options: .regularExpression) != nil { return true }
+        return text.split(whereSeparator: \.isWhitespace).contains { word in
+            word.count >= 16 && word.contains(where: \.isLetter) && word.contains(where: \.isNumber)
+        }
     }
 
     private static func capped(_ s: String) -> String { String(s.prefix(maxLabelLength)) }

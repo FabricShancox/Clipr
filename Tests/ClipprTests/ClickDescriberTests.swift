@@ -99,3 +99,34 @@ final class ClickDescriberTests: XCTestCase {
         XCTAssertNotEqual(security { $0.bundleID = "com.microsoft.VSCode"; $0.subrole = "AXSecureTextField" }, .notSecure)
     }
 }
+
+// Security #5: a clicked element's on-screen content isn't quoted into captions when it could be
+// secret or is long content rather than a control's name.
+final class ClickValueLabelTests: XCTestCase {
+    func testControlValuesAreKept() {
+        XCTAssertEqual(ClickDescriber.valueLabel("Save", role: "AXButton"), "Save")
+        XCTAssertEqual(ClickDescriber.valueLabel("Pricing", role: "AXLink"), "Pricing")
+    }
+
+    func testShortStaticTextIsKept() {
+        XCTAssertEqual(ClickDescriber.valueLabel("General", role: "AXStaticText"), "General")
+        XCTAssertEqual(ClickDescriber.valueLabel("Due 2026-10-04", role: "AXCell"), "Due 2026-10-04")
+    }
+
+    func testLongContentIsDropped() {
+        let message = "Hi Sam, the board meeting moved to Thursday, can you bring the numbers?"
+        XCTAssertNil(ClickDescriber.valueLabel(message, role: "AXStaticText"))
+    }
+
+    func testSecretLookingValuesAreDropped() {
+        for secret in ["482913", "Code: 123456", "4111 1111 1111 1111", "ghp_a1B2c3D4e5F6g7H8i9J0", "sk-live-9f8e7d6c5b4a3f2e"] {
+            XCTAssertNil(ClickDescriber.valueLabel(secret, role: "AXStaticText"), secret)
+            XCTAssertNil(ClickDescriber.valueLabel(secret, role: "AXButton"), secret)
+        }
+    }
+
+    func testOtherRolesNeverQuoteTheirValue() {
+        XCTAssertNil(ClickDescriber.valueLabel("hello", role: "AXTextField"))
+        XCTAssertNil(ClickDescriber.valueLabel("hello", role: "AXWebArea"))
+    }
+}
