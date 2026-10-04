@@ -415,6 +415,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // The base image changed, so the flattened export is out of date even if no annotation
             // did — crop and canvas-resize both land here.
             flattenedIsStale = true
+            // The Recents tile seeds from this cache by URL, and the URL hasn't changed, so
+            // without this it kept showing the uncropped image for the rest of the session.
+            ThumbnailCache.shared.remove(rawURL)
             return true
         } catch {
             NSLog("Clipr: \(operation) failed to write \(rawURL.lastPathComponent): \(error)")
