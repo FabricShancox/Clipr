@@ -16,6 +16,9 @@ struct ReviewRow: View {
     @State private var draft = ""
     @State private var suppressNextDraftChange = false
     @FocusState private var fieldFocused: Bool
+    @State private var isHovering = false
+
+    private var isSelected: Bool { model.selection.contains(step.id) }
 
     private var isEditing: Bool { editingID == step.id }
 
@@ -53,7 +56,7 @@ struct ReviewRow: View {
                 numberBadge
                 image.frame(width: 200)
                 details
-                editButton
+                compactEditMenu
             }
         case .large:
             HStack(alignment: .top, spacing: 16) {
@@ -64,19 +67,14 @@ struct ReviewRow: View {
                 image.containerRelativeFrame(.horizontal) { width, _ in
                     max(120, min(width * 0.62, width - Self.largeDetailsMinWidth - Self.largeChromeWidth))
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    details
-                    editButton
-                }
-                .frame(minWidth: Self.largeDetailsMinWidth)
+                details
+                    .frame(minWidth: Self.largeDetailsMinWidth)
             }
         case .guide:
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 12) {
                     numberBadge
                     details
-                    sizePicker
-                    editButton
                 }
                 // Guide is the layout that previews the finished document, so only it draws each
                 // step at its own size; List and Large keep rows uniform and show a badge instead.
@@ -112,8 +110,56 @@ struct ReviewRow: View {
                 .id("\(step.id)-\(model.refreshToken)-\(layout.rawValue)")
             )
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            // The controls act on the image, so they sit on it — leaving the caption the full
+            // width. Shown while the pointer is over the image and on selected rows, so the rest
+            // of the list reads like the finished guide. (List thumbnails are too small for this;
+            // that layout keeps a compact menu beside the caption.)
+            .overlay(alignment: .topTrailing) {
+                if layout != .list, isHovering || isSelected {
+                    imageToolbar.padding(8)
+                }
+            }
+            .onHover { isHovering = $0 }
             .onTapGesture(count: 2) { onOpenEditor(step) }
             .help("Double-click to edit the image")
+    }
+
+    private var imageToolbar: some View {
+        HStack(spacing: 6) {
+            sizePicker
+            Menu {
+                imageActions
+            } label: {
+                Text("Edit")
+            } primaryAction: {
+                onOpenEditor(step)
+            }
+            .menuStyle(.borderedButton)
+            .fixedSize()
+        }
+        .controlSize(.small)
+        .padding(5)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+    }
+
+    /// List layout: one small ⋯ menu beside the caption (Edit Image first), since the thumbnail
+    /// is too small to carry the image toolbar.
+    private var compactEditMenu: some View {
+        Menu {
+            imageActions
+            Divider()
+            imageSizeMenu
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Edit, retake, replace or resize the image")
+        .accessibilityLabel("Image options")
+        .padding(.top, 2)
     }
 
     private var details: some View {
@@ -142,20 +188,6 @@ struct ReviewRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Clicking "Edit" opens the image editor; its arrow offers replacing the image instead.
-    private var editButton: some View {
-        Menu {
-            imageActions
-        } label: {
-            Text("Edit")
-        } primaryAction: {
-            onOpenEditor(step)
-        }
-        .menuStyle(.borderedButton)
-        .fixedSize()
-        .padding(.top, 2)
-    }
-
     @ViewBuilder
     private var imageActions: some View {
         Button("Edit Image…") { onOpenEditor(step) }
@@ -167,7 +199,8 @@ struct ReviewRow: View {
             .disabled(model.isReadOnly || model.stepsInEditor.contains(step.id))
     }
 
-    /// Guide layout only: the size this step's image takes in the finished guide.
+    /// The size this step's image takes in the finished guide (drawn at that size in Guide;
+    /// shown as a badge in Large).
     private var sizePicker: some View {
         Picker("Image Size", selection: Binding(
             get: { step.imageSize ?? .full },
@@ -180,7 +213,6 @@ struct ReviewRow: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
-        .padding(.top, 2)
         .disabled(model.isReadOnly)
         .help("Image size in the guide (⌘+ / ⌘−)")
     }

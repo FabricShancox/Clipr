@@ -73,3 +73,5 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] Replace with File… → pick a PNG/JPEG/HEIC → the step shows the new image; the old PNG, annotations and zoom are in the Trash.
 - [ ] After a replace, ⌘Z → original image (with its marker) back; ⇧⌘Z → new image again.
 - [ ] Read-only session → Retake / Replace items are disabled.
+- [ ] Large / Guide: hovering an image (or selecting its row) shows a small toolbar on the image's top-right with S · M · L · Full and Edit ▾; it hides when the pointer leaves an unselected row. Captions use the full width.
+- [ ] List: the ⋯ button beside the caption opens Edit Image / Retake / Replace / Image Size.
