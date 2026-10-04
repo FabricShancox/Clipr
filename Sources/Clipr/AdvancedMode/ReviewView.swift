@@ -67,6 +67,8 @@ struct ReviewView: View {
             .disabled(editingID != nil)
             Button("Delete Selected", role: .destructive) { model.deleteSelection() }
                 .disabled(model.selection.isEmpty || model.isReadOnly)
+                // Deleted step images stay recoverable (Undo needs them) until the Trash is emptied.
+                .help("Moves the selected steps' images to the Trash (⌘Z puts them back). They stay there until you empty the Trash.")
             Button("Show in Finder", action: onShowInFinder)
             Button("Export…", action: onExport)
                 .disabled(model.manifest.steps.isEmpty)
