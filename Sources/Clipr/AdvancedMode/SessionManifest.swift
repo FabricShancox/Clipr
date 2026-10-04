@@ -33,12 +33,31 @@ struct SessionManifest: Codable, Equatable {
 
 enum SessionManifestStore {
     static let fileName = "session.json"
+    static let currentVersion = 1
+
+    enum StoreError: Error, Equatable { case folderUnreadable }
 
     static func save(_ manifest: SessionManifest, in folder: URL) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(manifest).write(to: folder.appendingPathComponent(fileName), options: .atomic)
+    }
+
+    /// Review saves after every edit. If the folder can't be listed (permissions changed, an
+    /// external drive went away) the in-memory manifest may have been built from an empty listing,
+    /// so writing it could erase every caption — refuse instead and let the caller retry.
+    static func saveSafely(_ manifest: SessionManifest, in folder: URL) throws {
+        guard (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) != nil else {
+            throw StoreError.folderUnreadable
+        }
+        try save(manifest, in: folder)
+    }
+
+    /// A manifest written by a newer Clipr may carry meaning this build doesn't understand, so
+    /// Review shows it but never writes it back.
+    static func isReadOnly(_ manifest: SessionManifest) -> Bool {
+        manifest.version > currentVersion
     }
 
     /// Always returns a manifest that matches the folder's contents: entries whose PNG is gone are
@@ -48,6 +67,9 @@ enum SessionManifestStore {
     static func load(from folder: URL) -> SessionManifest {
         let onDisk = rawStepFiles(in: folder)
         var manifest = decoded(from: folder) ?? SessionManifest(createdAt: creationDate(of: folder))
+        // A duplicate entry would show one file twice and make reorder/delete ambiguous.
+        var seen = Set<String>()
+        manifest.steps = manifest.steps.filter { seen.insert($0.file).inserted }
         let present = Set(onDisk)
         manifest.steps.removeAll { !present.contains($0.file) }
         let listed = Set(manifest.steps.map(\.file))

@@ -64,4 +64,41 @@ final class SessionManifestTests: XCTestCase {
     func testZoomName() {
         XCTAssertEqual(FilenameGenerator.zoomName(fromStep: "Step_03.png"), "Step_03_zoom.png")
     }
+
+    func testSaveSafelyWritesWhenFolderListable() throws {
+        touch("Step_01.png")
+        let m = SessionManifest(createdAt: Date(timeIntervalSince1970: 0), steps: [record("Step_01.png", caption: "A")])
+        try SessionManifestStore.saveSafely(m, in: folder)
+        XCTAssertEqual(SessionManifestStore.load(from: folder).steps.first?.caption, "A")
+    }
+
+    /// Write-and-search but no read permission: a plain save would succeed here, which is exactly
+    /// the case where a manifest built from an empty listing could overwrite real captions.
+    func testSaveSafelyRefusesWhenFolderUnlistable() throws {
+        touch("Step_01.png")
+        try SessionManifestStore.save(SessionManifest(createdAt: Date(), steps: [record("Step_01.png", caption: "keep")]), in: folder)
+        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+        XCTAssertThrowsError(try SessionManifestStore.saveSafely(SessionManifest(createdAt: Date()), in: folder)) {
+            XCTAssertEqual($0 as? SessionManifestStore.StoreError, .folderUnreadable)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+        XCTAssertEqual(SessionManifestStore.load(from: folder).steps.first?.caption, "keep")
+    }
+
+    func testLoadDropsDuplicateEntries() throws {
+        touch("Step_01.png")
+        let m = SessionManifest(createdAt: Date(timeIntervalSince1970: 0),
+                                steps: [record("Step_01.png", caption: "first"), record("Step_01.png", caption: "dup")])
+        try SessionManifestStore.save(m, in: folder)
+        let loaded = SessionManifestStore.load(from: folder)
+        XCTAssertEqual(loaded.steps.map(\.caption), ["first"])
+    }
+
+    func testNewerVersionIsReadOnly() {
+        var m = SessionManifest(createdAt: Date())
+        XCTAssertFalse(SessionManifestStore.isReadOnly(m))
+        m.version = SessionManifestStore.currentVersion + 1
+        XCTAssertTrue(SessionManifestStore.isReadOnly(m))
+    }
 }
