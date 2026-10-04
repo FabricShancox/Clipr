@@ -1,5 +1,7 @@
 import SwiftUI
 
+/// The Preferences window's content. Each tab lives in its own `PreferencesView+…Tab.swift`
+/// extension, so the state below is internal rather than private purely so those files can see it.
 struct PreferencesView: View {
     let settings: SettingsStore
     let onHotkeysChanged: () -> Void
@@ -16,18 +18,18 @@ struct PreferencesView: View {
     /// `HotkeyRecorderView.onRecordingChanged`.
     let onHotkeyRecording: (Bool) -> Void
 
-    @State private var captureHotkey: HotkeyBinding
-    @State private var advancedModeHotkey: HotkeyBinding
-    @State private var saveFolder: URL
-    @State private var launchAtLogin: Bool
-    @State private var captureCursor: Bool
+    @State var captureHotkey: HotkeyBinding
+    @State var advancedModeHotkey: HotkeyBinding
+    @State var saveFolder: URL
+    @State var launchAtLogin: Bool
+    @State var captureCursor: Bool
     /// Bound straight to the settings keys (see `SettingsStore.copyBorderKey`), so an open editor's
     /// copy-style menu and these toggles always agree.
-    @AppStorage private var copyBorder: Bool
-    @AppStorage private var copyShadow: Bool
-    @AppStorage private var checkForUpdates: Bool
-    @State private var advanced: AdvancedModeSettings
-    @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
+    @AppStorage var copyBorder: Bool
+    @AppStorage var copyShadow: Bool
+    @AppStorage var checkForUpdates: Bool
+    @State var advanced: AdvancedModeSettings
+    @State var inputMonitoringGranted = CGPreflightListenEventAccess()
 
     init(
         settings: SettingsStore,
@@ -69,199 +71,10 @@ struct PreferencesView: View {
         }
     }
 
-    // MARK: General
-
-    private var generalTab: some View {
-        Form {
-            Section {
-                LabeledContent("Capture") {
-                    HotkeyRecorderView(binding: Binding(
-                        get: { captureHotkey },
-                        set: { captureHotkey = $0; settings.captureHotkey = $0; onHotkeysChanged() }
-                    ), otherBindings: otherHotkeys(except: .capture), onRecordingChanged: onHotkeyRecording)
-                }
-                LabeledContent("Start / stop Advanced Mode") {
-                    HotkeyRecorderView(binding: Binding(
-                        get: { advancedModeHotkey },
-                        set: { advancedModeHotkey = $0; settings.advancedModeHotkey = $0; onHotkeysChanged() }
-                    ), otherBindings: otherHotkeys(except: .advancedMode), onRecordingChanged: onHotkeyRecording)
-                }
-            } header: {
-                sectionHeader("Shortcuts")
-            }
-
-            Section {
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([saveFolder]) }
-                        Button("Choose…") { chooseFolder() }
-                    }
-                } label: {
-                    Text("Save captures to")
-                    Text(saveFolder.path)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .help(saveFolder.path)
-                }
-            } header: {
-                sectionHeader("Saving")
-            }
-
-            Section {
-                Toggle(isOn: Binding(
-                    get: { captureCursor },
-                    set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
-                )) {
-                    Text("Include the mouse pointer")
-                    Text("Shows the pointer in screenshots and Advanced Mode steps.")
-                }
-            } header: {
-                sectionHeader("Capturing")
-            }
-
-            Section {
-                Toggle(isOn: $copyBorder) {
-                    Text("Add a border")
-                    Text("A thin outline around copied images.")
-                }
-                Toggle(isOn: $copyShadow) {
-                    Text("Add a drop shadow")
-                    Text("Makes copied images stand out when pasted into documents.")
-                }
-            } header: {
-                sectionHeader("Copying")
-            }
-
-            Section {
-                Toggle("Open Clipr at login", isOn: Binding(
-                    get: { launchAtLogin },
-                    set: { setLaunchAtLogin($0) }
-                ))
-                Toggle(isOn: $checkForUpdates) {
-                    Text("Check for updates automatically")
-                    Text("Asks GitHub for a newer release at most once a day.")
-                }
-            } header: {
-                sectionHeader("Startup")
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    // MARK: Advanced Mode
-
-    private var advancedModeTab: some View {
-        Form {
-            Section {
-                Toggle(isOn: advancedBinding(\.clickMarker)) {
-                    Text("Mark each click")
-                    Text("Draws an editable marker where you clicked.")
-                }
-                // Drawn, not a native `.segmented` Picker — see `DrawnSegmentedPicker`.
-                DrawnSegmentedPicker(
-                    label: "Marker style",
-                    selection: advancedBinding(\.markerStyle),
-                    options: [(.ring, "Ring"), (.dot, "Dot")]
-                )
-                .disabled(!advanced.clickMarker)
-                Toggle(isOn: advancedBinding(\.cursorTrail)) {
-                    Text("Show pointer trail")
-                    Text("A short curve showing where the pointer came from before each click.")
-                }
-                Toggle(isOn: advancedBinding(\.zoomOnClick)) {
-                    Text("Save a close-up of each click")
-                    Text("Adds a zoomed-in image next to each step, centred on the click.")
-                }
-            } header: {
-                sectionHeader("On each step")
-            }
-
-            Section {
-                Toggle(isOn: advancedBinding(\.autoCaptions)) {
-                    Text("Write captions automatically")
-                    Text("For example \u{201C}Click Save in Safari\u{201D}.")
-                }
-                Toggle(isOn: advancedBinding(\.typingSteps)) {
-                    Text("Record typing as steps")
-                    Text("Not recorded in password fields, terminals, or apps that don\u{2019}t report their fields to Accessibility.")
-                }
-                if advanced.typingSteps && !inputMonitoringGranted {
-                    LabeledContent {
-                        Button("Open System Settings…") {
-                            inputMonitoringGranted = CGRequestListenEventAccess()
-                        }
-                    } label: {
-                        Label("Needs Input Monitoring permission", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    }
-                }
-            } header: {
-                sectionHeader("Captions")
-            }
-
-            Section {
-                Picker(selection: advancedBinding(\.scope)) {
-                    Text("Clicked window").tag(AdvancedModeSettings.Scope.window)
-                    Text("Whole screen").tag(AdvancedModeSettings.Scope.screen)
-                    Text("Fixed area").tag(AdvancedModeSettings.Scope.fixedArea)
-                } label: {
-                    Text("Capture")
-                    Text(scopeDescription)
-                }
-                LabeledContent {
-                    HStack {
-                        Slider(value: advancedBinding(\.captureDelay), in: 0.2...2, step: 0.1)
-                            .frame(width: 180)
-                        // Locale-aware decimal separator (0,5 s in many locales).
-                        Text("\(advanced.captureDelay.formatted(.number.precision(.fractionLength(1)))) s")
-                            .monospacedDigit()
-                            .frame(width: 40, alignment: .trailing)
-                    }
-                } label: {
-                    Text("Wait after click")
-                    Text("Lets menus and pop-ups finish opening before the screenshot.")
-                }
-                LabeledContent {
-                    if let hotkey = advanced.stepHotkey {
-                        HStack(spacing: 8) {
-                            HotkeyRecorderView(binding: Binding(
-                                get: { hotkey },
-                                set: { advanced.stepHotkey = $0; settings.advancedMode = advanced }
-                            ), otherBindings: otherHotkeys(except: .step), onRecordingChanged: onHotkeyRecording)
-                            Button("Clear") { advanced.stepHotkey = nil; settings.advancedMode = advanced }
-                        }
-                    } else {
-                        Button("Add Shortcut") {
-                            advanced.stepHotkey = HotkeyBinding(keyCode: 1, modifiers: HotkeyBinding.Modifier.control.rawValue | HotkeyBinding.Modifier.option.rawValue)
-                            settings.advancedMode = advanced
-                        }
-                    }
-                } label: {
-                    Text("Take a step without clicking")
-                    Text("Shortcut that works only while recording.")
-                }
-            } header: {
-                sectionHeader("Capture")
-            } footer: {
-                Text("Changes apply the next time you start Advanced Mode.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
     /// Grouped forms leave a tall gap above every section title; pulling the title up tightens
     /// the page without changing the spacing inside each group.
-    private func sectionHeader(_ title: String) -> some View {
+    func sectionHeader(_ title: String) -> some View {
         Text(title).padding(.top, -14)
-    }
-
-    private var scopeDescription: String {
-        switch advanced.scope {
-        case .window: return "Just the window you clicked in."
-        case .screen: return "The whole display you clicked on, including menus."
-        case .fixedArea: return "An area you choose when recording starts."
-        }
     }
 
     // MARK: About
@@ -281,7 +94,7 @@ struct PreferencesView: View {
 
     /// A refused registration is reported and the toggle reverts to what the system actually has,
     /// rather than showing On for a login item that doesn't exist.
-    private func setLaunchAtLogin(_ enabled: Bool) {
+    func setLaunchAtLogin(_ enabled: Bool) {
         do {
             try settings.setLaunchAtLogin(enabled)
         } catch {
@@ -292,10 +105,10 @@ struct PreferencesView: View {
         launchAtLogin = settings.launchAtLogin
     }
 
-    private enum HotkeySlot { case capture, advancedMode, step }
+    enum HotkeySlot { case capture, advancedMode, step }
 
     /// Clipr's shortcuts other than `slot`, with the names the recorder shows on a clash.
-    private func otherHotkeys(except slot: HotkeySlot) -> [(binding: HotkeyBinding, name: String)] {
+    func otherHotkeys(except slot: HotkeySlot) -> [(binding: HotkeyBinding, name: String)] {
         var others: [(binding: HotkeyBinding, name: String)] = []
         if slot != .capture { others.append((captureHotkey, "Capture")) }
         if slot != .advancedMode { others.append((advancedModeHotkey, "Advanced Mode")) }
@@ -303,7 +116,7 @@ struct PreferencesView: View {
         return others
     }
 
-    private func chooseFolder() {
+    func chooseFolder() {
         let panel = Panels.chooseFolder(startingAt: saveFolder)
         if panel.runModal() == .OK, let url = panel.url {
             saveFolder = url
@@ -314,7 +127,7 @@ struct PreferencesView: View {
         }
     }
 
-    private func advancedBinding<T>(_ keyPath: WritableKeyPath<AdvancedModeSettings, T>) -> Binding<T> {
+    func advancedBinding<T>(_ keyPath: WritableKeyPath<AdvancedModeSettings, T>) -> Binding<T> {
         Binding(
             get: { advanced[keyPath: keyPath] },
             set: { advanced[keyPath: keyPath] = $0; settings.advancedMode = advanced }
