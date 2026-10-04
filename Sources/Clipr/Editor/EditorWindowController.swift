@@ -53,6 +53,12 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.title = "Clipr Editor"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // The editor is drawn in a fixed dark palette (`EditorColors`), which also keeps the
+        // annotation swatches — white among them — legible around the canvas. Following a Light
+        // system appearance put light bezels under white labels on the dark header (Reveal,
+        // Save As…, the menu, the rename field, popover steppers), so the window is pinned to
+        // dark; sheets and popovers attached to it inherit that.
+        window.appearance = NSAppearance(named: .darkAqua)
         super.init(window: window)
 
         // windowWillClose(_:) is the single place onFinished fires — Copy/Share leave the
