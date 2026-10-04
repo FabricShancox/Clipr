@@ -43,6 +43,8 @@ extension ReviewModel {
             banner = failure
             return
         }
+        // Owner-only like every step the recorder writes; the move below keeps it.
+        SessionFolder.restrict(temp)
         let old: TrashedStep
         do { old = try files.trashAll(step.file, in: folder) } catch {
             try? FileManager.default.removeItem(at: temp)

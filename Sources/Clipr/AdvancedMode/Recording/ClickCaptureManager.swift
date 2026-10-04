@@ -301,7 +301,6 @@ final class ClickCaptureManager {
         }
         do {
             try SessionManifestStore.save(snapshot, in: folder)
-            SessionFolder.restrict(folder.appendingPathComponent(SessionManifestStore.fileName))
         } catch {
             // The step's PNG is on disk and in the in-memory manifest, which the next step's save
             // (or Review, which lists the folder) picks up — but it isn't reported as captured.

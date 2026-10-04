@@ -12,7 +12,11 @@ enum SessionManifestStore {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(manifest).write(to: folder.appendingPathComponent(fileName), options: .atomic)
+        let url = folder.appendingPathComponent(fileName)
+        try encoder.encode(manifest).write(to: url, options: .atomic)
+        // Captions can hold what the user typed: owner-only, like every other session file. An
+        // atomic write replaces the file, so this is needed on every save, Review's included.
+        SessionFolder.restrict(url)
     }
 
     /// Review saves after every edit. If the folder can't be listed (permissions changed, an

@@ -34,6 +34,13 @@ final class SessionManifestTests: XCTestCase {
 
     // L7: two records sharing an id (a hand-edited or sync-merged session.json) must not crash
     // Review; the later one gets a fresh id and keeps everything else.
+    func testSavesAreOwnerOnly() throws {
+        touch("Step_01.png")
+        try SessionManifestStore.saveSafely(SessionManifest(createdAt: Date(), steps: [record("Step_01.png")]), in: folder)
+        let url = folder.appendingPathComponent(SessionManifestStore.fileName)
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int, 0o600)
+    }
+
     func testDuplicateIDsAreMadeUnique() throws {
         touch("Step_01.png"); touch("Step_02.png")
         let first = record("Step_01.png", caption: "A")

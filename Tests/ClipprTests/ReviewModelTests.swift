@@ -535,6 +535,8 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertNil(fileData("Step_02_zoom.png"))
         XCTAssertNil(fileData("Step_02_annotations.json"))
         XCTAssertEqual(model.undoManager.undoActionName, "Replace Image")
+        let permissions = try FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent("Step_02.png").path)[.posixPermissions] as? Int
+        XCTAssertEqual(permissions, 0o600, "a replaced image is owner-only like a recorded one")
     }
 
     func testUndoRedoReplaceImage() throws {
