@@ -85,21 +85,14 @@ enum GuideImages {
     /// Decodes straight to the target size so a huge capture is never held at full resolution.
     /// ImageIO bounds the *long* side, so the cap is converted from a width to that.
     private static func thumbnail(_ source: CGImageSource, maxPixelWidth: Int) -> CGImage? {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0
-        else { return nil }
+        guard let size = ImageDecoder.pixelSize(of: source), size.width > 0, size.height > 0 else { return nil }
+        let (width, height) = size
         guard maxPixelWidth > 0, width > maxPixelWidth else {
             return CGImageSourceCreateImageAtIndex(source, 0, nil)
         }
         // Rounded up so the width is never short of the cap; `downsampled` trims any excess pixel.
         let longSide = Int((Double(max(width, height)) * Double(maxPixelWidth) / Double(width)).rounded(.up))
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: longSide,
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        guard let image = ImageDecoder.thumbnail(source, maxPixelSize: longSide) else { return nil }
         return downsampled(image, maxPixelWidth: maxPixelWidth)
     }
 

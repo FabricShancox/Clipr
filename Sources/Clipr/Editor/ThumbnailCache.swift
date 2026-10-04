@@ -52,19 +52,11 @@ final class ThumbnailCache {
 
     /// Decodes `url` downsampled, without ever materialising the full-size image.
     ///
-    /// `CGImageSourceCreateThumbnailAtIndex` does the subsampling during decode, so a 24-megapixel
-    /// capture never costs 96MB just to produce a tile. Deliberately not `@MainActor` — callers
-    /// run it off the main thread, since the previous full decode happened on it.
+    /// `ImageDecoder` subsamples during decode, so a 24-megapixel capture never costs 96MB just
+    /// to produce a tile. Deliberately not `@MainActor` — callers run it off the main thread,
+    /// since the previous full decode happened on it.
     static func decodeThumbnail(at url: URL, maxPixelSize: Int = ThumbnailCache.maxPixelSize) -> NSImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return nil
-        }
+        guard let cgImage = ImageDecoder.thumbnail(at: url, maxPixelSize: maxPixelSize) else { return nil }
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }

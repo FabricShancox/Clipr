@@ -23,11 +23,8 @@ enum DecodeLimits {
 
     /// The pixel size an image file declares, read from its header without decoding it.
     static func declaredPixelSize(of url: URL) -> (width: Int, height: Int)? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
-        return (width, height)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return ImageDecoder.pixelSize(of: source)
     }
 
     static func isAcceptableImageSize(width: Int, height: Int) -> Bool {

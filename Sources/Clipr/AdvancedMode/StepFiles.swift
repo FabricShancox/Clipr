@@ -131,16 +131,11 @@ struct StepFiles {
     /// thread, since a large photo takes a noticeable time to decode and encode.
     static func replacementPNG(from url: URL) -> Data? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let properties = ImageDecoder.properties(of: source),
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              UntrustedImageLimits.allows(width: width, height: height) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: max(width, height),
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+              UntrustedImageLimits.allows(width: width, height: height),
+              let cgImage = ImageDecoder.thumbnail(source, maxPixelSize: max(width, height)) else { return nil }
         // A 144 dpi PNG is a Retina screenshot: keep it at its on-screen point size.
         let dpi = (properties[kCGImagePropertyDPIWidth] as? Double) ?? 72
         return ImageEncoding.png(NSImage(bitmap: cgImage, scale: dpi / 72))
