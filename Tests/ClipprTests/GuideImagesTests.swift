@@ -18,7 +18,7 @@ final class GuideImagesTests: XCTestCase {
     /// Writes `image` as a step PNG the way capture does, returning its URL.
     private func writeStep(_ image: NSImage, name: String = "Step_01.png") throws -> URL {
         let url = folder.appendingPathComponent(name)
-        try XCTUnwrap(StepFiles.pngData(image)).write(to: url)
+        try XCTUnwrap(ImageEncoding.png(image)).write(to: url)
         return url
     }
 

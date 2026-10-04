@@ -438,7 +438,7 @@ final class ClickCaptureManager {
     /// image won't encode.
     static func prepare(_ frame: CapturedFrame, kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint],
                         caption: String?, settings: AdvancedModeSettings, capturedAt: Date = Date()) -> PreparedStep? {
-        guard let png = StepFiles.pngData(frame.image) else {
+        guard let png = ImageEncoding.png(frame.image) else {
             NSLog("Clipr: advanced mode step encode failed")
             return nil
         }
@@ -457,7 +457,7 @@ final class ClickCaptureManager {
         }
         var zoomPNG: Data?
         if settings.zoomOnClick, let imagePoint, let zoom = StepZoom.image(from: frame.image, centeredOn: imagePoint) {
-            zoomPNG = StepFiles.pngData(zoom)
+            zoomPNG = ImageEncoding.png(zoom)
         }
         return PreparedStep(png: png, annotations: annotations, zoomPNG: zoomPNG, kind: kind, caption: caption,
                             clickPoint: imagePoint, appName: frame.appName, capturedAt: capturedAt)

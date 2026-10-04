@@ -327,7 +327,7 @@ final class StorageManager {
         // JPEG can't carry alpha: a capture whose canvas was resized outward has transparent
         // regions that would encode as black, so flatten onto white first.
         let source = format.needsOpaqueBackground ? Self.onWhite(image) : image
-        guard let data = Self.bitmapRep(of: source)?.representation(using: format.bitmapType, properties: format.properties) else {
+        guard let data = ImageEncoding.data(source, as: format) else {
             throw StorageError.pngEncodingFailed
         }
         try data.write(to: url, options: .atomic)
@@ -346,18 +346,8 @@ final class StorageManager {
         return NSImage(cgImage: result, size: size)
     }
 
-    /// The full-resolution bitmap, tagged with the image's point size so the file records its
-    /// pixel density (144 dpi for a Retina capture). That's what makes it reopen — here, in
-    /// Preview, or pasted into a document — at the size it appeared on screen.
-    private static func bitmapRep(of image: NSImage) -> NSBitmapImageRep? {
-        guard let bitmap = image.bitmap else { return nil }
-        let rep = NSBitmapImageRep(cgImage: bitmap)
-        rep.size = image.size
-        return rep
-    }
-
     private func write(_ image: NSImage, to url: URL, overwrite: Bool = false) throws -> URL {
-        guard let pngData = Self.bitmapRep(of: image)?.representation(using: .png, properties: [:]) else {
+        guard let pngData = ImageEncoding.png(image) else {
             throw StorageError.pngEncodingFailed
         }
         try Self.createPrivateFolder(url.deletingLastPathComponent())

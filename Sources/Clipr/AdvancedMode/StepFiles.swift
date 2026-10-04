@@ -124,16 +124,6 @@ struct StepFiles {
         }
     }
 
-    /// A replacement step image as PNG data at its own point size, so Retina images keep every
-    /// pixel (the same convention as capture: see `NSImage+PixelScale.swift`). Nil if it can't be
-    /// encoded.
-    static func pngData(_ image: NSImage) -> Data? {
-        guard let bitmap = image.bitmap else { return nil }
-        let rep = NSBitmapImageRep(cgImage: bitmap)
-        rep.size = image.size
-        return rep.representation(using: .png, properties: [:])
-    }
-
     /// A chosen file decoded upright and re-encoded as a step PNG, or nil if it won't decode.
     /// Decoding through ImageIO with the transform applied turns a photo stored sideways with an
     /// EXIF orientation the right way up; the thumbnail call at the image's own longest edge is
@@ -153,6 +143,6 @@ struct StepFiles {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         // A 144 dpi PNG is a Retina screenshot: keep it at its on-screen point size.
         let dpi = (properties[kCGImagePropertyDPIWidth] as? Double) ?? 72
-        return pngData(NSImage(bitmap: cgImage, scale: dpi / 72))
+        return ImageEncoding.png(NSImage(bitmap: cgImage, scale: dpi / 72))
     }
 }

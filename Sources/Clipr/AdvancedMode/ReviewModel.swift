@@ -320,7 +320,7 @@ final class ReviewModel: ObservableObject {
     func replaceImage(for id: UUID, with image: NSImage) {
         guard !isReadOnly else { return }
         guard let step = manifest.steps.first(where: { $0.id == id }) else { banner = Self.stepRemovedBanner; return }
-        guard let data = StepFiles.pngData(image) else {
+        guard let data = ImageEncoding.png(image) else {
             banner = "Couldn't replace the image for \(step.file)"
             return
         }

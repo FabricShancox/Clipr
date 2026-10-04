@@ -799,7 +799,7 @@ final class ReviewModelTests: XCTestCase {
         let model = makeModel()
         let id = model.manifest.steps[1].id
         model.delete(ids: [id])
-        let png = try XCTUnwrap(StepFiles.pngData(newImage()))
+        let png = try XCTUnwrap(ImageEncoding.png(newImage()))
         model.replaceImage(for: id, withPNG: png)
         XCTAssertEqual(model.banner, "Couldn't replace the image — that step was removed")
         XCTAssertEqual(model.undoManager.undoActionName, "Delete Steps")
@@ -808,7 +808,7 @@ final class ReviewModelTests: XCTestCase {
     func testReplaceWithPNGDataWritesItAsIs() throws {
         let id = try setClickData(step: 1)
         let model = makeModel()
-        let png = try XCTUnwrap(StepFiles.pngData(newImage()))
+        let png = try XCTUnwrap(ImageEncoding.png(newImage()))
         model.replaceImage(for: id, withPNG: png)
         XCTAssertEqual(fileData("Step_02.png"), png)
     }

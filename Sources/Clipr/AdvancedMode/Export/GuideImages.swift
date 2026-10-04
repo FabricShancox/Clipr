@@ -120,20 +120,13 @@ enum GuideImages {
 
     /// PNG, or JPEG when the PNG would be larger than `jpegThreshold` bytes.
     static func encode(_ image: CGImage, jpegThreshold: Int = GuideImages.jpegThreshold) -> GuideImage? {
-        guard let png = encoded(image, as: .png, properties: [:]) else { return nil }
+        guard let png = ImageEncoding.data(image, type: .png) else { return nil }
         let pngImage = GuideImage(data: png, pixelWidth: image.width, pixelHeight: image.height, kind: .png)
         guard png.count > jpegThreshold else { return pngImage }
         guard let opaque = onWhite(image),
-              let jpeg = encoded(opaque, as: .jpeg, properties: [kCGImageDestinationLossyCompressionQuality: jpegQuality])
+              let jpeg = ImageEncoding.data(opaque, type: .jpeg, properties: [kCGImageDestinationLossyCompressionQuality: jpegQuality])
         else { return pngImage }
         return GuideImage(data: jpeg, pixelWidth: image.width, pixelHeight: image.height, kind: .jpeg)
-    }
-
-    private static func encoded(_ image: CGImage, as type: UTType, properties: [CFString: Any]) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
-        return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 
     /// JPEG has no alpha: transparent areas (a canvas the editor enlarged) would turn black.
