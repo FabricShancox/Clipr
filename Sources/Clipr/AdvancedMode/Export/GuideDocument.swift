@@ -144,11 +144,7 @@ struct GuideDocument: Equatable {
 
     /// Always English day-month-year, matching the rest of Clipr's English-only copy.
     static func dateText(_ date: Date, timeZone: TimeZone = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "d MMM yyyy"
-        return formatter.string(from: date)
+        DateFormats.string(date, pattern: "d MMM yyyy", timeZone: timeZone)
     }
 
     private static func nonBlank(_ text: String?) -> String? {

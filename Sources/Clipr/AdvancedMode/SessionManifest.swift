@@ -161,8 +161,7 @@ enum SessionManifestStore {
     static func rawStepFiles(in folder: URL) -> [String] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         return names
-            .filter { $0.hasPrefix("Step_") && $0.lowercased().hasSuffix(".png")
-                && !$0.hasSuffix("_edited.png") && !$0.hasSuffix("_zoom.png") }
+            .filter(FilenameGenerator.isRawStepName)
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 

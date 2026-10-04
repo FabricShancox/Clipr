@@ -6,9 +6,7 @@ struct FilenameGenerator {
     }
 
     static func editedName(fromRaw rawFilename: String) -> String {
-        guard rawFilename.hasSuffix(".png") else { return rawFilename + "_edited" }
-        let base = String(rawFilename.dropLast(4))
-        return "\(base)_edited.png"
+        companion(of: rawFilename, pngSuffix: "_edited.png", otherwise: "_edited")
     }
 
     /// Sidecar JSON filename storing a raw capture's live, editable `[AnnotationObject]` — see
@@ -16,9 +14,7 @@ struct FilenameGenerator {
     /// only a flattened preview/export) so reopening a previously-edited capture from Recents
     /// restores the actual annotation objects, not just a static image.
     static func annotationsName(fromRaw rawFilename: String) -> String {
-        guard rawFilename.hasSuffix(".png") else { return rawFilename + "_annotations.json" }
-        let base = String(rawFilename.dropLast(4))
-        return "\(base)_annotations.json"
+        companion(of: rawFilename, pngSuffix: "_annotations.json", otherwise: "_annotations.json")
     }
 
     /// Cleans a user-typed capture name into something safe to write to disk, or `nil` if nothing
@@ -56,16 +52,24 @@ struct FilenameGenerator {
 
     /// The close-up crop saved next to a step when "Zoom on click" is on.
     static func zoomName(fromStep stepFilename: String) -> String {
-        guard stepFilename.hasSuffix(".png") else { return stepFilename + "_zoom.png" }
-        return "\(stepFilename.dropLast(4))_zoom.png"
+        companion(of: stepFilename, pngSuffix: "_zoom.png", otherwise: "_zoom.png")
+    }
+
+    /// A raw step image in a session folder ("Step_03.png"), as opposed to the `_edited.png`
+    /// preview and `_zoom.png` close-up written next to it.
+    static func isRawStepName(_ name: String) -> Bool {
+        name.hasPrefix("Step_") && name.lowercased().hasSuffix(".png")
+            && !name.hasSuffix("_edited.png") && !name.hasSuffix("_zoom.png")
+    }
+
+    /// A file named off `filename`: its `.png` replaced by `pngSuffix`, or `otherwise` appended
+    /// when it isn't a PNG.
+    private static func companion(of filename: String, pngSuffix: String, otherwise: String) -> String {
+        guard filename.hasSuffix(".png") else { return filename + otherwise }
+        return filename.dropLast(4) + pngSuffix
     }
 
     private static func timestamp(date: Date, timeZone: TimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HHmmss"
-        formatter.timeZone = timeZone
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        return formatter.string(from: date)
+        DateFormats.string(date, pattern: "yyyy-MM-dd_HHmmss", timeZone: timeZone, gregorian: true)
     }
 }
