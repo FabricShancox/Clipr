@@ -18,6 +18,29 @@ final class StorageManager {
         self.baseFolder = baseFolder
     }
 
+    /// Captures can hold anything that was on screen, and session captions can hold typed text,
+    /// so what Clipr writes into its own folders is readable by the owner only. Under `~/Pictures`
+    /// that changes nothing (the home folder is already private), but a save folder in
+    /// `/Users/Shared`, on an external disk or in a synced folder otherwise left every screenshot
+    /// readable by other accounts. Save As… exports keep the default permissions — handing a copy
+    /// to someone is their point.
+    static let privateFilePermissions = 0o600
+    static let privateFolderPermissions = 0o700
+
+    /// Creates `folder` (and any missing parents) owner-only. An existing folder is left as is.
+    static func createPrivateFolder(_ folder: URL) throws {
+        try FileManager.default.createDirectory(
+            at: folder, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: privateFolderPermissions]
+        )
+    }
+
+    /// Makes a file Clipr just wrote owner-only. Best effort: a volume without POSIX permissions
+    /// (FAT, some network shares) can't do it, and that mustn't fail the save.
+    static func restrictToOwner(_ url: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: privateFilePermissions], ofItemAtPath: url.path)
+    }
+
     func saveRawCapture(_ image: NSImage, date: Date) throws -> URL {
         let name = FilenameGenerator.rawScreenshotName(date: date)
         return try write(image, to: baseFolder.appendingPathComponent(name))
@@ -74,9 +97,10 @@ final class StorageManager {
             // Byte-for-byte, so the copy keeps the original's metadata and colour profile. Written as
             // data rather than copied, so extended attributes (com.apple.quarantine, Finder tags,
             // where-from URLs) don't come along.
-            try FileManager.default.createDirectory(at: baseFolder, withIntermediateDirectories: true)
+            try Self.createPrivateFolder(baseFolder)
             let destination = uniqueURL(for: target)
             try Data(contentsOf: url).write(to: destination, options: .atomic)
+            Self.restrictToOwner(destination)
             return destination
         }
         return try write(image, to: target)
@@ -108,8 +132,9 @@ final class StorageManager {
             return
         }
         let data = try JSONEncoder().encode(annotations)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.createPrivateFolder(url.deletingLastPathComponent())
         try data.write(to: url, options: .atomic)
+        Self.restrictToOwner(url)
     }
 
     /// Outcome of reading a capture's annotation sidecar. `missing` and `corrupt` are deliberately
@@ -267,7 +292,7 @@ final class StorageManager {
     func createSessionFolder(date: Date) throws -> URL {
         let folder = baseFolder.appendingPathComponent(FilenameGenerator.sessionFolderName(date: date))
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Self.createPrivateFolder(folder)
         } catch {
             throw StorageError.folderCreationFailed(folder)
         }
@@ -330,7 +355,7 @@ final class StorageManager {
         guard let pngData = Self.bitmapRep(of: image)?.representation(using: .png, properties: [:]) else {
             throw StorageError.pngEncodingFailed
         }
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.createPrivateFolder(url.deletingLastPathComponent())
 
         // `overwrite` writes to `url` exactly as given (replacing whatever's already there);
         // otherwise resolve a collision by appending a numeric suffix, for callers where a
@@ -341,6 +366,7 @@ final class StorageManager {
         // replaces atomically, so on failure the previous file is still there, untouched.
         let finalURL = overwrite ? url : uniqueURL(for: url)
         try writeData(pngData, finalURL)
+        Self.restrictToOwner(finalURL)
         return finalURL
     }
 

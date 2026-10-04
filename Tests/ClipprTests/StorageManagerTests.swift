@@ -174,6 +174,35 @@ final class StorageManagerTests: XCTestCase {
 
     /// A save-folder change in Preferences re-points the existing (long-lived) StorageManager rather
     /// than rebuilding it, so writes must follow the new folder immediately.
+    // MARK: - Permissions
+
+    private func permissions(_ url: URL) throws -> Int {
+        try XCTUnwrap(FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int)
+    }
+
+    func testCapturesAndSidecarsAreOwnerOnly() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let editedURL = try manager.saveEditedCapture(makeTestImage(), rawURL: rawURL)
+        let annotation = AnnotationObject(
+            id: UUID(), kind: .rectangle, frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+            color: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1), strokeWidth: 1
+        )
+        try manager.saveAnnotations([annotation], rawURL: rawURL)
+        XCTAssertEqual(try permissions(rawURL), 0o600)
+        XCTAssertEqual(try permissions(editedURL), 0o600)
+        XCTAssertEqual(try permissions(sidecarURL(for: rawURL)), 0o600)
+    }
+
+    func testFoldersClipCreatesAreOwnerOnly() throws {
+        manager.baseFolder = tempDir.appendingPathComponent("New/Captures")
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        XCTAssertEqual(try permissions(rawURL.deletingLastPathComponent()), 0o700)
+        let session = try manager.createSessionFolder(date: Date())
+        XCTAssertEqual(try permissions(session), 0o700)
+        let step = try manager.saveStep(makeTestImage(), index: 1, in: session)
+        XCTAssertEqual(try permissions(step), 0o600)
+    }
+
     // MARK: - Empty sidecars
 
     private func sidecarURL(for rawURL: URL) -> URL {
