@@ -14,6 +14,9 @@ final class SettingsStore {
         static let copyBorder = "copyBorder"
         static let copyShadow = "copyShadow"
         static let advancedMode = "advancedMode"
+        static let exportFormat = "exportFormat"
+        static let exportIncludeZoom = "exportIncludeZoom"
+        static let exportGIFFrameSeconds = "exportGIFFrameSeconds"
     }
 
     /// Shared with `ReviewView`'s `@AppStorage`, which reads and writes the same key directly.
@@ -86,6 +89,22 @@ final class SettingsStore {
     var reviewLayout: ReviewLayout {
         get { defaults.string(forKey: Self.reviewLayoutKey).flatMap(ReviewLayout.init(rawValue:)) ?? .list }
         set { defaults.set(newValue.rawValue, forKey: Self.reviewLayoutKey) }
+    }
+
+    /// The export sheet's starting options: the last format, close-up choice and GIF frame time,
+    /// with `title` (per session, so never remembered). An unknown format (a newer build's) reads
+    /// as PDF; a frame time outside 1–5 s is clamped.
+    func exportOptions(title: String) -> ExportOptions {
+        let format = defaults.string(forKey: Key.exportFormat).flatMap(GuideFormat.init(rawValue:)) ?? .pdf
+        let seconds = defaults.object(forKey: Key.exportGIFFrameSeconds) as? Double ?? 2
+        return ExportOptions(format: format, title: title, includeZoom: defaults.bool(forKey: Key.exportIncludeZoom),
+                             gifFrameSeconds: GIFGuideExporter.clampedFrameSeconds(seconds))
+    }
+
+    func rememberExportOptions(_ options: ExportOptions) {
+        defaults.set(options.format.rawValue, forKey: Key.exportFormat)
+        defaults.set(options.includeZoom, forKey: Key.exportIncludeZoom)
+        defaults.set(options.gifFrameSeconds, forKey: Key.exportGIFFrameSeconds)
     }
 
     private func decoded<T: Decodable>(_ key: String) -> T? {

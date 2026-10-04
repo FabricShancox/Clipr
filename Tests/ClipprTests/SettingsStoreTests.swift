@@ -50,6 +50,21 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.reviewLayout, .list)
     }
 
+    func testExportOptionsDefaultAndPersist() {
+        XCTAssertEqual(store.exportOptions(title: "T"), ExportOptions(format: .pdf, title: "T", includeZoom: false, gifFrameSeconds: 2))
+        store.rememberExportOptions(ExportOptions(format: .markdown, title: "Ignored", includeZoom: true, gifFrameSeconds: 4))
+        XCTAssertEqual(SettingsStore(defaults: defaults).exportOptions(title: "New"),
+                       ExportOptions(format: .markdown, title: "New", includeZoom: true, gifFrameSeconds: 4))
+    }
+
+    func testExportOptionsToleratesUnknownFormatAndOutOfRangeFrameTime() {
+        defaults.set("pptx", forKey: "exportFormat")
+        defaults.set(12.0, forKey: "exportGIFFrameSeconds")
+        let options = store.exportOptions(title: "T")
+        XCTAssertEqual(options.format, .pdf)
+        XCTAssertEqual(options.gifFrameSeconds, 5)
+    }
+
     func testThumbnailCacheKeepsSizesApartAndRemovesAll() {
         let url = URL(fileURLWithPath: "/tmp/\(UUID().uuidString).png")
         let small = NSImage(size: CGSize(width: 1, height: 1)), big = NSImage(size: CGSize(width: 2, height: 2))
