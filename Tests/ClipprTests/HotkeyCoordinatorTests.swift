@@ -73,4 +73,30 @@ final class HotkeyCoordinatorTests: XCTestCase {
         coordinator.setRecording(false, recorder: "a")
         XCTAssertEqual(ids, [1, 2], "an ended session's step hotkey doesn't come back")
     }
+
+    func testAcceptingARefusedBindingAlertsOnce() {
+        let refused = HotkeyBinding(keyCode: 7, modifiers: HotkeyBinding.Modifier.command.rawValue)
+        registry.refused = [refused]
+        coordinator.setRecording(true, recorder: "a")
+        settings.captureHotkey = refused
+        coordinator.reregisterAppHotkeys()
+        coordinator.setRecording(false, recorder: "a")
+        XCTAssertEqual(alerts.count, 1)
+        coordinator.setRecording(true, recorder: "a")
+        coordinator.setRecording(false, recorder: "a")
+        XCTAssertEqual(alerts.count, 1, "the same refusal isn't reported again")
+    }
+
+    func testANewRefusalAfterASuccessIsReported() {
+        let refused = HotkeyBinding(keyCode: 7, modifiers: HotkeyBinding.Modifier.command.rawValue)
+        registry.refused = [refused]
+        settings.captureHotkey = refused
+        coordinator.reregisterAppHotkeys()
+        XCTAssertEqual(alerts.count, 1)
+        settings.captureHotkey = .defaultCapture
+        coordinator.reregisterAppHotkeys()
+        settings.captureHotkey = refused
+        coordinator.reregisterAppHotkeys()
+        XCTAssertEqual(alerts.count, 2)
+    }
 }

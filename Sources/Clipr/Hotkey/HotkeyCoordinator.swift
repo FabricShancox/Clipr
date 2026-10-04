@@ -36,6 +36,9 @@ final class HotkeyCoordinator {
     private var activeRecorders: Set<AnyHashable> = []
     /// The step hotkey the running session asked for, kept so it can come back after recording.
     private var stepRegistration: (binding: HotkeyBinding, handler: () -> Void)?
+    /// The refusals the user was last told about; the same refusal isn't reported twice in a row
+    /// (accepting a refused binding and then ending the recording both re-register).
+    private var reportedRejections: [String] = []
 
     var isPausedForRecording: Bool { !activeRecorders.isEmpty }
 
@@ -61,7 +64,8 @@ final class HotkeyCoordinator {
         }) {
             rejected.append("\(settings.advancedModeHotkey.displayString) (Advanced Mode)")
         }
-        guard !rejected.isEmpty else { return }
+        defer { reportedRejections = rejected }
+        guard !rejected.isEmpty, rejected != reportedRejections else { return }
 
         // The registration that failed has already dropped whatever was bound before, so staying
         // quiet would leave the user with a hotkey that simply stopped working and no clue why.
