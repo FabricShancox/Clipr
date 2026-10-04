@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/GIFGuideExporter.swift
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers

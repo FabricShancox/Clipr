@@ -1,4 +1,3 @@
-// Sources/Clipr/UI/Panels.swift
 import Cocoa
 import UniformTypeIdentifiers
 

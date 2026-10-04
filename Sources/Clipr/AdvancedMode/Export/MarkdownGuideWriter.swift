@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/MarkdownGuideWriter.swift
 import Foundation
 
 /// A Markdown guide for GitHub, MkDocs, wikis and Notion import: `guide.md` plus an `images/`

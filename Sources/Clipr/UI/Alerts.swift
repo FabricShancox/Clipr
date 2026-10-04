@@ -1,4 +1,3 @@
-// Sources/Clipr/UI/Alerts.swift
 import Cocoa
 
 /// Every `NSAlert` Clipr shows, built the same way: a title, optional detail, a style (NSAlert's

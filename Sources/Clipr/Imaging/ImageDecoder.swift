@@ -1,4 +1,3 @@
-// Sources/Clipr/Imaging/ImageDecoder.swift
 import Foundation
 import CoreGraphics
 import ImageIO

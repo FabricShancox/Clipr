@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/ExportFlowController.swift
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers

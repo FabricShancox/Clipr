@@ -1,4 +1,3 @@
-// Sources/Clipr/Common/DateFormats.swift
 import Foundation
 
 /// Fixed-pattern date strings (file names, guide dates) from cached `DateFormatter`s, which are

@@ -1,4 +1,3 @@
-// Sources/Clipr/UI/WindowPresenter.swift
 import Cocoa
 
 /// Clipr is a menu-bar (accessory) app, so a window shown with a plain `showWindow` can open

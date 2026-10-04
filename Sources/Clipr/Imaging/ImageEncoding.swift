@@ -1,4 +1,3 @@
-// Sources/Clipr/Imaging/ImageEncoding.swift
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers

@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/ExportSheetModel.swift
 import Foundation
 
 /// The export sheet's state, seeded from the Review session and the last export's choices.

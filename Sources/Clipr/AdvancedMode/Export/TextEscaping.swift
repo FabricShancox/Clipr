@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/TextEscaping.swift
 import Foundation
 
 /// Shared mechanics for Markdown escaping. Which characters need escaping differs by context (an

@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/ExportSheet.swift
 import SwiftUI
 
 /// Format, title, which steps, and the format's own options. Export hands over to the save panel;

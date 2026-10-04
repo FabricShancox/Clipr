@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/CaptionMarkup.swift
 import Foundation
 
 /// Step captions are inline Markdown partly built from other apps' Accessibility labels, so they

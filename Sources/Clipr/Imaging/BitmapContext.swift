@@ -1,4 +1,3 @@
-// Sources/Clipr/Imaging/BitmapContext.swift
 import CoreGraphics
 
 /// The 8-bit device-RGB bitmap contexts every off-screen render in Clipr draws into.

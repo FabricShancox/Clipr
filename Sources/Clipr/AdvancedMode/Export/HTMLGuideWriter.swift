@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/HTMLGuideWriter.swift
 import Foundation
 
 /// The one guide template behind HTML, PDF and the clipboard. Light theme and the system font

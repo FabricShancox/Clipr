@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/Export/GuideClipboard.swift
 import AppKit
 
 /// Puts the guide on the pasteboard as HTML (what web docs tools read), RTF and RTFD (what Pages,
