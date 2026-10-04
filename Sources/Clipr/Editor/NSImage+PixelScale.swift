@@ -29,14 +29,9 @@ extension NSImage {
     /// A blank RGBA context for drawing an image `size` points big at `scale` pixels per point,
     /// already scaled so drawing into it is done in points. Starts fully transparent.
     static func pixelContext(size: CGSize, scale: CGFloat) -> CGContext? {
-        guard let context = CGContext(
-            data: nil,
+        guard let context = BitmapContext.rgb(
             width: max(Int((size.width * scale).rounded()), 1),
-            height: max(Int((size.height * scale).rounded()), 1),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            height: max(Int((size.height * scale).rounded()), 1)
         ) else { return nil }
         context.scaleBy(x: scale, y: scale)
         return context

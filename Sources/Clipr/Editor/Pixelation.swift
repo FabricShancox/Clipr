@@ -36,19 +36,12 @@ enum Pixelation {
         let smallWidth = max(1, Int((region.width / block).rounded(.down)))
         let smallHeight = max(1, Int((region.height / block).rounded(.down)))
 
-        guard let small = CGContext(
-            data: nil, width: smallWidth, height: smallHeight, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        guard let small = BitmapContext.rgb(width: smallWidth, height: smallHeight) else { return nil }
         small.interpolationQuality = .medium // averages the block being collapsed
         small.draw(cropped, in: CGRect(x: 0, y: 0, width: smallWidth, height: smallHeight))
         guard let averaged = small.makeImage() else { return nil }
 
-        guard let full = CGContext(
-            data: nil, width: Int(region.width), height: Int(region.height), bitsPerComponent: 8,
-            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        guard let full = BitmapContext.rgb(width: Int(region.width), height: Int(region.height)) else { return nil }
         // Off, so each averaged pixel becomes a hard square instead of being smoothed back into
         // something with recoverable detail.
         full.interpolationQuality = .none

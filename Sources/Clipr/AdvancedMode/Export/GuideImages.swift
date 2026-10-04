@@ -109,10 +109,7 @@ enum GuideImages {
         guard maxPixelWidth > 0, image.width > maxPixelWidth else { return image }
         let width = maxPixelWidth
         let height = max(1, Int((CGFloat(image.height) * CGFloat(width) / CGFloat(image.width)).rounded()))
-        guard let context = CGContext(
-            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        guard let context = BitmapContext.rgb(width: width, height: height) else { return nil }
         context.interpolationQuality = .high
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()
@@ -131,10 +128,7 @@ enum GuideImages {
 
     /// JPEG has no alpha: transparent areas (a canvas the editor enlarged) would turn black.
     private static func onWhite(_ image: CGImage) -> CGImage? {
-        guard let context = CGContext(
-            data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-        ) else { return nil }
+        guard let context = BitmapContext.rgb(width: image.width, height: image.height, opaque: true) else { return nil }
         let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         context.setFillColor(CGColor(gray: 1, alpha: 1))
         context.fill(rect)

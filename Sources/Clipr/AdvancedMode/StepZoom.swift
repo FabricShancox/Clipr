@@ -43,10 +43,8 @@ enum StepZoom {
     private static func rgba(_ image: CGImage) -> [UInt8]? {
         var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
         let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
-                bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            guard let context = BitmapContext.rgb(
+                width: image.width, height: image.height, data: buffer.baseAddress, bytesPerRow: image.width * 4
             ) else { return false }
             context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
             return true

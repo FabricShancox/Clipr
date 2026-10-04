@@ -67,10 +67,7 @@ enum GIFGuideExporter {
 
     static func renderFrame(_ image: GuideImage?, caption: String, canvas: CGSize) -> CGImage? {
         let width = Int(canvas.width)
-        guard let context = CGContext(
-            data: nil, width: width, height: Int(canvas.height), bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-        ) else { return nil }
+        guard let context = BitmapContext.rgb(width: width, height: Int(canvas.height), opaque: true) else { return nil }
         let band = CGFloat(captionBandHeight)
         context.setFillColor(CGColor(gray: 1, alpha: 1))
         context.fill(CGRect(origin: .zero, size: canvas))
