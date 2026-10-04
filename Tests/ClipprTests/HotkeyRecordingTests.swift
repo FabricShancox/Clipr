@@ -34,9 +34,26 @@ final class HotkeyRecordingTests: XCTestCase {
     }
 
     func testEachOfCommandControlOptionIsEnough() {
-        for modifiers in [cmd, ctrl, opt, cmd | shift, ctrl | opt | shift] {
+        for modifiers in [cmd, ctrl, cmd | shift, ctrl | opt | shift, cmd | opt] {
             XCTAssertEqual(outcome(1, modifiers), .accepted(HotkeyBinding(keyCode: 1, modifiers: modifiers)))
         }
+    }
+
+    func testOptionAloneIsRejected() {
+        for modifiers in [opt, opt | shift] {
+            guard case .rejected = outcome(1, modifiers) else { return XCTFail("⌥-only accepted: \(modifiers)") }
+        }
+        XCTAssertEqual(outcome(122, opt), .accepted(HotkeyBinding(keyCode: 122, modifiers: opt)), "F-keys stay free")
+    }
+
+    func testStandardShortcutsAreAcceptedWithANotice() {
+        for key: UInt32 in [12, 13, 4, 46, 48, 49, 43, 8, 9, 7, 6, 0] {
+            XCTAssertEqual(outcome(key, cmd), .accepted(HotkeyBinding(keyCode: key, modifiers: cmd)), "key \(key)")
+            XCTAssertNotNil(HotkeyBinding.conflictNotice(keyCode: key, modifiers: cmd), "key \(key)")
+        }
+        XCTAssertEqual(HotkeyBinding.conflictNotice(keyCode: 12, modifiers: cmd), "⌘Q will take a screenshot instead of quitting apps")
+        XCTAssertNil(HotkeyBinding.conflictNotice(keyCode: 12, modifiers: cmd | shift))
+        XCTAssertNil(HotkeyBinding.conflictNotice(keyCode: 1, modifiers: cmd))
     }
 
     func testBareFunctionKeysF1ThroughF20AreAllowed() {

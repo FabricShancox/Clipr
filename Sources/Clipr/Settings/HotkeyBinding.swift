@@ -81,10 +81,30 @@ struct HotkeyBinding: Codable, Equatable {
         let required = Modifier.command.rawValue | Modifier.control.rawValue | Modifier.option.rawValue
         let hasRequired = modifiers & required != 0
         if keyCode == escapeKeyCode, !hasRequired { return .cancelled }
+        // ⌥ alone (even with ⇧) types a character on most layouts, so it must pair with ⌘ or ⌃.
+        let hasCommandOrControl = modifiers & (Modifier.command.rawValue | Modifier.control.rawValue) != 0
+        if modifiers & Modifier.option.rawValue != 0, !hasCommandOrControl, !functionKeyCodes.contains(keyCode) {
+            return .rejected("⌥ needs ⌘ or ⌃ as well (or use F1–F20)")
+        }
         if hasRequired || functionKeyCodes.contains(keyCode) {
             return .accepted(HotkeyBinding(keyCode: keyCode, modifiers: modifiers))
         }
         return .rejected("Include ⌘, ⌃ or ⌥ (or use F1–F20)")
+    }
+
+    /// Plain ⌘ + key combinations other apps and macOS already use. They are accepted (the user's
+    /// choice, and existing bindings keep working) but the recorder warns what they will shadow.
+    private static let standardShortcutNames: [UInt32: String] = [
+        12: "quitting apps", 13: "closing windows", 4: "hiding apps", 46: "minimizing windows",
+        48: "switching apps", 49: "Spotlight", 43: "opening Settings", 8: "Copy", 9: "Paste",
+        7: "Cut", 6: "Undo", 0: "Select All",
+    ]
+
+    /// A non-blocking notice for a binding that shadows a standard ⌘ shortcut; nil otherwise.
+    static func conflictNotice(keyCode: UInt32, modifiers: UInt32) -> String? {
+        guard modifiers == Modifier.command.rawValue, let what = standardShortcutNames[keyCode] else { return nil }
+        let name = HotkeyBinding(keyCode: keyCode, modifiers: modifiers).displayString
+        return "\(name) will take a screenshot instead of \(what)"
     }
 
     static let defaultCapture = HotkeyBinding(keyCode: 19, modifiers: Modifier.command.rawValue | Modifier.shift.rawValue) // ⌘⇧2

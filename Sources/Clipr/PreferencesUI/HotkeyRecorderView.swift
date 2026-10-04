@@ -34,7 +34,7 @@ private struct KeyCatcherView: NSViewRepresentable {
         view.onKeyDown = { keyCode, modifiers in
             switch HotkeyBinding.recordingOutcome(keyCode: keyCode, modifiers: modifiers) {
             case .accepted(let newBinding):
-                hint = nil
+                hint = HotkeyBinding.conflictNotice(keyCode: newBinding.keyCode, modifiers: newBinding.modifiers)
                 binding = newBinding
                 isRecording = false
                 return true
