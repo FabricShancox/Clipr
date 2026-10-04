@@ -353,12 +353,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Cleared on close so the next Preferences request builds a fresh window rather than
         // trying to reuse a closed one.
         if let window = controller.window {
-            var token: NSObjectProtocol?
-            token = NotificationCenter.default.addObserver(
+            let box = ObserverTokenBox()
+            box.token = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification, object: window, queue: .main
             ) { [weak self] _ in
                 self?.preferencesWindowController = nil
-                if let token { NotificationCenter.default.removeObserver(token) }
+                if let token = box.token { NotificationCenter.default.removeObserver(token) }
             }
         }
         bringToFront(controller)
@@ -381,4 +381,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureManager.captureCursor = settings.captureCursor
         advancedMode.captureCursor = settings.captureCursor
     }
+}
+
+/// Holds a notification observer's token so the observer's own closure can remove it.
+private final class ObserverTokenBox: @unchecked Sendable {
+    var token: NSObjectProtocol?
 }
