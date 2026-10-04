@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/CaptionText.swift
 import Foundation
 
 /// Renders a caption's inline markdown (bold, italics) for display.

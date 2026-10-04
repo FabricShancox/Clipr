@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/AreaPicker.swift
 import Cocoa
 
 /// The one-time area selection for Fixed area scope, reusing the normal capture overlay.

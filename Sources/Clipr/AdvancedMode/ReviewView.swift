@@ -1,4 +1,3 @@
-// Sources/Clipr/AdvancedMode/ReviewView.swift
 import SwiftUI
 
 struct ReviewView: View {

@@ -1,19 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// One item of a Review row menu, described as data so the menus can be tested and shown as a
-/// native `NSMenu` popped up from a SwiftUI-drawn button.
-///
-/// Why not SwiftUI's `Menu`: on macOS it's an `NSPopUpButton`, and a native control inside a List
-/// row sets accessibility attributes while SwiftUI updates the row — re-entering that update and
-/// leaving SwiftUI in an attribute cycle it never exits (see the segmented-picker freeze). A menu
-/// popped up on demand puts no native control in the row at all.
-indirect enum RowMenuEntry {
-    case action(String, enabled: Bool = true, checked: Bool = false, perform: () -> Void)
-    case submenu(String, enabled: Bool, [RowMenuEntry])
-    case separator
-}
-
 @MainActor
 enum RowMenu {
     /// Edit first; Retake and Replace not while read-only, nor while an image editor is open on
@@ -71,25 +58,6 @@ enum RowMenu {
             }
         }
     }
-}
-
-/// Remembers the AppKit view behind a button's background so a menu can be anchored to it.
-@MainActor
-final class RowMenuAnchor {
-    weak var view: NSView?
-}
-
-/// A plain, non-control view placed in a button's `.background`; it only records itself.
-struct RowMenuAnchorView: NSViewRepresentable {
-    let anchor: RowMenuAnchor
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        anchor.view = view
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) { anchor.view = view }
 }
 
 /// A menu item that runs a closure. It is its own target; the menu keeps it alive.

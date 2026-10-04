@@ -1,11 +1,5 @@
 import Foundation
 
-/// A step taken out of a manifest, with where it was, so undo can put it back in place.
-struct RemovedStep: Equatable {
-    let record: StepRecord
-    let index: Int
-}
-
 /// Edits to a session's step list as pure value transforms. Keeping file access out of here is
 /// what lets Review's undo be "swap the old manifest back" and keeps every rule unit-testable.
 enum ManifestEditor {

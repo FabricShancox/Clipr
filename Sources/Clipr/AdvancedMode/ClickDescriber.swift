@@ -1,32 +1,5 @@
-// Sources/Clipr/AdvancedMode/ClickDescriber.swift
 import AppKit
 @preconcurrency import ApplicationServices
-
-protocol ClickDescribing: AnyObject {
-    /// What's under `point` (Quartz global). `nil` if Accessibility can't say.
-    func describe(at point: CGPoint) async -> ClickTarget?
-    /// The focused element's label (for "Type … in **Name**"), whether it's a password field,
-    /// and the element itself so a burst can be checked to start and end in the same field.
-    func focusedField() async -> FocusedField
-}
-
-/// Whether the focused element is a password field. `unknown` whenever Accessibility couldn't
-/// say for sure (no focused element, timeout, any other read error, or anything
-/// `TypingInputPolicy` doesn't trust) — typing steps treat it like `secure`, so a failed read can
-/// never let a password through.
-enum FieldSecurity: Equatable {
-    case secure, notSecure, unknown
-}
-
-struct FocusedField {
-    var label: String?
-    var security: FieldSecurity
-    /// `nil` when there's no focused element (security is then `unknown`), and in test fakes.
-    var element: AXUIElement?
-    /// Where the element is on screen (Quartz global, top-left origin), so a typing step can
-    /// capture the display the typing happened on. `nil` when Accessibility can't say.
-    var frame: CGRect? = nil
-}
 
 /// Reads the UI under a click through Accessibility. Runs on its own serial queue with a short
 /// messaging timeout: a hung target app would otherwise block for AX's default ~6 s, and this

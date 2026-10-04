@@ -1,15 +1,6 @@
 import Cocoa
 import SwiftUI
 
-/// Observable state the floating control panel renders — owned by `AdvancedModeControlPanel` and
-/// updated by `AdvancedModeController` as steps land and the session pauses/resumes.
-final class AdvancedModeControlState: ObservableObject {
-    @Published var stepCount = 0
-    @Published var isPaused = false
-    /// One-line notice under the controls, e.g. typing is off because Input Monitoring is denied.
-    @Published var warning: String?
-}
-
 /// The small floating Pause/Stop bar shown while Advanced Mode runs. It never appears in a
 /// step: Window scope captures only the clicked window (`desktopIndependentWindow`), Screen and
 /// Fixed-area scopes leave every Clipr window but the menu-bar icon out of the capture

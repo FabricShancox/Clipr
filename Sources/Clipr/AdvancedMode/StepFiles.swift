@@ -1,19 +1,5 @@
 import AppKit
 
-enum StepFilesError: Error, Equatable {
-    case trashedFileMissing(String)
-}
-
-/// Where a step's files went when it was deleted, so undo can move them back.
-struct TrashedStep: Equatable {
-    struct Move: Equatable {
-        let original: URL
-        let trashed: URL
-    }
-    let file: String
-    let moves: [Move]
-}
-
 /// Every file that belongs to one step, and moving them to and from the Trash together. The file
 /// operations are injected so tests never touch the user's real Trash.
 struct StepFiles {

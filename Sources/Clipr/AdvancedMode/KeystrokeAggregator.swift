@@ -1,30 +1,5 @@
 import Foundation
 
-struct KeyModifiers: OptionSet, Equatable {
-    let rawValue: Int
-    static let control = KeyModifiers(rawValue: 1 << 0)
-    static let option = KeyModifiers(rawValue: 1 << 1)
-    static let shift = KeyModifiers(rawValue: 1 << 2)
-    static let command = KeyModifiers(rawValue: 1 << 3)
-}
-
-/// One key press, already decoded off the event tap so this file stays free of CGEvent.
-struct KeyInput: Equatable {
-    /// As typed (with Shift/Option applied).
-    var characters: String
-    /// `charactersIgnoringModifiers`, used to name shortcuts.
-    var baseCharacters: String
-    var keyCode: UInt16
-    var modifiers: KeyModifiers
-    /// macOS secure input was on, or the focused element is a password field.
-    var isSecure: Bool
-}
-
-enum TypingEvent: Equatable {
-    case text(String)
-    case shortcut(String)
-}
-
 /// Groups key presses into "typed X" bursts and "pressed ⌘S" shortcuts for typing steps.
 /// Time is passed in rather than read, so the idle rule is testable.
 struct KeystrokeAggregator {
