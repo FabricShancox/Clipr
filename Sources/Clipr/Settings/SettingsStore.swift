@@ -11,7 +11,6 @@ final class SettingsStore {
         static let captureHotkey = "captureHotkey"
         static let advancedModeHotkey = "advancedModeHotkey"
         static let saveFolder = "saveFolder"
-        static let launchAtLogin = "launchAtLogin"
         static let captureCursor = "captureCursor"
         static let advancedMode = "advancedMode"
         static let exportFormat = "exportFormat"
@@ -36,8 +35,11 @@ final class SettingsStore {
     /// Shared with `ReviewView`'s `@AppStorage`, which reads and writes the same key directly.
     static let reviewLayoutKey = "reviewLayout"
 
-    init(defaults: UserDefaults = .standard) {
+    private let loginItem: LoginItem
+
+    init(defaults: UserDefaults = .standard, loginItem: LoginItem = MainAppLoginItem()) {
         self.defaults = defaults
+        self.loginItem = loginItem
         migrateAdvancedModeHotkey()
     }
 
@@ -72,20 +74,15 @@ final class SettingsStore {
         set { defaults.set(newValue.path, forKey: Key.saveFolder) }
     }
 
-    var launchAtLogin: Bool {
-        get { defaults.bool(forKey: Key.launchAtLogin) }
-        set {
-            defaults.set(newValue, forKey: Key.launchAtLogin)
-            do {
-                if newValue {
-                    try SMAppService.mainApp.register()
-                } else {
-                    try SMAppService.mainApp.unregister()
-                }
-            } catch {
-                NSLog("Clipr: failed to update login item registration: \(error)")
-            }
-        }
+    /// Read from the system, not from a stored preference: registration can fail (an unsigned or
+    /// moved app) or be switched off in System Settings, and a stored flag then showed On for a
+    /// login item that didn't exist.
+    var launchAtLogin: Bool { loginItem.isEnabled }
+
+    /// Registers or unregisters the login item. Throws when the system refuses, so the caller can
+    /// say so; `launchAtLogin` always reports what actually took effect.
+    func setLaunchAtLogin(_ enabled: Bool) throws {
+        if enabled { try loginItem.register() } else { try loginItem.unregister() }
     }
 
     /// Whether Clipr asks GitHub for a newer release at launch (at most once a day). On by default.
@@ -155,4 +152,17 @@ final class SettingsStore {
         guard let data = try? JSONEncoder().encode(value) else { return }
         defaults.set(data, forKey: key)
     }
+}
+
+/// The app's login item — a seam so tests never register the test runner to open at login.
+protocol LoginItem {
+    var isEnabled: Bool { get }
+    func register() throws
+    func unregister() throws
+}
+
+struct MainAppLoginItem: LoginItem {
+    var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    func register() throws { try SMAppService.mainApp.register() }
+    func unregister() throws { try SMAppService.mainApp.unregister() }
 }

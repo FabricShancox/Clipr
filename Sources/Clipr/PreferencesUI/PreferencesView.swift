@@ -130,7 +130,7 @@ struct PreferencesView: View {
             Section {
                 Toggle("Open Clipr at login", isOn: Binding(
                     get: { launchAtLogin },
-                    set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
+                    set: { setLaunchAtLogin($0) }
                 ))
                 Toggle(isOn: $checkForUpdates) {
                     Text("Check for updates automatically")
@@ -271,6 +271,22 @@ struct PreferencesView: View {
 
     private static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+
+    /// A refused registration is reported and the toggle reverts to what the system actually has,
+    /// rather than showing On for a login item that doesn't exist.
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try settings.setLaunchAtLogin(enabled)
+        } catch {
+            NSLog("Clipr: failed to update login item registration: \(error)")
+            let alert = NSAlert()
+            alert.messageText = enabled ? "Couldn't add Clipr to your login items" : "Couldn't remove Clipr from your login items"
+            alert.informativeText = "\(error.localizedDescription)\n\nYou can change this in System Settings › General › Login Items."
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+        launchAtLogin = settings.launchAtLogin
     }
 
     private func chooseFolder() {
