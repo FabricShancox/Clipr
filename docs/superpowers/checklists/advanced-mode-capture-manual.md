@@ -91,3 +91,22 @@ Script: copy it from Task 1 Step 1 of `docs/superpowers/plans/2026-10-04-advance
 Decision: `GuideClipboard.imagesMayBeDropped` is `false` only if every web target's Image cell is `Kept`; otherwise `true` and the export sheet shows the Copy note.
 
 Outcome: pending — until the spike is run, assume `imagesMayBeDropped = true` (the safe default: the Copy note is shown).
+
+## Export
+- [ ] Review's header shows **Export…**; ⇧⌘E opens the same sheet. Both are disabled when the session has no steps; ⇧⌘E does nothing while a caption is being edited.
+- [ ] The sheet lists PDF, HTML, Markdown, GIF, Copy as Rich Text; Title defaults to the session folder name. Clearing the Title and exporting uses the folder name as the heading.
+- [ ] With two steps selected the sheet offers "Selected steps (2)" (chosen) and "All steps (N)"; exporting gives just those two, numbered 1 and 2, in Review order.
+- [ ] PDF: the save panel suggests "<title>.pdf"; after export Finder reveals the file. In Preview: title, grey "date · N steps" line, numbered steps with bold kept, app name in small grey text, images with their annotations (markers, trail, editor drawings), sized steps narrower, no step split across pages. Paper is A4 (Letter when the Mac's region is US).
+- [ ] HTML: opens in Safari looking like the PDF; move the file to another folder and reopen → images still show (embedded).
+- [ ] Markdown: choose a folder → it contains `guide.md` and `images/step-01.png`…; the guide renders on GitHub with images, Small/Medium/Large steps narrower than Full ones.
+- [ ] Markdown again into the same folder (or into a folder that has only an `images` folder) → "This folder already has guide.md or an images folder." with Replace / Cancel → Cancel leaves the folder untouched; Replace overwrites guide.md and the whole images/ folder.
+- [ ] GIF: one frame per step, same size throughout, caption band underneath ("Step N" when no caption), loops forever; the Frame time slider (1–5 s) changes the pace; posted in Slack it animates.
+- [ ] Include close-ups on (session recorded with Zoom on click): the close-up sits beside the image in HTML/PDF and follows the image line in Markdown; off → no close-ups. The toggle is hidden for GIF.
+- [ ] Copy as Rich Text: the action button reads "Copy"; the web-app note ("Images may not paste into some web apps — use PDF or Markdown") shows while the clipboard spike is pending or recorded dropped images. Paste into TextEdit, Google Docs, Notion and Confluence and compare with the spike table above.
+- [ ] Progress sheet: the bar fills while step images render, then turns into an indeterminate bar with "Finishing…" (PDF printing, writing files, clipboard conversion); Cancel stays available throughout.
+- [ ] Reopen the sheet → last format, close-ups choice and frame time are remembered; Title is the folder name again.
+- [ ] With Review open, move one step's PNG out of the session folder in Finder, then export HTML → that step shows "Image unavailable" and an alert lists the step.
+- [ ] Replace a step's `_annotations.json` contents with `x`, export → the step's image appears without annotations and an alert says its annotations couldn't be read.
+- [ ] Start a PDF export of a long session and press Cancel in the progress sheet → no file at the chosen location.
+- [ ] Export into a folder you can't write to (e.g. `chmod 555` a test folder) → "Export Failed" alert explaining the location couldn't be written; nothing appears there.
+- [ ] Hand-edit `session.json` "version" to 2 (read-only session) → Export still works.

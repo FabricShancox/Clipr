@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 
 final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     private let storage: StorageManager
+    private let settings: SettingsStore
+    /// Set once the window exists; owns the export sheets and the running export.
+    private var exportFlow: ExportFlowController?
     private let model: ReviewModel
     private let captureReplacement: (@escaping (NSImage?) -> Void) -> Void
     let sessionFolder: URL
@@ -16,8 +19,10 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
     @MainActor
-    init(sessionFolder: URL, storage: StorageManager, captureReplacement: @escaping (@escaping (NSImage?) -> Void) -> Void) {
+    init(sessionFolder: URL, storage: StorageManager, settings: SettingsStore = SettingsStore(),
+         captureReplacement: @escaping (@escaping (NSImage?) -> Void) -> Void) {
         self.storage = storage
+        self.settings = settings
         self.captureReplacement = captureReplacement
         self.sessionFolder = sessionFolder
         model = ReviewModel(folder: sessionFolder)
@@ -36,8 +41,10 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
             onOpenEditor: { [weak self] step in self?.openEditor(for: step) },
             onRetake: { [weak self] step in self?.retake(step) },
             onReplaceWithFile: { [weak self] step in self?.replaceWithFile(step) },
-            onShowInFinder: { NSWorkspace.shared.activateFileViewerSelecting([sessionFolder]) }
+            onShowInFinder: { NSWorkspace.shared.activateFileViewerSelecting([sessionFolder]) },
+            onExport: { [weak self] in self?.showExport() }
         ))
+        exportFlow = ExportFlowController(window: window, settings: settings)
         window.center()
     }
 
@@ -75,6 +82,15 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// A caption typed in the last half-second must still be saved.
     func windowWillClose(_ notification: Notification) {
         MainActor.assumeIsolated { model.flush() }
+    }
+
+    /// Exports what Review shows now: a caption typed in the last half-second is saved first, so
+    /// the guide has it. Read-only sessions export too — exporting never writes to the session.
+    private func showExport() {
+        MainActor.assumeIsolated {
+            model.flush()
+            exportFlow?.begin(manifest: model.manifest, folder: model.folder, selection: model.selection)
+        }
     }
 
     /// The capture overlay hides Clipr's windows (this one included) while it's up and restores

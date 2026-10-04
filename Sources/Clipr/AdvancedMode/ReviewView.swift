@@ -7,6 +7,7 @@ struct ReviewView: View {
     let onRetake: (StepRecord) -> Void
     let onReplaceWithFile: (StepRecord) -> Void
     let onShowInFinder: () -> Void
+    let onExport: () -> Void
 
     @State private var editingID: UUID?
     /// Same key as `SettingsStore.reviewLayout`, so every Review window opens in the last choice.
@@ -67,6 +68,9 @@ struct ReviewView: View {
             Button("Delete Selected", role: .destructive) { model.deleteSelection() }
                 .disabled(model.selection.isEmpty || model.isReadOnly)
             Button("Show in Finder", action: onShowInFinder)
+            Button("Export…", action: onExport)
+                .disabled(model.manifest.steps.isEmpty)
+                .help("Export the guide (⇧⌘E)")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -118,6 +122,9 @@ struct ReviewView: View {
             Button("") { model.stepImageSize(by: -1) }
                 .keyboardShortcut("-", modifiers: .command)
                 .disabled(editingID != nil || model.isReadOnly || model.selection.isEmpty)
+            Button("") { onExport() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(editingID != nil || model.manifest.steps.isEmpty)
             // ⌘1 / ⌘2 / ⌘3, as Finder does for its views.
             ForEach(Array(ReviewLayout.allCases.enumerated()), id: \.element) { index, option in
                 Button("") { layout = option }
