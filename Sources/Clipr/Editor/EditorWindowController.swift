@@ -6,6 +6,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private var rawURL: URL
     private let storage: StorageManager
     private let settings: SettingsStore
+    private let allowsRename: Bool
     /// Shared by every content view this window shows; each one re-registers on appear.
     private let commands = EditorCommands()
     private var keyMonitor: Any?
@@ -36,11 +37,12 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// every settled edit made the editor hitch continuously on large captures.
     private static let flattenedWriteInterval: TimeInterval = 3
 
-    init(image: NSImage, rawURL: URL, storage: StorageManager, settings: SettingsStore = SettingsStore()) {
+    init(image: NSImage, rawURL: URL, storage: StorageManager, settings: SettingsStore = SettingsStore(), allowsRename: Bool = true) {
         self.image = image
         self.rawURL = rawURL
         self.storage = storage
         self.settings = settings
+        self.allowsRename = allowsRename
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
@@ -159,7 +161,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
             onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) },
-            onRename: { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) },
+            onRename: allowsRename ? { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) } : nil,
             commands: commands
         ))
     }

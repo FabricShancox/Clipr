@@ -90,14 +90,15 @@ extension EditorView {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .contentShape(Rectangle())
-                .onTapGesture { beginRename() }
-                .help("Click to rename this capture")
+                .onTapGesture { if onRename != nil { beginRename() } }
+                .help(onRename != nil ? "Click to rename this capture" : "")
         }
     }
 
     /// Seeds the field with the name minus its extension — the extension is managed for the user
     /// (and re-applied on save), so putting it in the field only invites it being typed away.
     func beginRename() {
+        guard onRename != nil else { return }
         draftName = currentURL.deletingPathExtension().lastPathComponent
         isRenaming = true
         renameFieldFocused = true
@@ -107,6 +108,6 @@ extension EditorView {
         isRenaming = false
         let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != currentURL.deletingPathExtension().lastPathComponent else { return }
-        onRename(currentURL, trimmed, annotations)
+        onRename?(currentURL, trimmed, annotations)
     }
 }

@@ -109,7 +109,9 @@ struct EditorView: View {
     /// Rename requested from the header: the capture being renamed, the new base name (no
     /// extension, unsanitised as typed), and the current annotations so the controller can flush
     /// them against the OLD name before any file moves — same reasoning as `onOpenCapture`.
-    let onRename: (URL, String, [AnnotationObject]) -> Void
+    /// `nil` when renaming isn't allowed — Review opens steps whose filenames `session.json`
+    /// refers to, so renaming one there would orphan its caption.
+    let onRename: ((URL, String, [AnnotationObject]) -> Void)?
     /// ⌘C/⌘X/⌘V/⌘A, forwarded by the window controller — see `EditorCommands`.
     let commands: EditorCommands
 
