@@ -104,14 +104,10 @@ enum CaptionMarkup {
     /// `*` is included alongside the spec's list: captions carry literal asterisks (CaptionFormatter
     /// escapes them in UI labels) that would otherwise turn into emphasis.
     static func escapeMarkdown(_ text: String) -> String {
-        let special: Set<Character> = ["\\", "`", "*", "_", "[", "]", "<", ">", "~", "&", "#"]
-        var out = ""
-        for character in stripBidi(text) {
-            if special.contains(character) { out.append("\\") }
-            out.append(character)
-        }
-        return out
+        TextEscaping.backslashed(stripBidi(text), headingSpecial)
     }
+
+    private static let headingSpecial: Set<Character> = ["\\", "`", "*", "_", "[", "]", "<", ">", "~", "&", "#"]
 
     /// A code span whose fence is longer than any run of backticks inside it, so the code can't
     /// close its own span.

@@ -57,12 +57,6 @@ enum CaptionFormatter {
     private static let markdownPunctuation: Set<Character> = ["\\", "`", "*", "_", "[", "]", "<", ">", "&", "~", "!", "\""]
 
     static func escapeMarkdown(_ text: String) -> String {
-        var escaped = ""
-        escaped.reserveCapacity(text.count)
-        for character in text {
-            if markdownPunctuation.contains(character) { escaped.append("\\") }
-            escaped.append(character)
-        }
-        return escaped
+        TextEscaping.backslashed(text, markdownPunctuation)
     }
 }
