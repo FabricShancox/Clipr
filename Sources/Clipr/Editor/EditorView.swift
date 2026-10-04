@@ -127,7 +127,11 @@ struct EditorView: View {
     /// rename field. Every bare-key shortcut (the 1-0 tool keys, Delete, ⌘Z) must be disabled
     /// while this holds, or it fires instead of reaching the field: Backspace would delete the
     /// selected annotation rather than a character, and a digit would switch tools mid-word.
-    var isTextEntryActive: Bool { editingTextID != nil || isRenaming }
+    ///
+    /// The stamp popover counts too: its "Next" number field takes digits, Delete and Return, and
+    /// the editor's bare-key shortcuts (Return = copy and close) could otherwise still fire through
+    /// key-equivalent dispatch while it's being typed in.
+    var isTextEntryActive: Bool { editingTextID != nil || isRenaming || showingStampAlternatives }
 
     var numberTool: AnnotationTool { .stamp(stampKind(for: nextStampNumber)) }
     var visibleRecents: [URL] { recentCaptures.filter { !deletedRecentURLs.contains($0) } }
