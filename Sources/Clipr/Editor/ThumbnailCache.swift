@@ -33,6 +33,12 @@ final class ThumbnailCache {
         cache.setObject(image, forKey: url as NSURL, cost: cost)
     }
 
+    /// Review drops a step's entry after the image editor closes, so the edited image is decoded
+    /// again instead of the stale one being shown.
+    func remove(_ url: URL) {
+        cache.removeObject(forKey: url as NSURL)
+    }
+
     /// Decodes `url` downsampled, without ever materialising the full-size image.
     ///
     /// `CGImageSourceCreateThumbnailAtIndex` does the subsampling during decode, so a 24-megapixel
