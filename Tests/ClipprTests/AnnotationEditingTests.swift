@@ -101,4 +101,16 @@ final class AnnotationEditingTests: XCTestCase {
     func testBackwardOnTheBottomMostIsClampedNotNegative() {
         XCTAssertEqual(max(0 - 1, 0), 0)
     }
+
+    // MARK: - Text style target
+
+    func testStyleControlsTargetTheBoxBeingTypedIntoEvenWhenNotSelected() {
+        let typing = annotation(CGRect(x: 0, y: 0, width: 100, height: 20), kind: .text("", .default))
+        let other = annotation(CGRect(x: 0, y: 50, width: 100, height: 20), kind: .text("x", .default))
+        let target = EditorView.textStyleTarget(editingTextID: typing.id, selectedIDs: [other.id], annotations: [typing, other])
+        XCTAssertEqual(target?.id, typing.id)
+        XCTAssertEqual(EditorView.textStyleTarget(editingTextID: nil, selectedIDs: [other.id], annotations: [typing, other])?.id, other.id)
+        XCTAssertNil(EditorView.textStyleTarget(editingTextID: nil, selectedIDs: [typing.id, other.id], annotations: [typing, other]))
+        XCTAssertNil(EditorView.textStyleTarget(editingTextID: nil, selectedIDs: [], annotations: [typing, other]))
+    }
 }

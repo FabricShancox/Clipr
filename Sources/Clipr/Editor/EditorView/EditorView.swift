@@ -146,7 +146,22 @@ struct EditorView: View {
     /// annotation — used to decide whether the toolbar's text-style controls should edit
     /// "the next new text" (`currentTextStyle`) or the already-placed one that's selected.
     var selectedTextAnnotation: (id: UUID, style: TextStyle)? {
-        guard selectedIDs.count == 1, let id = selectedIDs.first, let annotation = annotations.first(where: { $0.id == id }),
+        Self.textStyleTarget(editingTextID: editingTextID, selectedIDs: selectedIDs, annotations: annotations)
+    }
+
+    /// The text annotation the text-style controls edit: the box being typed into — a brand-new
+    /// one included, whatever the selection says — otherwise the one selected text annotation.
+    static func textStyleTarget(editingTextID: UUID?, selectedIDs: Set<UUID>,
+                                annotations: [AnnotationObject]) -> (id: UUID, style: TextStyle)? {
+        let id: UUID
+        if let editingTextID {
+            id = editingTextID
+        } else if selectedIDs.count == 1, let selected = selectedIDs.first {
+            id = selected
+        } else {
+            return nil
+        }
+        guard let annotation = annotations.first(where: { $0.id == id }),
               case .text(_, let style) = annotation.kind else { return nil }
         return (id, style)
     }

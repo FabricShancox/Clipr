@@ -3,8 +3,8 @@ import SwiftUI
 /// Font/alignment controls for text annotations. See `EditorView.swift`'s header for how this
 /// file relates to the rest of the type.
 extension EditorView {
-    /// The binding the text-style controls actually edit: the selected text annotation's own
-    /// style when one is selected, otherwise `currentTextStyle` (the default applied to the
+    /// The binding the text-style controls actually edit: the style of the text box being typed
+    /// into or else the selected text annotation (see `textStyleTarget`), otherwise `currentTextStyle` (the default applied to the
     /// next text annotation placed). Looks the selected annotation up by id inside the
     /// closures (rather than capturing an index) so it stays correct even if `annotations`
     /// is mutated elsewhere between a get and a set.
@@ -17,6 +17,9 @@ extension EditorView {
                 return style
             },
             set: { newStyle in
+                // Styling the box being typed carries on to the next new one, as picking a colour
+                // does — the same as if the style had been chosen before placing it.
+                if selected.id == editingTextID { currentTextStyle = newStyle }
                 mutateAnnotations { list in
                     guard let index = list.firstIndex(where: { $0.id == selected.id }),
                           case .text(let string, _) = list[index].kind else { return }
