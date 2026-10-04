@@ -46,6 +46,12 @@ extension EditorView {
             .keyboardShortcut(.escape, modifiers: [])
             .disabled(editing)
             Button("") {
+                // With one text annotation selected, Return goes back into it to edit — the
+                // keyboard counterpart of double-clicking it.
+                if let text = selectedTextAnnotation {
+                    editingTextID = text.id
+                    return
+                }
                 onCopy(annotations)
                 onClose()
             }

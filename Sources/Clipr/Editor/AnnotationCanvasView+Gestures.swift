@@ -94,6 +94,13 @@ extension AnnotationCanvasView {
             if moveOffset != .zero {
                 let delta = rendererDelta(of: moveOffset)
                 annotations = annotations.map { movingIDs.contains($0.id) ? $0.translated(by: delta) : $0 }
+            } else if (NSApp.currentEvent?.clickCount ?? 1) >= 2, movingIDs.count == 1,
+                      let id = movingIDs.first,
+                      let hit = annotations.first(where: { $0.id == id }), case .text = hit.kind {
+                // Double-clicking placed text opens it for editing again, so a typo can be fixed
+                // without deleting and retyping it.
+                selectedIDs = [id]
+                editingTextID = id
             }
             movingIDs = []
             moveOffset = .zero
