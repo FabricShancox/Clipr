@@ -34,6 +34,8 @@ final class ClickCaptureManager {
     /// capture finishes after a fast one. `stop` awaits this to know everything is on disk.
     private var lastWrite: Task<Void, Never>?
     private var isStopping = false
+    /// Where the user last clicked: the best guess at the display a shortcut was pressed on.
+    private var lastClickPoint: CGPoint?
 
     private static let stopFlushTimeout: TimeInterval = 10
 
@@ -114,6 +116,7 @@ final class ClickCaptureManager {
         typingUnavailable = settings.typingSteps && !inputMonitoringGranted()
         manifest = SessionManifest(createdAt: now)
         nextStepIndex = 1
+        lastClickPoint = nil
         trail = CursorTrailRecorder()
         keystrokes = KeystrokeAggregator()
         burstStartField = nil
@@ -186,6 +189,7 @@ final class ClickCaptureManager {
             endTypingBurst()
         case .click(let p, let clickCount, let window):
             endTypingBurst()
+            lastClickPoint = p
             var points = trail.drain()
             if let previous = pending {
                 previous.work.cancel()
@@ -286,7 +290,8 @@ final class ClickCaptureManager {
     private func emit(_ typed: TypingEvent) {
         switch typed {
         case .shortcut(let keys):
-            enqueue(kind: .typing, target: scopeTarget(for: nil), click: nil, trail: [], caption: { _ in CaptionFormatter.shortcut(keys) })
+            enqueue(kind: .typing, target: typingTarget(near: lastClickPoint), click: nil, trail: [],
+                    caption: { _ in CaptionFormatter.shortcut(keys) })
         case .text(let text):
             let start = burstStartField, last = burstLastField
             burstStartField = nil
@@ -300,7 +305,12 @@ final class ClickCaptureManager {
             // secure both times, or the step is dropped before anything is captured. Focus can
             // move mid-burst without a click or Tab, so one read could vouch for one field while
             // the text went into a password field.
-            enqueue(kind: .typing, target: scopeTarget(for: nil), click: nil, trail: [], skipIf: {
+            // Screen scope: the display the field is on, read with the burst's first key.
+            let fallback = typingTarget(near: lastClickPoint)
+            enqueue(kind: .typing, target: fallback, resolveTarget: {
+                guard case .screenContaining = fallback, let frame = await start?.value.frame else { return fallback }
+                return .screenContaining(CGPoint(x: frame.midX, y: frame.midY))
+            }, click: nil, trail: [], skipIf: {
                 guard let start, let last else { return true }
                 return !Self.isSameNonSecureField(await start.value, await last.value)
             }, caption: { _ in
@@ -318,6 +328,12 @@ final class ClickCaptureManager {
         case let (x?, y?): return CFEqual(x, y)
         default: return false
         }
+    }
+
+    /// Typing has no click point. In Screen scope the display where the user last clicked is a
+    /// better guess than wherever the pointer has drifted to since.
+    private func typingTarget(near point: CGPoint?) -> CaptureTarget {
+        scopeTarget(for: settings.scope == .screen ? point : nil)
     }
 
     /// Window scope captures the window that was clicked, when it's an app window; a click on the
@@ -349,7 +365,8 @@ final class ClickCaptureManager {
 
     /// `slot` is the click's reserved place in the chain; every other step joins at the end now.
     private func enqueue(
-        kind: StepRecord.Kind, target: CaptureTarget, click: CGPoint?, appName: String? = nil, trail: [CGPoint],
+        kind: StepRecord.Kind, target: CaptureTarget, resolveTarget: (() async -> CaptureTarget)? = nil,
+        click: CGPoint?, appName: String? = nil, trail: [CGPoint],
         slot: WriteSlot? = nil,
         skipIf: @escaping () async -> Bool = { false }, caption: @escaping (_ appName: String?) async -> String?
     ) {
@@ -371,7 +388,7 @@ final class ClickCaptureManager {
             // Encoded before waiting for the steps ahead, so a queue of fast clicks holds PNG
             // bytes rather than full-resolution bitmaps.
             let prepared = await Self.captureAndPrepare(
-                target: target, imageSource: imageSource, showsCursor: showsCursor, skipIf: skipIf,
+                target: target, resolveTarget: resolveTarget, imageSource: imageSource, showsCursor: showsCursor, skipIf: skipIf,
                 kind: kind, click: click, appName: appName, trail: trail, settings: settings, caption: caption
             )
             await predecessor?.value
@@ -395,11 +412,13 @@ final class ClickCaptureManager {
 
     /// Captures, captions and encodes a step. The captured bitmap lives only inside this call.
     private static func captureAndPrepare(
-        target: CaptureTarget, imageSource: StepImageSource, showsCursor: Bool, skipIf: () async -> Bool,
+        target: CaptureTarget, resolveTarget: (() async -> CaptureTarget)?, imageSource: StepImageSource,
+        showsCursor: Bool, skipIf: () async -> Bool,
         kind: StepRecord.Kind, click: CGPoint?, appName: String?, trail: [CGPoint], settings: AdvancedModeSettings,
         caption: (_ appName: String?) async -> String?
     ) async -> PreparedStep? {
         guard await !skipIf() else { return nil }
+        let target = await resolveTarget?() ?? target
         let frame: CapturedFrame?
         do {
             frame = try await imageSource.capture(target, showsCursor: showsCursor)

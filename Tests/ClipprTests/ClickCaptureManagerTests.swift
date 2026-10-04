@@ -524,6 +524,27 @@ final class ClickCaptureManagerTests: XCTestCase {
         XCTAssertTrue(StorageManager(baseFolder: folder).loadAnnotations(rawURL: sessionFolder.appendingPathComponent(manifest.steps[0].file)).isEmpty)
     }
 
+    // M8: a typing step in Screen scope captures the display the field is on, not the pointer's.
+    func testScreenScopeTypingCapturesTheFieldsDisplay() throws {
+        describer.field = FocusedField(label: "Name", security: .notSecure, element: nil,
+                                       frame: CGRect(x: 2000, y: 400, width: 200, height: 20))
+        _ = try manager.start(settings: settings { $0.scope = .screen; $0.typingSteps = true }, area: nil)
+        typeAndReturn("John")
+        waitForSteps(1)
+        _ = stop()
+        XCTAssertEqual(images.targets, [.screenContaining(CGPoint(x: 2100, y: 410))])
+    }
+
+    func testScreenScopeShortcutCapturesTheDisplayOfTheLastClick() throws {
+        _ = try manager.start(settings: settings { $0.scope = .screen; $0.typingSteps = true; $0.captureDelay = 0 }, area: nil)
+        manager.handle(.click(CGPoint(x: 2100, y: 410)))
+        waitForSteps(1)
+        manager.handle(.key(KeyInput(characters: "s", baseCharacters: "s", keyCode: 1, modifiers: [.command], isSecure: false)))
+        waitForSteps(2)
+        _ = stop()
+        XCTAssertEqual(images.targets, [.screenContaining(CGPoint(x: 2100, y: 410)), .screenContaining(CGPoint(x: 2100, y: 410))])
+    }
+
     func testFixedAreaTargetsArea() throws {
         let area = CGRect(x: 100, y: 100, width: 400, height: 300)
         _ = try manager.start(settings: settings { $0.scope = .fixedArea }, area: area)

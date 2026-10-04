@@ -23,6 +23,9 @@ struct FocusedField {
     var security: FieldSecurity
     /// `nil` when there's no focused element (security is then `unknown`), and in test fakes.
     var element: AXUIElement?
+    /// Where the element is on screen (Quartz global, top-left origin), so a typing step can
+    /// capture the display the typing happened on. `nil` when Accessibility can't say.
+    var frame: CGRect? = nil
 }
 
 /// Reads the UI under a click through Accessibility. Runs on its own serial queue with a short
@@ -65,14 +68,16 @@ final class ClickDescriber: ClickDescribing {
                 if case .value(let r) = role { roleString = r }
                 if case .value(let r) = subrole { subroleString = r }
                 let label = Self.label(of: focused, role: roleString, allowValue: false)
+                let size = Self.size(of: focused)
                 let facts = FocusedElementFacts(
-                    bundleID: bundleID, role: roleString, subrole: subroleString, size: Self.size(of: focused),
+                    bundleID: bundleID, role: roleString, subrole: subroleString, size: size,
                     domClassList: Self.strings(focused, "AXDOMClassList"), label: label,
                     readFailed: role == .failed || subrole == .failed
                 )
                 let security = TypingInputPolicy.security(of: facts)
                 continuation.resume(returning: FocusedField(
-                    label: security == .notSecure ? label : nil, security: security, element: focused
+                    label: security == .notSecure ? label : nil, security: security, element: focused,
+                    frame: Self.position(of: focused).flatMap { origin in size.map { CGRect(origin: origin, size: $0) } }
                 ))
             }
         }
@@ -158,6 +163,14 @@ final class ClickDescriber: ClickDescribing {
               CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         var size = CGSize.zero
         return AXValueGetValue(value as! AXValue, .cgSize, &size) ? size : nil
+    }
+
+    private static func position(of el: AXUIElement) -> CGPoint? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &value) == .success, let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        return AXValueGetValue(value as! AXValue, .cgPoint, &point) ? point : nil
     }
 
     private static func strings(_ el: AXUIElement, _ attribute: String) -> [String] {
