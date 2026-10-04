@@ -14,7 +14,8 @@ final class ReviewModel: ObservableObject {
     @Published private(set) var refreshToken = 0
 
     let folder: URL
-    let isReadOnly: Bool
+    let readOnlyReason: SessionManifestStore.ReadOnlyReason?
+    var isReadOnly: Bool { readOnlyReason != nil }
     let undoManager = UndoManager()
 
     private let files: StepFiles
@@ -31,7 +32,17 @@ final class ReviewModel: ObservableObject {
     /// whole session becomes one "Edit Caption" undo when committed, and Esc restores `original`.
     private var captionSession: (id: UUID, original: String?)?
 
-    var readOnlyNotice: String? { isReadOnly ? "Made by a newer version of Clipr — read only" : nil }
+    /// True while edits exist only in memory because saving keeps failing; closing the window
+    /// then would lose them.
+    var hasUnsavedChanges: Bool { isDirty }
+
+    var readOnlyNotice: String? {
+        switch readOnlyReason {
+        case .newerVersion: "Made by a newer version of Clipr — read only"
+        case .unreadable: "Couldn't read session.json — read only"
+        case nil: nil
+        }
+    }
 
     init(
         folder: URL,
@@ -43,9 +54,9 @@ final class ReviewModel: ObservableObject {
         self.files = files
         self.save = save
         self.captionDelay = captionDelay
-        let loaded = SessionManifestStore.load(from: folder)
-        manifest = loaded
-        isReadOnly = SessionManifestStore.isReadOnly(loaded)
+        let loaded = SessionManifestStore.loadForReview(from: folder)
+        manifest = loaded.manifest
+        readOnlyReason = loaded.readOnly
         // Explicit groups: with grouping by run-loop event, several edits in one pass (and tests)
         // merge into a single undo step, and undo() inside an open event group raises.
         undoManager.groupsByEvent = false

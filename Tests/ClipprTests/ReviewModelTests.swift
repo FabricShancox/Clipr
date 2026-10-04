@@ -202,6 +202,59 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("session.json")), before)
     }
 
+    /// Attempts every kind of edit and the close/quit flush on a read-only model.
+    private func attemptEdits(_ model: ReviewModel) {
+        model.move(fromOffsets: [0], toOffset: model.manifest.steps.count)
+        if let id = model.manifest.steps.first?.id {
+            model.beginCaptionEdit(for: id)
+            model.editCaption("typed", for: id)
+            model.commitCaption("x", for: id)
+            model.selection = [id]
+        }
+        model.deleteSelection()
+        model.flush()
+    }
+
+    func testUnknownKindFromNewerVersionOpensReadOnlyAndNeverWrites() throws {
+        // A newer Clipr may add step kinds this build can't decode; the full decode fails, but the
+        // version still says the file isn't ours to rewrite.
+        let json = """
+        {"version": 2, "createdAt": "1970-01-01T00:00:00Z", "steps": [
+          {"id": "\(UUID().uuidString)", "file": "Step_01.png", "kind": "hover", "caption": "keep me",
+           "capturedAt": "1970-01-01T00:00:00Z"}
+        ]}
+        """
+        let url = folder.appendingPathComponent("session.json")
+        try Data(json.utf8).write(to: url)
+        let before = try Data(contentsOf: url)
+        let model = makeModel()
+        XCTAssertTrue(model.isReadOnly)
+        XCTAssertEqual(model.readOnlyNotice, "Made by a newer version of Clipr — read only")
+        attemptEdits(model)
+        XCTAssertEqual(try Data(contentsOf: url), before)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Step_01.png").path))
+    }
+
+    func testGarbageManifestOpensReadOnlyAndNeverWrites() throws {
+        let url = folder.appendingPathComponent("session.json")
+        try Data("{ not json".utf8).write(to: url)
+        let before = try Data(contentsOf: url)
+        let model = makeModel()
+        XCTAssertTrue(model.isReadOnly)
+        XCTAssertEqual(model.readOnlyNotice, "Couldn't read session.json — read only")
+        // Steps still show, rebuilt from the PNGs.
+        XCTAssertEqual(model.manifest.steps.count, 4)
+        attemptEdits(model)
+        XCTAssertEqual(try Data(contentsOf: url), before)
+    }
+
+    func testMissingManifestStaysWritable() throws {
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("session.json"))
+        let model = makeModel()
+        XCTAssertFalse(model.isReadOnly)
+        XCTAssertNil(model.readOnlyNotice)
+    }
+
     func testReloadPicksUpExternalChangesAndBumpsToken() throws {
         let model = makeModel()
         let before = model.refreshToken

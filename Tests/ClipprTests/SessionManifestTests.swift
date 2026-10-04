@@ -45,6 +45,20 @@ final class SessionManifestTests: XCTestCase {
         XCTAssertEqual(SessionManifestStore.load(from: folder).steps.map(\.file), ["Step_01.png"])
     }
 
+    func testLoadForReviewFlagsUndecodableAndNewerManifests() throws {
+        touch("Step_01.png")
+        let url = folder.appendingPathComponent(SessionManifestStore.fileName)
+        XCTAssertNil(SessionManifestStore.loadForReview(from: folder).readOnly, "no session.json is writable")
+        try SessionManifestStore.save(SessionManifest(createdAt: Date(), steps: [record("Step_01.png")]), in: folder)
+        XCTAssertNil(SessionManifestStore.loadForReview(from: folder).readOnly)
+        try Data(#"{"version": 3, "steps": "unknown shape"}"#.utf8).write(to: url)
+        XCTAssertEqual(SessionManifestStore.loadForReview(from: folder).readOnly, .newerVersion)
+        try Data("not json".utf8).write(to: url)
+        let garbage = SessionManifestStore.loadForReview(from: folder)
+        XCTAssertEqual(garbage.readOnly, .unreadable)
+        XCTAssertEqual(garbage.manifest.steps.map(\.file), ["Step_01.png"])
+    }
+
     func testReconstructionIgnoresDerivedFiles() {
         touch("Step_01.png"); touch("Step_01_edited.png"); touch("Step_01_zoom.png")
         touch("Step_01_annotations.json"); touch(".DS_Store")

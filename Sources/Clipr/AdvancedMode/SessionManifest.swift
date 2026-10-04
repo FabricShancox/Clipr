@@ -60,6 +60,38 @@ enum SessionManifestStore {
         manifest.version > currentVersion
     }
 
+    /// Why Review must not write a session's `session.json`.
+    enum ReadOnlyReason: Equatable {
+        /// Written by a newer Clipr: it may carry meaning this build doesn't understand.
+        case newerVersion
+        /// Present but not decodable as a manifest this build understands. Rewriting it from the
+        /// PNGs (what `load` falls back to) would erase every caption in it.
+        case unreadable
+    }
+
+    /// `load(from:)` plus whether Review may write the result back. A missing `session.json` is
+    /// writable (sessions from before the manifest existed); one that exists but doesn't fully
+    /// decode never is — even when its version is ours, since the rebuilt manifest would drop
+    /// whatever the file held.
+    static func loadForReview(from folder: URL) -> (manifest: SessionManifest, readOnly: ReadOnlyReason?) {
+        let manifest = load(from: folder)
+        let url = folder.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return (manifest, nil) }
+        guard let data = try? Data(contentsOf: url) else { return (manifest, .unreadable) }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        // Checked first so a newer manifest gets the newer-version notice whether or not this
+        // build happens to decode the rest of it.
+        if let header = try? decoder.decode(VersionHeader.self, from: data), header.version > currentVersion {
+            return (manifest, .newerVersion)
+        }
+        guard (try? decoder.decode(SessionManifest.self, from: data)) != nil else { return (manifest, .unreadable) }
+        return (manifest, nil)
+    }
+
+    /// Just enough of `session.json` to read its version when the rest won't decode.
+    private struct VersionHeader: Decodable { let version: Int }
+
     /// Always returns a manifest that matches the folder's contents: entries whose PNG is gone are
     /// dropped and raw step PNGs with no entry are appended as `.manual` steps without captions.
     /// A missing or unreadable `session.json` (sessions recorded before the manifest existed, or a
