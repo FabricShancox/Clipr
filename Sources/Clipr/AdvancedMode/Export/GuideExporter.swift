@@ -14,7 +14,7 @@ enum GuideWarning: Equatable {
         let closeUps = warnings.compactMap { if case .missingCloseUp(let step) = $0 { return step } else { return nil } }
         var lines: [String] = []
         if !missing.isEmpty { lines.append("\(stepList(missing)): image unavailable — exported with a placeholder.") }
-        if !damaged.isEmpty { lines.append("\(stepList(damaged)): annotations couldn't be read — exported without them.") }
+        if !damaged.isEmpty { lines.append("\(stepList(damaged)): annotations couldn't be read — image left out to avoid exposing redacted content.") }
         if !closeUps.isEmpty { lines.append("\(stepList(closeUps)): close-up couldn't be rendered — exported without it.") }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
@@ -209,10 +209,11 @@ struct GuideExporter {
             let main = render(step.image, width)
             if let image = main.image {
                 images.steps[step.number] = image
+            } else if main.sidecarDamaged {
+                warnings.append(.damagedAnnotations(step: step.number))
             } else {
                 warnings.append(.missingImage(step: step.number))
             }
-            if main.sidecarDamaged { warnings.append(.damagedAnnotations(step: step.number)) }
             if format != .gif, let zoom = step.zoom {
                 if let image = render(zoom, GuideImages.zoomPixelWidth).image {
                     images.zooms[step.number] = image

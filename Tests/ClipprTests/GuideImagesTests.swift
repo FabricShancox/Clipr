@@ -118,7 +118,7 @@ final class GuideImagesTests: XCTestCase {
         XCTAssertEqual(image.pixelWidth, 200)
     }
 
-    func testDamagedSidecarGivesRawImageAndFlag() throws {
+    func testDamagedSidecarOmitsImageAndFlags() throws {
         let blue = testImage(width: 20, height: 20) {
             NSColor.blue.set()
             NSRect(x: 0, y: 0, width: 20, height: 20).fill()
@@ -127,13 +127,7 @@ final class GuideImagesTests: XCTestCase {
         try Data("not json".utf8).write(to: folder.appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: "Step_01.png")))
         let result = GuideImages.render(.file(url), maxPixelWidth: 1600)
         XCTAssertTrue(result.sidecarDamaged)
-        XCTAssertEqual(result.image?.pixelWidth, 20)
-        let bitmap = try decode(result.image)
-        for (x, y) in [(2, 2), (10, 10), (17, 17)] {
-            let color = try XCTUnwrap(bitmap.colorAt(x: x, y: y))
-            XCTAssertGreaterThan(color.blueComponent, 0.9, "raw capture pixels, no annotation drawn")
-            XCTAssertLessThan(color.redComponent, 0.1)
-        }
+        XCTAssertNil(result.image, "the raw capture could expose redacted content")
     }
 
     /// JPEG has no alpha, so transparent areas must come out white rather than black.

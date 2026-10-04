@@ -46,7 +46,7 @@ final class GuideExporterTests: XCTestCase {
                 calls.widths.append(width)
                 switch calls.widths.count {
                 case 2: return GuideImageRender(image: nil, sidecarDamaged: false)
-                case 3: return GuideImageRender(image: image, sidecarDamaged: true)
+                case 3: return GuideImageRender(image: nil, sidecarDamaged: true)
                 default: return GuideImageRender(image: image, sidecarDamaged: false)
                 }
             },
@@ -92,7 +92,7 @@ final class GuideExporterTests: XCTestCase {
         _ = try await exporter().export(doc(), options: ExportOptions(format: .markdown, title: "T"), to: out)
         XCTAssertTrue(try String(contentsOf: out.appendingPathComponent("guide.md"), encoding: .utf8).hasPrefix("# T\n"))
         let images = try FileManager.default.contentsOfDirectory(atPath: out.appendingPathComponent("images").path).sorted()
-        XCTAssertEqual(images, ["step-01.png", "step-03.png"])
+        XCTAssertEqual(images, ["step-01.png"])
         XCTAssertTrue(try workIsEmpty())
     }
 
@@ -295,7 +295,7 @@ final class GuideExporterTests: XCTestCase {
     func testWarningSummary() {
         XCTAssertNil(GuideWarning.summary([]))
         XCTAssertEqual(GuideWarning.summary([.missingImage(step: 2), .missingImage(step: 5), .damagedAnnotations(step: 3)]),
-                       "Steps 2, 5: image unavailable — exported with a placeholder.\nStep 3: annotations couldn't be read — exported without them.")
+                       "Steps 2, 5: image unavailable — exported with a placeholder.\nStep 3: annotations couldn't be read — image left out to avoid exposing redacted content.")
     }
 
     func testFailedCloseUpWarnsAndIsDropped() async throws {

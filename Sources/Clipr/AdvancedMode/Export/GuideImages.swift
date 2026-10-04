@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 struct GuideImageRender {
     /// Nil when the image is missing or won't decode.
     let image: GuideImage?
-    /// The step's annotation sidecar exists but couldn't be read, so `image` is the raw capture.
+    /// The step's annotation sidecar exists but couldn't be read. `image` is then nil: the raw capture
+    /// may hold content a redaction was covering, so it is never exported.
     let sidecarDamaged: Bool
 }
 
@@ -37,10 +38,9 @@ enum GuideImages {
                 return GuideImageRender(image: nil, sidecarDamaged: false)
             }
             var annotations: [AnnotationObject] = []
-            var damaged = false
             switch StorageManager(baseFolder: url.deletingLastPathComponent()).readAnnotations(rawURL: url) {
             case .loaded(let loaded): annotations = loaded
-            case .corrupt: damaged = true
+            case .corrupt: return GuideImageRender(image: nil, sidecarDamaged: true)
             case .missing: break
             }
             let scaled: CGImage?
@@ -49,13 +49,13 @@ enum GuideImages {
             } else {
                 // Annotations are in points on the full-size image, so flatten first, then shrink.
                 guard let base = NSImage(contentsOf: url), base.bitmap != nil else {
-                    return GuideImageRender(image: nil, sidecarDamaged: damaged)
+                    return GuideImageRender(image: nil, sidecarDamaged: false)
                 }
                 let flat = AnnotationRenderer.flatten(base: base, annotations: annotations)
                 scaled = flat.bitmap.flatMap { downsampled($0, maxPixelWidth: maxPixelWidth) }
             }
-            guard let scaled else { return GuideImageRender(image: nil, sidecarDamaged: damaged) }
-            return GuideImageRender(image: encode(scaled, jpegThreshold: jpegThreshold), sidecarDamaged: damaged)
+            guard let scaled else { return GuideImageRender(image: nil, sidecarDamaged: false) }
+            return GuideImageRender(image: encode(scaled, jpegThreshold: jpegThreshold), sidecarDamaged: false)
         }
     }
 
