@@ -22,9 +22,7 @@ struct ReviewRow: View {
     private static let largeDetailsMinWidth: CGFloat = 180
     /// What else shares a Large row with the image and caption: the number badge, the gaps
     /// between the three, and the list's own row insets.
-    private static let largeChromeWidth: CGFloat = 26 + 16 * 2 + rowInsetWidth
-    /// The list's own horizontal row insets, which a container-relative width still includes.
-    private static let rowInsetWidth: CGFloat = 40
+    private static let largeChromeWidth: CGFloat = 26 + 16 * 2 + 40
 
     var body: some View {
         content
@@ -84,7 +82,9 @@ struct ReviewRow: View {
                 // step at its own size; List and Large keep rows uniform and show a badge instead.
                 image
                     .containerRelativeFrame(.horizontal) { width, _ in
-                        max(120, (width - Self.rowInsetWidth) * (step.imageSize ?? .full).widthFraction)
+                        // Measured: this width already matches the row's content width, so Full
+                        // fills the row as the image did before sizes existed.
+                        max(120, width * (step.imageSize ?? .full).widthFraction)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
