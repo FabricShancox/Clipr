@@ -272,6 +272,21 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertNil(model.readOnlyNotice)
     }
 
+    // L13: rows don't stat the disk on every render; a change to one step refreshes only it.
+    func testThumbnailURLIsCachedUntilThatStepChanges() throws {
+        let model = makeModel()
+        let step = model.manifest.steps[0]
+        XCTAssertEqual(model.thumbnailURL(for: step).lastPathComponent, "Step_01.png")
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("Step_01_edited.png").path, contents: Data([2]))
+        XCTAssertEqual(model.thumbnailURL(for: step).lastPathComponent, "Step_01.png", "cached")
+        let token = model.refreshToken
+        model.reload(changedStep: step.id)
+        XCTAssertEqual(model.thumbnailURL(for: step).lastPathComponent, "Step_01_edited.png")
+        XCTAssertEqual(model.imageVersion(of: step.id), 1)
+        XCTAssertEqual(model.imageVersion(of: model.manifest.steps[1].id), 0)
+        XCTAssertEqual(model.refreshToken, token)
+    }
+
     func testReloadPicksUpExternalChangesAndBumpsToken() throws {
         let model = makeModel()
         let before = model.refreshToken
@@ -527,7 +542,9 @@ final class ReviewModelTests: XCTestCase {
         let model = makeModel()
         let before = model.refreshToken
         model.replaceImage(for: id, with: newImage())
-        XCTAssertGreaterThan(model.refreshToken, before)
+        // Only the replaced step's row rebuilds its thumbnail.
+        XCTAssertEqual(model.imageVersion(of: id), 1)
+        XCTAssertEqual(model.refreshToken, before)
         model.undoManager.undo()
         XCTAssertEqual(fileData("Step_02.png"), Data([1]))
         XCTAssertEqual(fileData("Step_02_zoom.png"), Data([9]))

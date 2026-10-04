@@ -138,7 +138,7 @@ struct ReviewRow: View {
                     maxPixelSize: layout == .list ? ThumbnailCache.maxPixelSize : ThumbnailCache.largePixelSize
                 )
                 // New identity after the editor closes so the edited image is decoded.
-                .id("\(step.id)-\(model.refreshToken)-\(layout.rawValue)")
+                .id("\(step.id)-\(model.refreshToken)-\(model.imageVersion(of: step.id))-\(layout.rawValue)")
             )
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .onTapGesture(count: 2) { onOpenEditor(step) }

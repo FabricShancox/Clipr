@@ -10,8 +10,15 @@ final class ReviewModel: ObservableObject {
     @Published private(set) var manifest: SessionManifest
     @Published var selection: Set<UUID> = []
     @Published private(set) var banner: String?
-    /// Bumped when step images may have changed on disk, so rows rebuild their thumbnails.
+    /// Bumped when any step's image may have changed on disk (a reload), so rows rebuild their
+    /// thumbnails.
     @Published private(set) var refreshToken = 0
+    /// Per step: bumped when just that step's image changed (a replacement, its editor closing),
+    /// so only its row decodes again.
+    @Published private(set) var imageVersions: [UUID: Int] = [:]
+    /// Which file each step's thumbnail comes from (raw or edited preview), so rows don't stat the
+    /// disk every time they render. Cleared whenever a step's files may have changed.
+    private var thumbnailURLs: [String: URL] = [:]
     /// Steps with an image editor open on them, kept up to date by `ReviewWindowController`.
     /// Their images can't be replaced (or a replacement undone) meanwhile: the editor still holds
     /// the old image and would write it, or an edited preview of it, back over the new one.
@@ -75,7 +82,14 @@ final class ReviewModel: ObservableObject {
     }
 
     func url(for step: StepRecord) -> URL { folder.appendingPathComponent(step.file) }
-    func thumbnailURL(for step: StepRecord) -> URL { StepFiles.thumbnailURL(of: step.file, in: folder) }
+    func thumbnailURL(for step: StepRecord) -> URL {
+        if let cached = thumbnailURLs[step.file] { return cached }
+        let url = StepFiles.thumbnailURL(of: step.file, in: folder)
+        thumbnailURLs[step.file] = url
+        return url
+    }
+
+    func imageVersion(of id: UUID) -> Int { imageVersions[id] ?? 0 }
 
     // MARK: Reorder
 
@@ -413,14 +427,15 @@ final class ReviewModel: ObservableObject {
             ThumbnailCache.shared.remove(url)
         }
         ThumbnailCache.shared.remove(folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: manifest.steps[index].file)))
-        refreshToken += 1
+        thumbnailURLs[manifest.steps[index].file] = nil
+        imageVersions[id, default: 0] += 1
     }
 
     // MARK: Reload
 
-    /// After the image editor closes (it may have changed or deleted the step's image), re-read the
-    /// session from disk and make rows decode their thumbnails again.
-    func reload() {
+    /// Re-reads the session from disk and makes rows decode their thumbnails again. After an image
+    /// editor closes, pass its step as `changedStep`: only that row's thumbnail is rebuilt.
+    func reload(changedStep: UUID? = nil) {
         flush()
         // Unsaved edits live only in memory; reloading now would silently discard them.
         guard !isDirty else { reloadPending = true; return }
@@ -428,7 +443,12 @@ final class ReviewModel: ObservableObject {
         manifest = SessionManifestStore.load(from: folder)
         let ids = Set(manifest.steps.map(\.id))
         selection = selection.filter { ids.contains($0) }
-        refreshToken += 1
+        thumbnailURLs = [:]
+        if let changedStep, ids.contains(changedStep) {
+            imageVersions[changedStep, default: 0] += 1
+        } else {
+            refreshToken += 1
+        }
     }
 
     // MARK: Undo

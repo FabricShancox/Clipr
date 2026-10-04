@@ -151,7 +151,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
                 for companion in StepFiles.companions(of: step.file, in: folder) {
                     ThumbnailCache.shared.remove(companion)
                 }
-                self.model.reload()
+                self.model.reload(changedStep: step.id)
             }
         }
         editor.showWindow(nil)
