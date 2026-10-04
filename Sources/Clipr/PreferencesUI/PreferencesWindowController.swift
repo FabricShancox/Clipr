@@ -7,7 +7,7 @@ final class PreferencesWindowController: NSWindowController {
         onHotkeysChanged: @escaping () -> Void,
         onSaveFolderChanged: @escaping () -> Void,
         onCaptureCursorChanged: @escaping () -> Void,
-        onHotkeyRecording: @escaping (Bool) -> Void = { _ in }
+        onHotkeyRecording: @escaping (_ recorder: UUID, _ recording: Bool) -> Void = { _, _ in }
     ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 540, height: 600),

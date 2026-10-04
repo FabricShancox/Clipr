@@ -14,9 +14,9 @@ struct PreferencesView: View {
     /// `captureCursor` copy (set once at launch) rather than reading `SettingsStore` live, so
     /// this callback re-syncs both the moment the toggle changes.
     let onCaptureCursorChanged: () -> Void
-    /// Recording a shortcut started (true) or ended (false) — see
+    /// A shortcut recorder (identified by its id) started (true) or ended (false) recording — see
     /// `HotkeyRecorderView.onRecordingChanged`.
-    let onHotkeyRecording: (Bool) -> Void
+    let onHotkeyRecording: (_ recorder: UUID, _ recording: Bool) -> Void
 
     @State var captureHotkey: HotkeyBinding
     @State var advancedModeHotkey: HotkeyBinding
@@ -36,7 +36,7 @@ struct PreferencesView: View {
         onHotkeysChanged: @escaping () -> Void,
         onSaveFolderChanged: @escaping () -> Void,
         onCaptureCursorChanged: @escaping () -> Void,
-        onHotkeyRecording: @escaping (Bool) -> Void = { _ in }
+        onHotkeyRecording: @escaping (_ recorder: UUID, _ recording: Bool) -> Void = { _, _ in }
     ) {
         self.settings = settings
         self.onHotkeyRecording = onHotkeyRecording

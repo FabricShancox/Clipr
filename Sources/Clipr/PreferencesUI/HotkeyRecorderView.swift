@@ -8,7 +8,10 @@ struct HotkeyRecorderView: View {
     var otherBindings: [(binding: HotkeyBinding, name: String)] = []
     /// Told when recording starts and stops, so Clipr's own hotkeys can be switched off meanwhile:
     /// pressing the current capture combo to re-record it otherwise took a screenshot instead.
-    var onRecordingChanged: (Bool) -> Void = { _ in }
+    /// Carries this recorder's id, so moving straight from one recorder to another (whose end and
+    /// start can arrive in either order) keeps the hotkeys off throughout.
+    var onRecordingChanged: (_ recorder: UUID, _ recording: Bool) -> Void = { _, _ in }
+    @State private var recorderID = UUID()
     @State private var isRecording = false
     /// Shown after a key that can't be a global hotkey (see `HotkeyBinding.recordingOutcome`);
     /// recording stays on so the user can simply try again.
@@ -27,8 +30,8 @@ struct HotkeyRecorderView: View {
             }
             .background(KeyCatcherView(isRecording: $isRecording, binding: $binding, hint: $hint, otherBindings: otherBindings))
         }
-        .onChange(of: isRecording) { _, recording in onRecordingChanged(recording) }
-        .onDisappear { if isRecording { onRecordingChanged(false) } }
+        .onChange(of: isRecording) { _, recording in onRecordingChanged(recorderID, recording) }
+        .onDisappear { if isRecording { onRecordingChanged(recorderID, false) } }
     }
 }
 

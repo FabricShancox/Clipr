@@ -34,7 +34,9 @@ final class PreferencesPresenter {
             onCaptureCursorChanged: { [weak self] in self?.onCaptureCursorChanged() },
             // Clipr's own hotkeys are off while a shortcut is being recorded, so pressing the
             // current capture combo records it instead of taking a screenshot.
-            onHotkeyRecording: { [weak self] recording in self?.hotkeys.setRecording(recording) }
+            onHotkeyRecording: { [weak self] recorder, recording in
+                self?.hotkeys.setRecording(recording, recorder: recorder)
+            }
         )
         self.controller = controller
         // Cleared on close so the next Preferences request builds a fresh window rather than
@@ -44,8 +46,12 @@ final class PreferencesPresenter {
             box.token = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification, object: window, queue: .main
             ) { [weak self] _ in
-                // Delivered on the main queue.
-                MainActor.assumeIsolated { self?.controller = nil }
+                // Delivered on the main queue. A recorder still recording when the window closes
+                // may never report its end, so the hotkeys are brought back explicitly.
+                MainActor.assumeIsolated {
+                    self?.controller = nil
+                    self?.hotkeys.endAllRecording()
+                }
                 if let token = box.token { NotificationCenter.default.removeObserver(token) }
             }
         }
