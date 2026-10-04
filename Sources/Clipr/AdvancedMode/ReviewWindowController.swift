@@ -144,7 +144,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
                 let folder = self.model.folder
                 // Drop every cached decode for this step so the row shows the edited image.
                 for companion in StepFiles.companions(of: step.file, in: folder) {
-                    ThumbnailCache.shared.remove(companion)
+                    self.model.thumbnails.remove(companion)
                 }
                 self.model.reload(changedStep: step.id)
             }

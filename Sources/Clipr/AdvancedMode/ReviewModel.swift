@@ -32,6 +32,8 @@ final class ReviewModel: ObservableObject {
     private let files: StepFiles
     private let save: (SessionManifest, URL) throws -> Void
     private let writeImage: (Data, URL) throws -> Void
+    /// Decoded step images shown in Review; entries are dropped when a step's image changes.
+    let thumbnails: ThumbnailCache
     private let captionDelay: TimeInterval
     private var pendingCaption: (id: UUID, text: String?)?
     private var captionWork: DispatchWorkItem?
@@ -66,12 +68,14 @@ final class ReviewModel: ObservableObject {
         files: StepFiles = StepFiles(),
         save: @escaping (SessionManifest, URL) throws -> Void = SessionManifestStore.saveSafely,
         writeImage: @escaping (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) },
+        thumbnails: ThumbnailCache = .shared,
         captionDelay: TimeInterval = 0.5
     ) {
         self.folder = folder
         self.files = files
         self.save = save
         self.writeImage = writeImage
+        self.thumbnails = thumbnails
         self.captionDelay = captionDelay
         let loaded = SessionManifestStore.loadForReview(from: folder)
         manifest = loaded.manifest
@@ -424,9 +428,9 @@ final class ReviewModel: ObservableObject {
         manifest.steps[index].zoomFile = zoomFile
         _ = persist()
         for url in StepFiles.companions(of: manifest.steps[index].file, in: folder) + [url(for: manifest.steps[index])] {
-            ThumbnailCache.shared.remove(url)
+            thumbnails.remove(url)
         }
-        ThumbnailCache.shared.remove(folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: manifest.steps[index].file)))
+        thumbnails.remove(folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: manifest.steps[index].file)))
         thumbnailURLs[manifest.steps[index].file] = nil
         imageVersions[id, default: 0] += 1
     }
