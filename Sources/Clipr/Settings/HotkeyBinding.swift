@@ -58,6 +58,35 @@ struct HotkeyBinding: Codable, Equatable {
         return s
     }
 
+    /// F1–F20. The only keys allowed as a hotkey without ⌘/⌃/⌥, since nothing types them.
+    static let functionKeyCodes: Set<UInt32> = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111,
+        105, 107, 113, 106, 64, 79, 80, 90
+    ]
+    static let escapeKeyCode: UInt32 = 53
+
+    /// What the Preferences shortcut recorder should do with a key press.
+    enum RecordingOutcome: Equatable {
+        case accepted(HotkeyBinding)
+        /// Esc (without ⌘/⌃/⌥): stop recording and keep the current binding.
+        case cancelled
+        /// Not usable as a global hotkey; the string is a short hint to show the user.
+        case rejected(String)
+    }
+
+    /// A global hotkey swallows its key in every app, so a bare letter, Return, Delete or Esc
+    /// bound here would stop that key working system-wide. A binding therefore needs ⌘, ⌃ or ⌥
+    /// (⇧ alone still types a character), except F1–F20, which may be bare.
+    static func recordingOutcome(keyCode: UInt32, modifiers: UInt32) -> RecordingOutcome {
+        let required = Modifier.command.rawValue | Modifier.control.rawValue | Modifier.option.rawValue
+        let hasRequired = modifiers & required != 0
+        if keyCode == escapeKeyCode, !hasRequired { return .cancelled }
+        if hasRequired || functionKeyCodes.contains(keyCode) {
+            return .accepted(HotkeyBinding(keyCode: keyCode, modifiers: modifiers))
+        }
+        return .rejected("Include ⌘, ⌃ or ⌥ (or use F1–F20)")
+    }
+
     static let defaultCapture = HotkeyBinding(keyCode: 19, modifiers: Modifier.command.rawValue | Modifier.shift.rawValue) // ⌘⇧2
     static let defaultAdvancedMode = HotkeyBinding(keyCode: 20, modifiers: Modifier.command.rawValue | Modifier.shift.rawValue) // ⌘⇧3
 }
