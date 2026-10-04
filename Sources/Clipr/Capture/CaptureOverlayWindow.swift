@@ -1,6 +1,7 @@
 import Cocoa
 import SwiftUI
 
+/// The full-screen overlay, one per display, that the user drags or clicks on to choose a capture.
 final class CaptureOverlayWindow: NSWindow {
     private static var openWindows: [CaptureOverlayWindow] = []
 
@@ -36,30 +37,7 @@ final class CaptureOverlayWindow: NSWindow {
         let mouseLocation = NSEvent.mouseLocation
         var primary: CaptureOverlayWindow?
         for screen in NSScreen.screens {
-            let window = CaptureOverlayWindow(
-                contentRect: screen.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false,
-                screen: screen
-            )
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.level = .screenSaver
-            window.ignoresMouseEvents = false
-            // Belt-and-suspenders: on mixed-DPI multi-monitor setups (e.g. a 2x main display
-            // alongside 1x externals), the `contentRect`/`screen:` given to this initializer has
-            // been observed to leave borderless windows mispositioned/mis-sized on non-main
-            // displays (verified live on a 3-monitor 2x+1x+1x rig: correct on the main screen,
-            // partially or fully off-screen on the others). Forcing the frame explicitly after
-            // construction is the standard, more reliable way to pin a window to a specific
-            // screen's exact bounds regardless of that initial placement quirk.
-            window.setFrame(screen.frame, display: true)
-            window.onResult = onResult
-            window.contentView = NSHostingView(rootView: CaptureOverlayView(screen: screen, frozenImage: frozenScreens[screen.displayID], onResult: { result in
-                dismissAll()
-                onResult(result)
-            }))
+            let window = makeOverlay(for: screen, frozenImage: frozenScreens[screen.displayID], onResult: onResult)
             // Ordered front WITHOUT claiming key here: `makeKeyAndOrderFront` on every screen's
             // overlay left the last one made key by accident, and made the key window change
             // once per screen on the way there.
@@ -87,6 +65,36 @@ final class CaptureOverlayWindow: NSWindow {
             NSCursor.crosshair.push()
             isCrosshairPushed = true
         }
+    }
+
+    /// One screen's borderless overlay, hosting a `CaptureOverlayView`. Not yet on screen.
+    private static func makeOverlay(for screen: NSScreen, frozenImage: NSImage?,
+                                    onResult: @escaping (CaptureResult) -> Void) -> CaptureOverlayWindow {
+        let window = CaptureOverlayWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = .screenSaver
+        window.ignoresMouseEvents = false
+        // Belt-and-suspenders: on mixed-DPI multi-monitor setups (e.g. a 2x main display
+        // alongside 1x externals), the `contentRect`/`screen:` given to this initializer has
+        // been observed to leave borderless windows mispositioned/mis-sized on non-main
+        // displays (verified live on a 3-monitor 2x+1x+1x rig: correct on the main screen,
+        // partially or fully off-screen on the others). Forcing the frame explicitly after
+        // construction is the standard, more reliable way to pin a window to a specific
+        // screen's exact bounds regardless of that initial placement quirk.
+        window.setFrame(screen.frame, display: true)
+        window.onResult = onResult
+        window.contentView = NSHostingView(rootView: CaptureOverlayView(screen: screen, frozenImage: frozenImage, onResult: { result in
+            dismissAll()
+            onResult(result)
+        }))
+        return window
     }
 
     /// Takes Clipr's own windows off screen before the overlay goes up.

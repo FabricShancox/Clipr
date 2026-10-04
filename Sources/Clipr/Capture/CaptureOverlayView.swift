@@ -1,5 +1,7 @@
 import SwiftUI
 
+/// One screen's capture overlay: the frozen screen, dimmed, with the Area / Window / Full Screen
+/// picker, the drag selection and the hovered-window outline.
 struct CaptureOverlayView: View {
     let screen: NSScreen
     /// The screen as it was when the hotkey fired. Drawn under the dimming so that whatever the
@@ -23,69 +25,16 @@ struct CaptureOverlayView: View {
                     .resizable()
             }
             Color.black.opacity(0.15)
-
-            if mode == .area, let start = dragStart, let current = dragCurrent {
-                let rect = CGRect(
-                    x: min(start.x, current.x), y: min(start.y, current.y),
-                    width: abs(current.x - start.x), height: abs(current.y - start.y)
-                )
-                Rectangle()
-                    .stroke(Color.accentColor, lineWidth: 2)
-                    .background(Color.accentColor.opacity(0.1))
-                    .frame(width: rect.width, height: rect.height)
-                    .position(x: rect.midX, y: rect.midY)
-            }
-
-            if mode == .window, let hovered = hoveredWindow {
-                // hovered.bounds is in CGWindowBounds' global-display space; convert back to this
-                // view's local space before using it to position SwiftUI content (see the note on
-                // globalDisplayPoint below - this is that conversion's inverse).
-                let localOrigin = CaptureOverlayView.viewLocalPoint(forGlobalDisplayPoint: hovered.bounds.origin, on: screen)
-                let localRect = CGRect(origin: localOrigin, size: hovered.bounds.size)
-                Rectangle()
-                    .stroke(Color.accentColor, lineWidth: 3)
-                    .frame(width: localRect.width, height: localRect.height)
-                    .position(x: localRect.midX, y: localRect.midY)
-            }
-
-            HStack(spacing: 12) {
-                ForEach(CaptureMode.allCases, id: \.self) { m in
-                    Button(m.rawValue) { mode = m }
-                        .buttonStyle(.borderedProminent)
-                        .tint(mode == m ? .accentColor : .gray)
-                }
-            }
-            .padding(8)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            // Below the camera housing on a notched display, now that the whole overlay ignores
-            // the safe area.
-            .padding(.top, 24 + screen.safeAreaInsets.top)
+            selectionOutline
+            hoveredWindowOutline
+            modePicker
         }
         // The whole overlay, not just the frozen image, ignores the safe area: drags are measured
         // in this stack's space and cropped in the screen's, so on a notched display a stack
         // inset by the notch put every crop off by the notch height.
         .ignoresSafeArea()
         .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 1)
-                .onChanged { value in
-                    guard mode == .area else { return }
-                    if dragStart == nil { dragStart = value.startLocation }
-                    dragCurrent = value.location
-                }
-                .onEnded { value in
-                    guard mode == .area, let start = dragStart else { return }
-                    let rect = CGRect(
-                        x: min(start.x, value.location.x), y: min(start.y, value.location.y),
-                        width: abs(value.location.x - start.x), height: abs(value.location.y - start.y)
-                    )
-                    dragStart = nil
-                    dragCurrent = nil
-                    if rect.width > 2 && rect.height > 2 {
-                        onResult(.area(rect, screen))
-                    }
-                }
-        )
+        .gesture(areaDrag)
         .onTapGesture { _ in
             switch mode {
             case .fullScreen:
@@ -98,19 +47,89 @@ struct CaptureOverlayView: View {
                 break
             }
         }
-        .onContinuousHover { phase in
-            guard mode == .window else { hoveredWindow = nil; return }
-            switch phase {
-            case .active(let location):
-                let screenPoint = CaptureOverlayView.globalDisplayPoint(forViewLocalPoint: location, on: screen)
-                let list = windows ?? WindowPicker.onScreenWindows()
-                if windows == nil { windows = list }
-                hoveredWindow = WindowPicker.window(at: screenPoint, in: list)
-            case .ended:
-                // Each display has its own overlay; leaving this one must clear its highlight, or a
-                // stale outline stays on this screen while the pointer is on another.
-                hoveredWindow = nil
+        .onContinuousHover { phase in updateHoveredWindow(phase) }
+    }
+
+    /// The area being dragged out, in Area mode.
+    @ViewBuilder
+    private var selectionOutline: some View {
+        if mode == .area, let start = dragStart, let current = dragCurrent {
+            let rect = CGRect(
+                x: min(start.x, current.x), y: min(start.y, current.y),
+                width: abs(current.x - start.x), height: abs(current.y - start.y)
+            )
+            Rectangle()
+                .stroke(Color.accentColor, lineWidth: 2)
+                .background(Color.accentColor.opacity(0.1))
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+        }
+    }
+
+    /// The window under the pointer, in Window mode.
+    @ViewBuilder
+    private var hoveredWindowOutline: some View {
+        if mode == .window, let hovered = hoveredWindow {
+            // hovered.bounds is in CGWindowBounds' global-display space; convert back to this
+            // view's local space before using it to position SwiftUI content (see the note on
+            // globalDisplayPoint below - this is that conversion's inverse).
+            let localOrigin = CaptureOverlayView.viewLocalPoint(forGlobalDisplayPoint: hovered.bounds.origin, on: screen)
+            let localRect = CGRect(origin: localOrigin, size: hovered.bounds.size)
+            Rectangle()
+                .stroke(Color.accentColor, lineWidth: 3)
+                .frame(width: localRect.width, height: localRect.height)
+                .position(x: localRect.midX, y: localRect.midY)
+        }
+    }
+
+    private var modePicker: some View {
+        HStack(spacing: 12) {
+            ForEach(CaptureMode.allCases, id: \.self) { m in
+                Button(m.rawValue) { mode = m }
+                    .buttonStyle(.borderedProminent)
+                    .tint(mode == m ? .accentColor : .gray)
             }
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        // Below the camera housing on a notched display, now that the whole overlay ignores
+        // the safe area.
+        .padding(.top, 24 + screen.safeAreaInsets.top)
+    }
+
+    private var areaDrag: some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                guard mode == .area else { return }
+                if dragStart == nil { dragStart = value.startLocation }
+                dragCurrent = value.location
+            }
+            .onEnded { value in
+                guard mode == .area, let start = dragStart else { return }
+                let rect = CGRect(
+                    x: min(start.x, value.location.x), y: min(start.y, value.location.y),
+                    width: abs(value.location.x - start.x), height: abs(value.location.y - start.y)
+                )
+                dragStart = nil
+                dragCurrent = nil
+                if rect.width > 2 && rect.height > 2 {
+                    onResult(.area(rect, screen))
+                }
+            }
+    }
+
+    private func updateHoveredWindow(_ phase: HoverPhase) {
+        guard mode == .window else { hoveredWindow = nil; return }
+        switch phase {
+        case .active(let location):
+            let screenPoint = CaptureOverlayView.globalDisplayPoint(forViewLocalPoint: location, on: screen)
+            let list = windows ?? WindowPicker.onScreenWindows()
+            if windows == nil { windows = list }
+            hoveredWindow = WindowPicker.window(at: screenPoint, in: list)
+        case .ended:
+            // Each display has its own overlay; leaving this one must clear its highlight, or a
+            // stale outline stays on this screen while the pointer is on another.
+            hoveredWindow = nil
         }
     }
 

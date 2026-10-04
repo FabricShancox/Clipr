@@ -54,48 +54,7 @@ extension EditorView {
             let renderScale = userSetZoom ? canvasScale : fitScale(for: geo.size)
             let scaledSize = CGSize(width: image.size.width * renderScale, height: image.size.height * renderScale)
             ScrollView([.horizontal, .vertical]) {
-                ZStack {
-                    CheckerboardBackground(squareSize: 8 / renderScale)
-                        .frame(width: image.size.width, height: image.size.height)
-                    AnnotationCanvasView(
-                        image: image,
-                        annotations: annotationsBinding,
-                        selectedTool: $selectedTool,
-                        currentColor: $currentColor,
-                        currentStrokeWidth: currentStrokeWidth,
-                        currentTextStyle: $currentTextStyle,
-                        selectedIDs: $selectedIDs,
-                        editingTextID: $editingTextID,
-                        canvasScale: renderScale,
-                        redactionStyle: redactionStyle,
-                        onAnnotationCommitted: handleAnnotationCommitted,
-                        onCropRequested: { rect in onCropApplied(rect, annotations) }
-                    )
-                    canvasResizeHandles
-                }
-                // `canvasResizeHandles` positions its corners with `.position()`, which makes it
-                // a flexible view that expands to fill whatever space is offered. Without pinning
-                // the stack to the image's natural size here, the scaled frame below offers it
-                // the (larger) scaled size, the stack grows to that, and the fixed-size canvas
-                // gets centred inside the grown stack — which the `.scaleEffect` then multiplies
-                // into a large offset, pushing the image off-screen when zoomed past 100%.
-                .frame(width: image.size.width, height: image.size.height)
-                .scaleEffect(renderScale, anchor: .topLeading)
-                // `scaleEffect` scales rendering only — the canvas still reports its full,
-                // unscaled `image.size` for layout. So this frame must pin that (larger) child
-                // to its top-leading corner, matching the scale anchor, for the scaled render to
-                // land exactly inside it. Leaving the default centre alignment offsets the child
-                // by half the difference between the two sizes and the image drifts off-canvas.
-                .frame(width: scaledSize.width, height: scaledSize.height, alignment: .topLeading)
-                .padding(24)
-                // Centres the canvas in the viewport. `max` keeps this at least the true content
-                // size when zoomed in past what fits, so `ScrollView` still has scroll range —
-                // a fixed `frame` smaller than the content would just clip it.
-                .frame(
-                    width: max(geo.size.width, scaledSize.width + 48),
-                    height: max(geo.size.height, scaledSize.height + 48),
-                    alignment: .center
-                )
+                scaledCanvas(renderScale: renderScale, scaledSize: scaledSize, viewport: geo.size)
             }
             .background(EditorColors.s0)
             .onAppear {
@@ -127,6 +86,53 @@ extension EditorView {
         .onChange(of: editingTextID) { _, newValue in
             if newValue == nil { history.closeGroup() }
         }
+    }
+
+    /// The image, its annotation canvas and resize handles, scaled to `renderScale` and centred in
+    /// a frame at least as large as the viewport.
+    private func scaledCanvas(renderScale: CGFloat, scaledSize: CGSize, viewport: CGSize) -> some View {
+        ZStack {
+            CheckerboardBackground(squareSize: 8 / renderScale)
+                .frame(width: image.size.width, height: image.size.height)
+            AnnotationCanvasView(
+                image: image,
+                annotations: annotationsBinding,
+                selectedTool: $selectedTool,
+                currentColor: $currentColor,
+                currentStrokeWidth: currentStrokeWidth,
+                currentTextStyle: $currentTextStyle,
+                selectedIDs: $selectedIDs,
+                editingTextID: $editingTextID,
+                canvasScale: renderScale,
+                redactionStyle: redactionStyle,
+                onAnnotationCommitted: handleAnnotationCommitted,
+                onCropRequested: { rect in onCropApplied(rect, annotations) }
+            )
+            canvasResizeHandles
+        }
+        // `canvasResizeHandles` positions its corners with `.position()`, which makes it
+        // a flexible view that expands to fill whatever space is offered. Without pinning
+        // the stack to the image's natural size here, the scaled frame below offers it
+        // the (larger) scaled size, the stack grows to that, and the fixed-size canvas
+        // gets centred inside the grown stack — which the `.scaleEffect` then multiplies
+        // into a large offset, pushing the image off-screen when zoomed past 100%.
+        .frame(width: image.size.width, height: image.size.height)
+        .scaleEffect(renderScale, anchor: .topLeading)
+        // `scaleEffect` scales rendering only — the canvas still reports its full,
+        // unscaled `image.size` for layout. So this frame must pin that (larger) child
+        // to its top-leading corner, matching the scale anchor, for the scaled render to
+        // land exactly inside it. Leaving the default centre alignment offsets the child
+        // by half the difference between the two sizes and the image drifts off-canvas.
+        .frame(width: scaledSize.width, height: scaledSize.height, alignment: .topLeading)
+        .padding(24)
+        // Centres the canvas in the viewport. `max` keeps this at least the true content
+        // size when zoomed in past what fits, so `ScrollView` still has scroll range —
+        // a fixed `frame` smaller than the content would just clip it.
+        .frame(
+            width: max(viewport.width, scaledSize.width + 48),
+            height: max(viewport.height, scaledSize.height + 48),
+            alignment: .center
+        )
     }
 
     /// Scale at which the full image fits the given viewport, never upscaling past 100% —
