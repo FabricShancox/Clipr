@@ -55,6 +55,14 @@ final class ExportSheetModelTests: XCTestCase {
         XCTAssertEqual(model().options, ExportOptions(format: .gif, title: "Session_2026-10-04_09-30-00", includeZoom: true, gifFrameSeconds: 3.5))
     }
 
+    func testBlankTitleFallsBackToFolderName() {
+        let model = model()
+        model.options.title = "  \n "
+        XCTAssertEqual(model.makeDocument().title, "Session_2026-10-04_09-30-00")
+        model.options.title = "Mine"
+        XCTAssertEqual(model.makeDocument().title, "Mine")
+    }
+
     func testCopyActionAndWebAppNote() {
         let model = model()
         XCTAssertEqual(model.actionTitle, "Export…")

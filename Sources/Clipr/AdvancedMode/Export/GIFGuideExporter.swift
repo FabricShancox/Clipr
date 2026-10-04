@@ -19,7 +19,8 @@ enum GIFGuideExporter {
     enum GIFError: Error { case cannotCreate, encodeFailed }
 
     static func clampedFrameSeconds(_ seconds: Double) -> Double {
-        min(max(seconds, ExportOptions.gifFrameRange.lowerBound), ExportOptions.gifFrameRange.upperBound)
+        guard seconds.isFinite else { return 2 }
+        return min(max(seconds, ExportOptions.gifFrameRange.lowerBound), ExportOptions.gifFrameRange.upperBound)
     }
 
     /// One canvas for every frame, so the GIF doesn't jump: as wide as the widest image (within

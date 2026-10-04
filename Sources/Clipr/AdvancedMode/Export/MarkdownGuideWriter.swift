@@ -37,9 +37,10 @@ enum MarkdownGuideWriter {
         try Data(write(doc, images: images).utf8).write(to: folder.appendingPathComponent(fileName))
     }
 
-    /// Whether exporting into `folder` would overwrite an earlier guide, so the user is asked first.
+    /// Whether exporting into `folder` would overwrite something — an earlier guide, or any `images`
+    /// entry (which Replace swaps out wholesale, even if it's the user's own) — so they're asked first.
     static func hasExistingGuide(in folder: URL) -> Bool {
-        FileManager.default.fileExists(atPath: folder.appendingPathComponent(fileName).path)
+        [fileName, imagesFolder].contains { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
     }
 
     /// Markdown image syntax has no width, so sized steps use an `<img>` tag, which GitHub, MkDocs

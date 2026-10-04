@@ -169,6 +169,28 @@ final class GuideExporterTests: XCTestCase {
         XCTAssertEqual(fractions, [1.0 / 3, 2.0 / 3, 1])
     }
 
+    func testDefaultWorkRootExportsAndLeavesNoWorkFolder() async throws {
+        var exporter = exporter()
+        exporter.workRoot = nil
+        let destination = out.appendingPathComponent("Guide.html")
+        _ = try await exporter.export(doc(), options: ExportOptions(format: .html, title: "T"), to: destination)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: out.path), ["Guide.html"])
+    }
+
+    func testMarkdownGuideFailureRestoresOldImages() throws {
+        struct Boom: Error {}
+        let output = root.appendingPathComponent("built")
+        try FileManager.default.createDirectory(at: output.appendingPathComponent("images"), withIntermediateDirectories: true)
+        try Data("new".utf8).write(to: output.appendingPathComponent("images/new.png"))
+        try Data("g".utf8).write(to: output.appendingPathComponent("guide.md"))
+        try FileManager.default.createDirectory(at: out.appendingPathComponent("images"), withIntermediateDirectories: true)
+        try Data("mine".utf8).write(to: out.appendingPathComponent("images/mine.png"))
+        XCTAssertThrowsError(try GuideExporter.moveIntoPlace(output, format: .markdown, destination: out, placeGuide: { _, _ in throw Boom() }))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: out.path).sorted(), ["images"])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: out.appendingPathComponent("images").path), ["mine.png"])
+    }
+
     func testWarningSummary() {
         XCTAssertNil(GuideWarning.summary([]))
         XCTAssertEqual(GuideWarning.summary([.missingImage(step: 2), .missingImage(step: 5), .damagedAnnotations(step: 3)]),

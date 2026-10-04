@@ -190,23 +190,45 @@ struct GuideExporter {
 
     private func makeWorkFolder(for destination: URL) throws -> URL {
         let fileManager = FileManager.default
-        guard let workRoot else {
-            return try fileManager.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                                       appropriateFor: destination, create: true)
+        if workRoot == nil,
+           let folder = try? fileManager.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                             appropriateFor: destination, create: true) {
+            return folder
         }
-        let folder = workRoot.appendingPathComponent("ClipprExport-\(UUID().uuidString)", isDirectory: true)
+        // Either a test's work root, or the volume refused a replacement folder: use the system temp folder.
+        let root = workRoot ?? fileManager.temporaryDirectory
+        let folder = root.appendingPathComponent("ClipprExport-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }
 
     /// Replaces what's at the destination only now that the output is complete. For Markdown the
-    /// destination is the chosen folder: `images/` moves first, so a failure never leaves a new
-    /// guide.md pointing at images that aren't there.
-    nonisolated static func moveIntoPlace(_ output: URL, format: GuideFormat, destination: URL) throws {
+    /// destination is the chosen folder: the old `images/` is set aside while the new one moves in,
+    /// and put back if guide.md then can't be placed, so a failed export leaves the folder as it was
+    /// (an old guide.md never ends up beside new images, nor a new one beside missing images).
+    nonisolated static func moveIntoPlace(_ output: URL, format: GuideFormat, destination: URL,
+                                          placeGuide: (URL, URL) throws -> Void = { try place($0, at: $1) }) throws {
         if format == .markdown {
-            for name in [MarkdownGuideWriter.imagesFolder, MarkdownGuideWriter.fileName] {
-                try place(output.appendingPathComponent(name), at: destination.appendingPathComponent(name))
+            let fileManager = FileManager.default
+            let imagesTarget = destination.appendingPathComponent(MarkdownGuideWriter.imagesFolder)
+            let backup = destination.appendingPathComponent(".images-backup-\(UUID().uuidString)")
+            let hadImages = fileManager.fileExists(atPath: imagesTarget.path)
+            if hadImages { try fileManager.moveItem(at: imagesTarget, to: backup) }
+            do {
+                try fileManager.moveItem(at: output.appendingPathComponent(MarkdownGuideWriter.imagesFolder), to: imagesTarget)
+            } catch {
+                if hadImages { try? fileManager.moveItem(at: backup, to: imagesTarget) }
+                throw error
             }
+            do {
+                try placeGuide(output.appendingPathComponent(MarkdownGuideWriter.fileName),
+                               destination.appendingPathComponent(MarkdownGuideWriter.fileName))
+            } catch {
+                try? fileManager.removeItem(at: imagesTarget)
+                if hadImages { try? fileManager.moveItem(at: backup, to: imagesTarget) }
+                throw error
+            }
+            if hadImages { try? fileManager.removeItem(at: backup) }
         } else {
             try place(output, at: destination)
         }

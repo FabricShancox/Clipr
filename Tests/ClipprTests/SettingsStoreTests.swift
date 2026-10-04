@@ -57,6 +57,13 @@ final class SettingsStoreTests: XCTestCase {
                        ExportOptions(format: .markdown, title: "New", includeZoom: true, gifFrameSeconds: 4))
     }
 
+    func testNonFiniteFrameTimeFallsBackToDefault() {
+        for value in [Double.nan, .infinity, -.infinity] {
+            defaults.set(value, forKey: "exportGIFFrameSeconds")
+            XCTAssertEqual(store.exportOptions(title: "T").gifFrameSeconds, 2)
+        }
+    }
+
     func testExportOptionsToleratesUnknownFormatAndOutOfRangeFrameTime() {
         defaults.set("pptx", forKey: "exportFormat")
         defaults.set(12.0, forKey: "exportGIFFrameSeconds")

@@ -34,7 +34,10 @@ final class ExportSheetModel: ObservableObject {
     var showsWebAppNote: Bool { options.format == .clipboard && GuideClipboard.imagesMayBeDropped }
 
     func makeDocument() -> GuideDocument {
-        GuideDocument.make(manifest: manifest, folder: folder, selection: useSelection ? selection : [], options: options)
+        // A blank title would print an empty heading; the session folder name is the default.
+        var effective = options
+        if effective.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { effective.title = folder.lastPathComponent }
+        return GuideDocument.make(manifest: manifest, folder: folder, selection: useSelection ? selection : [], options: effective)
     }
 
     func rememberOptions() {

@@ -73,5 +73,8 @@ final class MarkdownGuideWriterTests: XCTestCase {
         XCTAssertFalse(MarkdownGuideWriter.hasExistingGuide(in: folder))
         try MarkdownGuideWriter.export(doc, images: images, to: folder)
         XCTAssertTrue(MarkdownGuideWriter.hasExistingGuide(in: folder))
+        let other = folder.appendingPathComponent("other")
+        try? FileManager.default.createDirectory(at: other.appendingPathComponent("images"), withIntermediateDirectories: true)
+        XCTAssertTrue(MarkdownGuideWriter.hasExistingGuide(in: other), "an images folder alone also needs the Replace prompt")
     }
 }
