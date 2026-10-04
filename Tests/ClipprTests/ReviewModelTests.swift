@@ -335,4 +335,63 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertFalse(model.undoManager.canRedo)
         XCTAssertEqual(captions(onDisk), ["b", "c", "d"])
     }
+
+    func testCancelInOtherStepKeepsPendingCaption() {
+        let model = makeModel(captionDelay: 10)
+        let a = model.manifest.steps[0].id, b = model.manifest.steps[1].id
+        model.beginCaptionEdit(for: a)
+        model.editCaption("typed", for: a)
+        model.cancelCaptionEdit(for: b)
+        XCTAssertEqual(onDisk.steps[0].caption, "typed")
+    }
+
+    func testTrashFailureDoesNotOverwriteSaveFailureBanner() {
+        let box = Box()
+        let flaky = StepFiles(trashItem: { _ in throw CocoaError(.fileWriteNoPermission) },
+                              moveItem: { try FileManager.default.moveItem(at: $0, to: $1) })
+        let model = ReviewModel(folder: folder, files: flaky,
+                                save: { _, _ in if box.fail { throw CocoaError(.fileWriteUnknown) } }, captionDelay: 0.05)
+        model.move(fromOffsets: [0], toOffset: 2)  // save fails -> dirty
+        model.selection = [model.manifest.steps[0].id]
+        model.deleteSelection()
+        XCTAssertEqual(model.banner, "Couldn't save changes — will retry")
+    }
+
+    func testBeginOnAnotherStepCommitsOpenSession() async throws {
+        let model = makeModel(captionDelay: 0.05)
+        let a = model.manifest.steps[0].id, b = model.manifest.steps[1].id
+        model.beginCaptionEdit(for: a)
+        model.editCaption("typed", for: a)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        model.beginCaptionEdit(for: b)
+        XCTAssertEqual(model.undoManager.undoActionName, "Edit Caption")
+        model.undoManager.undo()
+        XCTAssertEqual(onDisk.steps[0].caption, "a")
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    func testCommitSessionForRemovedStepRegistersNoUndo() throws {
+        let model = makeModel(captionDelay: 10)
+        let id = model.manifest.steps[3].id
+        model.beginCaptionEdit(for: id)
+        model.selection = [id]
+        model.deleteSelection()
+        model.undoManager.removeAllActions()
+        model.commitCaption("late", for: id)
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    func testSkippedReloadRunsAfterNextSuccessfulSave() throws {
+        let box = Box()
+        let model = makeModel(save: { m, f in if box.fail { throw CocoaError(.fileWriteUnknown) }; try SessionManifestStore.saveSafely(m, in: f) })
+        model.move(fromOffsets: [0], toOffset: 2)  // dirty
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("Step_04.png"))
+        let before = model.refreshToken
+        model.reload()  // skipped
+        XCTAssertEqual(model.refreshToken, before)
+        box.fail = false
+        model.flush()
+        XCTAssertEqual(model.refreshToken, before + 1)
+        XCTAssertEqual(captions(model.manifest), ["b", "a", "c"])
+    }
 }

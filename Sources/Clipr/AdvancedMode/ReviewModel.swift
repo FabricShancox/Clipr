@@ -25,6 +25,8 @@ final class ReviewModel: ObservableObject {
     /// True after a failed save until a later save succeeds, so edits held only in memory are
     /// retried (flush) and never overwritten by a reload.
     private var isDirty = false
+    /// A reload skipped because unsaved edits were in memory; runs after the next successful save.
+    private var reloadPending = false
     /// While a caption field is focused, its debounced saves are not individual undo steps: the
     /// whole session becomes one "Edit Caption" undo when committed, and Esc restores `original`.
     private var captionSession: (id: UUID, original: String?)?
@@ -77,12 +79,19 @@ final class ReviewModel: ObservableObject {
     /// Call when a caption field gains focus; remembers the caption Esc and undo return to.
     func beginCaptionEdit(for id: UUID) {
         guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        // Moving focus straight from one caption to another ends the first edit as a commit.
+        if let open = captionSession, open.id != id {
+            let typed = pendingCaption?.id == open.id ? pendingCaption!.text : manifest.steps.first { $0.id == open.id }?.caption
+            commitCaption(typed, for: open.id)
+        }
         captionSession = (id, step.caption)
     }
 
     /// Esc: drop typing and put the original back on disk without leaving anything to undo.
     func cancelCaptionEdit(for id: UUID) {
         guard !isReadOnly else { return }
+        // Typing in another step must survive Esc in this one.
+        if let pending = pendingCaption, pending.id != id { flushPendingCaption() }
         captionWork?.cancel()
         captionWork = nil
         pendingCaption = nil
@@ -115,8 +124,8 @@ final class ReviewModel: ObservableObject {
             captionSession = nil
             let updated = ManifestEditor.settingCaption(text, forStep: id, in: manifest)
             if updated != manifest { manifest = updated; persist() }
-            let final = manifest.steps.first { $0.id == id }?.caption
-            guard final != session.original else { return }
+            // A step deleted or reloaded away mid-edit has nothing left to undo.
+            guard let step = manifest.steps.first(where: { $0.id == id }), step.caption != session.original else { return }
             let original = session.original
             registerUndo("Edit Caption") {
                 $0.replace(with: ManifestEditor.settingCaption(original, forStep: id, in: $0.manifest), actionName: "Edit Caption")
@@ -167,7 +176,8 @@ final class ReviewModel: ObservableObject {
             do { trashed[step.id] = try files.trash(step.file, in: folder) } catch { failed.append(step.file) }
         }
         guard !trashed.isEmpty else {
-            banner = failed.first.map { "Couldn't move \($0) to the Trash" }
+            // A pending "will retry" matters more: it says edits are not on disk.
+            if !isDirty { banner = failed.first.map { "Couldn't move \($0) to the Trash" } }
             return
         }
         let firstIndex = manifest.steps.firstIndex { trashed[$0.id] != nil } ?? 0
@@ -194,7 +204,7 @@ final class ReviewModel: ObservableObject {
             }
         }
         guard !restored.isEmpty else {
-            if let first = missing.first { banner = "Couldn't restore \(first) — it's no longer in the Trash" }
+            if !isDirty, let first = missing.first { banner = "Couldn't restore \(first) — it's no longer in the Trash" }
             return
         }
         manifest = ManifestEditor.restoring(restored, into: manifest)
@@ -212,7 +222,8 @@ final class ReviewModel: ObservableObject {
     func reload() {
         flush()
         // Unsaved edits live only in memory; reloading now would silently discard them.
-        guard !isDirty else { return }
+        guard !isDirty else { reloadPending = true; return }
+        reloadPending = false
         manifest = SessionManifestStore.load(from: folder)
         let ids = Set(manifest.steps.map(\.id))
         selection = selection.filter { ids.contains($0) }
@@ -260,6 +271,7 @@ final class ReviewModel: ObservableObject {
             try save(manifest, folder)
             banner = nil
             isDirty = false
+            if reloadPending { reload() }
             return true
         } catch {
             banner = "Couldn't save changes — will retry"
