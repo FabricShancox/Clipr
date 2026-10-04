@@ -75,6 +75,33 @@ struct StepFiles {
         return TrashedStep(file: file, moves: moves)
     }
 
+    /// Like `trash`, but all-or-nothing: if any companion won't move, the files already moved
+    /// are put back and the error is thrown. Replacing an image needs this — a leftover
+    /// `_edited.png` would be shown instead of the new image, and a leftover sidecar's annotations
+    /// would be drawn over it.
+    func trashAll(_ file: String, in folder: URL) throws -> TrashedStep {
+        let urls = Self.companions(of: file, in: folder)
+        guard let raw = urls.first, raw.lastPathComponent == file else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        var moves: [TrashedStep.Move] = []
+        do {
+            for url in urls {
+                moves.append(TrashedStep.Move(original: url, trashed: try trashItem(url)))
+            }
+        } catch {
+            for move in moves.reversed() { try? moveItem(move.trashed, move.original) }
+            throw error
+        }
+        return TrashedStep(file: file, moves: moves)
+    }
+
+    /// Whether every file in `trashed` is still in the Trash, so a restore can't fail half-way for
+    /// that reason. Checked before anything else is moved, so an emptied Trash changes nothing.
+    static func isInTrash(_ trashed: TrashedStep) -> Bool {
+        trashed.moves.allSatisfy { FileManager.default.fileExists(atPath: $0.trashed.path) }
+    }
+
     /// All-or-nothing: if any trashed file is gone (the Trash was emptied), nothing is moved back.
     /// If a moveItem fails mid-restore, all already-restored files are moved back to the Trash
     /// (best-effort) so a restored manifest entry never points at a partially-restored step.
@@ -97,13 +124,34 @@ struct StepFiles {
         }
     }
 
-    /// A replacement step image, written as PNG at its own point size so Retina images keep every
-    /// pixel (the same convention as capture: see `NSImage+PixelScale.swift`).
-    static func writePNG(_ image: NSImage, to url: URL) throws {
-        guard let bitmap = image.bitmap else { throw CocoaError(.fileWriteUnknown) }
+    /// A replacement step image as PNG data at its own point size, so Retina images keep every
+    /// pixel (the same convention as capture: see `NSImage+PixelScale.swift`). Nil if it can't be
+    /// encoded.
+    static func pngData(_ image: NSImage) -> Data? {
+        guard let bitmap = image.bitmap else { return nil }
         let rep = NSBitmapImageRep(cgImage: bitmap)
         rep.size = image.size
-        guard let data = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
-        try data.write(to: url, options: .atomic)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    /// A chosen file decoded upright and re-encoded as a step PNG, or nil if it won't decode.
+    /// Decoding through ImageIO with the transform applied turns a photo stored sideways with an
+    /// EXIF orientation the right way up; the thumbnail call at the image's own longest edge is
+    /// how ImageIO applies that transform to a full-size decode. Callers run this off the main
+    /// thread, since a large photo takes a noticeable time to decode and encode.
+    static func replacementPNG(from url: URL) -> Data? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        // A 144 dpi PNG is a Retina screenshot: keep it at its on-screen point size.
+        let dpi = (properties[kCGImagePropertyDPIWidth] as? Double) ?? 72
+        return pngData(NSImage(bitmap: cgImage, scale: dpi / 72))
     }
 }

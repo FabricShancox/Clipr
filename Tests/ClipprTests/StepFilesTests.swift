@@ -115,6 +115,51 @@ final class StepFilesTests: XCTestCase {
         }
     }
 
+    func testTrashAllMovesEveryCompanion() throws {
+        touch("Step_07.png"); touch("Step_07_annotations.json"); touch("Step_07_edited.png")
+        let trashed = try fakeFiles.trashAll("Step_07.png", in: folder)
+        XCTAssertEqual(trashed.moves.count, 3)
+        XCTAssertFalse(exists("Step_07.png")); XCTAssertFalse(exists("Step_07_annotations.json")); XCTAssertFalse(exists("Step_07_edited.png"))
+    }
+
+    /// Replacing an image must not leave an old `_edited.png` behind to shadow the new one, so a
+    /// companion that won't move puts everything back and fails the whole trash.
+    func testTrashAllPutsEverythingBackWhenACompanionWontMove() throws {
+        touch("Step_08.png"); touch("Step_08_annotations.json"); touch("Step_08_edited.png")
+        let stuck = StepFiles(
+            trashItem: { [trash] url in
+                if url.lastPathComponent == "Step_08_edited.png" { throw CocoaError(.fileWriteNoPermission) }
+                let dest = trash!.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                try FileManager.default.moveItem(at: url, to: dest)
+                return dest
+            },
+            moveItem: { try FileManager.default.moveItem(at: $0, to: $1) }
+        )
+        XCTAssertThrowsError(try stuck.trashAll("Step_08.png", in: folder))
+        XCTAssertTrue(exists("Step_08.png")); XCTAssertTrue(exists("Step_08_annotations.json")); XCTAssertTrue(exists("Step_08_edited.png"))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: trash.path), [])
+    }
+
+    /// A phone photo stored sideways with an EXIF orientation must come out upright.
+    func testReplacementPNGAppliesEXIFOrientation() throws {
+        let url = folder.appendingPathComponent("photo.jpg")
+        let source = testImage(width: 6, height: 2) { NSColor.red.set(); NSRect(x: 0, y: 0, width: 6, height: 2).fill() }
+        let cg = try XCTUnwrap(source.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, cg, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        let png = try XCTUnwrap(StepFiles.replacementPNG(from: url))
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: png))
+        XCTAssertEqual(rep.pixelsWide, 2)
+        XCTAssertEqual(rep.pixelsHigh, 6)
+    }
+
+    func testReplacementPNGIsNilForAFileThatWontDecode() throws {
+        let url = folder.appendingPathComponent("broken.png")
+        try Data("not an image".utf8).write(to: url)
+        XCTAssertNil(StepFiles.replacementPNG(from: url))
+    }
+
     func testThumbnailCacheRemove() {
         let url = folder.appendingPathComponent("x.png")
         ThumbnailCache.shared.store(NSImage(size: CGSize(width: 2, height: 2)), for: url)

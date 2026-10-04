@@ -130,10 +130,11 @@ struct ReviewRow: View {
     private var imageActions: some View {
         Button("Edit Image…") { onOpenEditor(step) }
         Divider()
+        // Not while an image editor is open on this step: it would write the old image back.
         Button("Retake Screenshot…") { onRetake(step) }
-            .disabled(model.isReadOnly)
+            .disabled(model.isReadOnly || model.stepsInEditor.contains(step.id))
         Button("Replace with File…") { onReplaceWithFile(step) }
-            .disabled(model.isReadOnly)
+            .disabled(model.isReadOnly || model.stepsInEditor.contains(step.id))
     }
 
     @ViewBuilder

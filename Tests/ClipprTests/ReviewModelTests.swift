@@ -543,8 +543,181 @@ final class ReviewModelTests: XCTestCase {
         var m = SessionManifestStore.load(from: folder)
         m.version = SessionManifestStore.currentVersion + 1
         try SessionManifestStore.save(m, in: folder)
+        let before = try Data(contentsOf: folder.appendingPathComponent("session.json"))
         let model = makeModel()
+        let manifest = model.manifest
         model.replaceImage(for: model.manifest.steps[0].id, with: newImage())
         XCTAssertEqual(fileData("Step_01.png"), Data([1]))
+        XCTAssertEqual(model.manifest, manifest)
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("session.json")), before)
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    private func trashContents() throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: trash.path).sorted()
+    }
+    private func folderContents() throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+    }
+
+    final class Counter { var trashed = 0 }
+
+    /// Trashes like `fakeFiles`, but refuses any file named `refused` and counts what it moves.
+    private func files(refusing refused: String? = nil, counter: Counter = Counter()) -> StepFiles {
+        StepFiles(
+            trashItem: { [trash] url in
+                if url.lastPathComponent == refused { throw CocoaError(.fileWriteNoPermission) }
+                counter.trashed += 1
+                let dest = trash!.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                try FileManager.default.moveItem(at: url, to: dest)
+                return dest
+            },
+            moveItem: { try FileManager.default.moveItem(at: $0, to: $1) }
+        )
+    }
+
+    private func assertStep2Untouched(_ model: ReviewModel, file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]), file: file, line: line)
+        XCTAssertEqual(fileData("Step_02_zoom.png"), Data([9]), file: file, line: line)
+        XCTAssertEqual(fileData("Step_02_annotations.json"), Data([8]), file: file, line: line)
+        XCTAssertEqual(onDisk.steps[1].clickPoint, CGPoint(x: 5, y: 6), file: file, line: line)
+        XCTAssertEqual(try trashContents(), [], file: file, line: line)
+        XCTAssertFalse(try folderContents().contains { $0.contains("replacing") }, "temp file left behind", file: file, line: line)
+        XCTAssertFalse(model.undoManager.canUndo, file: file, line: line)
+    }
+
+    func testReplaceImageWriteFailureNeverTrashesOriginal() throws {
+        let id = try setClickData(step: 1)
+        let counter = Counter()
+        let model = ReviewModel(folder: folder, files: files(counter: counter), writeImage: { _, _ in throw CocoaError(.fileWriteUnknown) }, captionDelay: 0.05)
+        model.replaceImage(for: id, with: newImage())
+        XCTAssertEqual(counter.trashed, 0)
+        try assertStep2Untouched(model)
+        XCTAssertEqual(model.banner, "Couldn't replace the image for Step_02.png")
+    }
+
+    func testReplaceImageTrashFailureChangesNothing() throws {
+        let id = try setClickData(step: 1)
+        let model = ReviewModel(folder: folder, files: files(refusing: "Step_02.png"), captionDelay: 0.05)
+        model.replaceImage(for: id, with: newImage())
+        try assertStep2Untouched(model)
+        XCTAssertEqual(model.banner, "Couldn't replace the image for Step_02.png")
+    }
+
+    func testReplaceImageCompanionThatCantBeTrashedChangesNothing() throws {
+        let id = try setClickData(step: 1)
+        let model = ReviewModel(folder: folder, files: files(refusing: "Step_02_annotations.json"), captionDelay: 0.05)
+        model.replaceImage(for: id, with: newImage())
+        try assertStep2Untouched(model)
+        XCTAssertEqual(model.banner, "Couldn't replace the image for Step_02.png")
+    }
+
+    func testUndoReplaceAfterTrashEmptiedKeepsCurrentImage() throws {
+        let id = try setClickData(step: 1)
+        let counter = Counter()
+        let model = ReviewModel(folder: folder, files: files(counter: counter), captionDelay: 0.05)
+        model.replaceImage(for: id, with: newImage())
+        try emptyTrash()
+        counter.trashed = 0
+        model.undoManager.undo()
+        XCTAssertEqual(counter.trashed, 0)
+        XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
+        XCTAssertNil(onDisk.steps[1].clickPoint)
+        XCTAssertEqual(try trashContents(), [])  // nothing moved to the Trash
+        XCTAssertEqual(model.banner, "Couldn't restore Step_02.png — it's no longer in the Trash")
+    }
+
+    func testReplaceImageSaveFailureIsRetriedByFlush() throws {
+        let id = try setClickData(step: 1)
+        let box = Box()
+        box.fail = false
+        let model = makeModel(save: { m, f in if box.fail { throw CocoaError(.fileWriteUnknown) }; try SessionManifestStore.saveSafely(m, in: f) })
+        box.fail = true
+        model.replaceImage(for: id, with: newImage())
+        XCTAssertEqual(model.banner, "Couldn't save changes — will retry")
+        XCTAssertTrue(model.hasUnsavedChanges)
+        XCTAssertEqual(onDisk.steps[1].clickPoint, CGPoint(x: 5, y: 6))
+        box.fail = false
+        model.flush()
+        XCTAssertNil(onDisk.steps[1].clickPoint)
+        XCTAssertNil(onDisk.steps[1].zoomFile)
+        XCTAssertFalse(model.hasUnsavedChanges)
+    }
+
+    func testUndoReplaceAfterStepRemovedByReloadMovesNothing() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        model.replaceImage(for: id, with: newImage())
+        var m = SessionManifestStore.load(from: folder)
+        m.steps.removeAll { $0.id == id }
+        try SessionManifestStore.save(m, in: folder)
+        model.reload()
+        let folderBefore = try folderContents(), trashBefore = try trashContents()
+        model.undoManager.undo()
+        XCTAssertEqual(try folderContents(), folderBefore)
+        XCTAssertEqual(try trashContents(), trashBefore)
+        XCTAssertEqual(model.banner, "Couldn't undo — Step_02.png is no longer in this session")
+    }
+
+    func testPendingCaptionIsSavedAndKeptAcrossReplace() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel(captionDelay: 10)
+        model.editCaption("typed", for: id)
+        model.replaceImage(for: id, with: newImage())
+        XCTAssertEqual(onDisk.steps[1].caption, "typed")
+        model.undoManager.undo()  // the replace
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        XCTAssertEqual(onDisk.steps[1].caption, "typed")
+    }
+
+    func testReplaceRefusedWhileStepIsOpenInEditor() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        model.stepsInEditor = [id]
+        model.replaceImage(for: id, with: newImage())
+        try assertStep2Untouched(model)
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
+    }
+
+    /// A refused undo stays available, so it works once the editor is closed.
+    func testUndoReplaceRefusedWhileEditorOpenThenWorksAfterClose() async throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        model.replaceImage(for: id, with: newImage())
+        model.stepsInEditor = [id]
+        model.undoManager.undo()
+        XCTAssertEqual(model.banner, "Close the image editor for this step first")
+        XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(model.undoManager.canUndo)
+        XCTAssertFalse(model.undoManager.canRedo)
+        model.stepsInEditor = []
+        model.undoManager.undo()
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        XCTAssertEqual(onDisk.steps[1].clickPoint, CGPoint(x: 5, y: 6))
+    }
+
+    func testRedoReplaceRefusedWhileEditorOpenStaysRedoable() async throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        model.replaceImage(for: id, with: newImage())
+        model.undoManager.undo()
+        model.stepsInEditor = [id]
+        model.undoManager.redo()
+        XCTAssertEqual(fileData("Step_02.png"), Data([1]))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(model.undoManager.canRedo)
+        XCTAssertFalse(model.undoManager.canUndo)
+        model.stepsInEditor = []
+        model.undoManager.redo()
+        XCTAssertEqual(NSImage(contentsOf: folder.appendingPathComponent("Step_02.png"))?.size, CGSize(width: 8, height: 5))
+    }
+
+    func testReplaceWithPNGDataWritesItAsIs() throws {
+        let id = try setClickData(step: 1)
+        let model = makeModel()
+        let png = try XCTUnwrap(StepFiles.pngData(newImage()))
+        model.replaceImage(for: id, withPNG: png)
+        XCTAssertEqual(fileData("Step_02.png"), png)
     }
 }

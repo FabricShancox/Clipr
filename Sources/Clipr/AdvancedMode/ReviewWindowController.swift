@@ -10,8 +10,9 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     // Keeps each opened EditorWindowController alive until it finishes; without this,
     // the local `editor` in openEditor(for:) would be deallocated as soon as that
     // function returns, silently breaking its Done/Discard closures (which capture
-    // `[weak self]` on the editor controller).
-    private var openEditors: [EditorWindowController] = []
+    // `[weak self]` on the editor controller). Each is paired with the step it edits, so that
+    // step's image can't be replaced while the editor still holds the old one.
+    private var openEditors: [(editor: EditorWindowController, stepID: UUID)] = []
     var windowID: CGWindowID? { window.map { CGWindowID($0.windowNumber) } }
 
     @MainActor
@@ -54,7 +55,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// Saves the session's pending caption (retrying a failed save) and any edits pending in
     /// image editors opened from it — the same flush `AppDelegate` gives its own editors on quit.
     func flush() {
-        for editor in openEditors { editor.flushPendingSave() }
+        for open in openEditors { open.editor.flushPendingSave() }
         MainActor.assumeIsolated { model.flush() }
     }
 
@@ -95,8 +96,16 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
-            guard let image = NSImage(contentsOf: url) else { return }
-            MainActor.assumeIsolated { self.model.replaceImage(for: step.id, with: image) }
+            let model = self.model
+            // A large photo takes a noticeable time to decode and re-encode; doing it here would
+            // freeze the window. The model applies the result back on the main actor.
+            Task.detached(priority: .userInitiated) {
+                let png = StepFiles.replacementPNG(from: url)
+                await MainActor.run {
+                    guard let png else { return model.showBanner("Couldn't open \(url.lastPathComponent)") }
+                    model.replaceImage(for: step.id, withPNG: png)
+                }
+            }
         }
     }
 
@@ -105,10 +114,12 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         guard let image = NSImage(contentsOf: url) else { return }
         // Rename disabled: session.json refers to steps by filename.
         let editor = EditorWindowController(image: image, rawURL: url, storage: storage, allowsRename: false)
-        openEditors.append(editor)
+        openEditors.append((editor, step.id))
+        updateStepsInEditor()
         editor.onFinished = { [weak self, weak editor] in
             guard let self, let editor else { return }
-            self.openEditors.removeAll { $0 === editor }
+            self.openEditors.removeAll { $0.editor === editor }
+            self.updateStepsInEditor()
             MainActor.assumeIsolated {
                 let folder = self.model.folder
                 // Drop every cached decode for this step so the row shows the edited image.
@@ -119,5 +130,10 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         editor.showWindow(nil)
+    }
+
+    private func updateStepsInEditor() {
+        let ids = Set(openEditors.map(\.stepID))
+        MainActor.assumeIsolated { model.stepsInEditor = ids }
     }
 }

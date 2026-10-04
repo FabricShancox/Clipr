@@ -12,6 +12,10 @@ final class ReviewModel: ObservableObject {
     @Published private(set) var banner: String?
     /// Bumped when step images may have changed on disk, so rows rebuild their thumbnails.
     @Published private(set) var refreshToken = 0
+    /// Steps with an image editor open on them, kept up to date by `ReviewWindowController`.
+    /// Their images can't be replaced (or a replacement undone) meanwhile: the editor still holds
+    /// the old image and would write it, or an edited preview of it, back over the new one.
+    @Published var stepsInEditor: Set<UUID> = []
 
     let folder: URL
     let readOnlyReason: SessionManifestStore.ReadOnlyReason?
@@ -20,7 +24,7 @@ final class ReviewModel: ObservableObject {
 
     private let files: StepFiles
     private let save: (SessionManifest, URL) throws -> Void
-    private let writeImage: (NSImage, URL) throws -> Void
+    private let writeImage: (Data, URL) throws -> Void
     private let captionDelay: TimeInterval
     private var pendingCaption: (id: UUID, text: String?)?
     private var captionWork: DispatchWorkItem?
@@ -49,7 +53,7 @@ final class ReviewModel: ObservableObject {
         folder: URL,
         files: StepFiles = StepFiles(),
         save: @escaping (SessionManifest, URL) throws -> Void = SessionManifestStore.saveSafely,
-        writeImage: @escaping (NSImage, URL) throws -> Void = StepFiles.writePNG,
+        writeImage: @escaping (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) },
         captionDelay: TimeInterval = 0.5
     ) {
         self.folder = folder
@@ -240,21 +244,54 @@ final class ReviewModel: ObservableObject {
 
     // MARK: Replace image
 
-    /// Swaps a step's image for a retake or a chosen file. The old image and everything derived
-    /// from it (annotations, zoom crop, edited preview) go to the Trash, and the click point and
-    /// zoom are cleared because they describe the old image. The step keeps its filename, place
-    /// and caption.
+    /// For failures found outside the model, such as a chosen replacement file that won't open.
+    func showBanner(_ text: String) { banner = text }
+
+    static let editorOpenBanner = "Close the image editor for this step first"
+
+    /// Swaps a step's image for a retake. See `replaceImage(for:withPNG:)`.
     func replaceImage(for id: UUID, with image: NSImage) {
         guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        guard let data = StepFiles.pngData(image) else {
+            banner = "Couldn't replace the image for \(step.file)"
+            return
+        }
+        replaceImage(for: id, withPNG: data)
+    }
+
+    /// Swaps a step's image for new PNG data. The old image and everything derived from it
+    /// (annotations, zoom crop, edited preview) go to the Trash, and the click point and zoom are
+    /// cleared because they describe the old image. The step keeps its filename, place and caption.
+    ///
+    /// The new image is written to a temporary file before anything is trashed, so a failed encode
+    /// or write never touches the old image; and the old files are trashed all-or-nothing, so no
+    /// stale companion is left to shadow the new image.
+    func replaceImage(for id: UUID, withPNG data: Data) {
+        guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        guard !stepsInEditor.contains(id) else { banner = Self.editorOpenBanner; return }
         flushPendingCaption()
         let failure = "Couldn't replace the image for \(step.file)"
+        let stepURL = url(for: step)
+        // Hidden, and without the "Step_" prefix, so a leftover after a crash is never taken for
+        // a step when a session is rebuilt from its PNGs.
+        let temp = folder.appendingPathComponent(".\((step.file as NSString).deletingPathExtension).replacing.png")
+        do { try writeImage(data, temp) } catch {
+            try? FileManager.default.removeItem(at: temp)
+            banner = failure
+            return
+        }
         let old: TrashedStep
-        do { old = try files.trash(step.file, in: folder) } catch { banner = failure; return }
-        do {
-            try writeImage(image, url(for: step))
-        } catch {
-            // Put the original back so a failed write never leaves the step without an image.
-            try? files.restore(old)
+        do { old = try files.trashAll(step.file, in: folder) } catch {
+            try? FileManager.default.removeItem(at: temp)
+            banner = failure
+            return
+        }
+        do { try files.moveItem(temp, stepURL) } catch {
+            try? FileManager.default.removeItem(at: temp)
+            do { try files.restore(old) } catch {
+                banner = Self.lostImageBanner(step.file, trashed: old)
+                return
+            }
             banner = failure
             return
         }
@@ -262,28 +299,70 @@ final class ReviewModel: ObservableObject {
         registerUndo("Replace Image") { $0.swapImage(for: id, restoring: old, record: step) }
     }
 
+    /// When putting an image back fails too, the step is left without one; the banner says where
+    /// the image went so the user can recover it by hand.
+    private static func lostImageBanner(_ file: String, trashed: TrashedStep) -> String {
+        let location = trashed.moves.first?.trashed.path ?? "the Trash"
+        return "Couldn't put back the image for \(file) — it's in the Trash at \(location)"
+    }
+
     /// Undo and redo of a replacement: the current image set goes to the Trash and `trashed` comes
     /// back, with the click data that belongs to it. Each swap registers the opposite swap.
     private func swapImage(for id: UUID, restoring trashed: TrashedStep, record: StepRecord) {
-        guard let current = manifest.steps.first(where: { $0.id == id }) else { return }
+        guard let current = manifest.steps.first(where: { $0.id == id }) else {
+            banner = "Couldn't \(undoManager.isRedoing ? "redo" : "undo") — \(record.file) is no longer in this session"
+            return
+        }
+        guard !stepsInEditor.contains(id) else {
+            banner = Self.editorOpenBanner
+            requeue { $0.swapImage(for: id, restoring: trashed, record: record) }
+            return
+        }
+        // Checked before anything moves: finding out mid-swap would mean trashing the current
+        // image with nothing to put in its place.
+        guard StepFiles.isInTrash(trashed) else {
+            banner = "Couldn't restore \(trashed.file) — it's no longer in the Trash"
+            return
+        }
         let currentFiles: TrashedStep
-        do { currentFiles = try files.trash(current.file, in: folder) } catch {
+        do { currentFiles = try files.trashAll(current.file, in: folder) } catch {
             banner = "Couldn't replace the image for \(current.file)"
             return
         }
         do {
             try files.restore(trashed)
         } catch {
-            try? files.restore(currentFiles)
-            banner = "Couldn't restore \(current.file) — it's no longer in the Trash"
+            do { try files.restore(currentFiles) } catch {
+                banner = Self.lostImageBanner(current.file, trashed: currentFiles)
+                return
+            }
+            banner = "Couldn't restore \(trashed.file)"
             return
         }
         applyImageFields(clickPoint: record.clickPoint, zoomFile: record.zoomFile, for: id)
         registerUndo("Replace Image") { $0.swapImage(for: id, restoring: currentFiles, record: current) }
     }
 
+    /// Puts a refused undo (or redo) back on the stack it came from, so it can be tried again
+    /// once the editor is closed rather than being lost. Registered while undoing, a handler
+    /// lands on the redo stack; redoing it straight away runs a handler that registers `action`,
+    /// which — registered while redoing — lands back on the undo stack. Redo is the mirror image.
+    /// Deferred because the undo manager can't start a redo from inside an undo.
+    private func requeue(_ action: @escaping (ReviewModel) -> Void) {
+        let wasUndoing = undoManager.isUndoing
+        registerUndo("Replace Image") { $0.registerUndo("Replace Image", action) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if wasUndoing { self.undoManager.redo() } else { self.undoManager.undo() }
+        }
+    }
+
     private func applyImageFields(clickPoint: CGPoint?, zoomFile: String?, for id: UUID) {
-        guard let index = manifest.steps.firstIndex(where: { $0.id == id }) else { return }
+        // Callers check the step exists before moving any files, so this is a last line of defence.
+        guard let index = manifest.steps.firstIndex(where: { $0.id == id }) else {
+            banner = "Couldn't update the step — it's no longer in this session"
+            return
+        }
         manifest.steps[index].clickPoint = clickPoint
         manifest.steps[index].zoomFile = zoomFile
         _ = persist()
