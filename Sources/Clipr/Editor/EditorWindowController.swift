@@ -159,7 +159,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onShare: { [weak self] annotations in self?.share(annotations: annotations) },
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
-            onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) },
+            onDeleteCapture: { [weak self] url, deleted in self?.deleteRecent(url, then: deleted) },
             onRename: allowsRename ? { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) } : nil,
             commands: commands
         ))
@@ -313,6 +313,33 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
                 alert.beginSheetModal(for: window)
+            }
+        }
+    }
+
+    /// Confirms, then moves a Recent capture (and its edited copy and annotations) to the Trash.
+    /// The × on a thumbnail is small and sits on every tile, so one mis-click used to delete a
+    /// capture permanently with no warning; a failure was swallowed and the tile hidden anyway.
+    private func deleteRecent(_ url: URL, then deleted: @escaping () -> Void) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
+        alert.informativeText = "Its edited copy and annotations go too. You can put them back from the Trash in Finder."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            do {
+                try self.storage.deleteCapture(rawURL: url)
+                ThumbnailCache.shared.remove(url)
+                deleted()
+            } catch {
+                NSLog("Clipr: couldn't move \(url.lastPathComponent) to the Trash: \(error)")
+                let failure = NSAlert()
+                failure.messageText = "Couldn't move this capture to the Trash"
+                failure.informativeText = "\(url.lastPathComponent) was left where it is.\n\n\(error.localizedDescription)"
+                failure.alertStyle = .warning
+                failure.beginSheetModal(for: window)
             }
         }
     }

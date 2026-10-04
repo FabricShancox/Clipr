@@ -104,7 +104,9 @@ struct EditorView: View {
     /// can extend beyond the image's own bounds (expand) or be smaller (shrink/crop) — plus the
     /// current annotations, for the same remap-not-discard treatment as crop.
     let onCanvasResize: (CGRect, [AnnotationObject]) -> Void
-    let onDeleteCapture: (URL) -> Void
+    /// Asks to move a Recent capture to the Trash. The controller confirms first and calls the
+    /// completion only once the file has actually gone, so a failed delete doesn't hide the tile.
+    let onDeleteCapture: (URL, @escaping () -> Void) -> Void
     /// Rename requested from the header: the capture being renamed, the new base name (no
     /// extension, unsanitised as typed), and the current annotations so the controller can flush
     /// them against the OLD name before any file moves — same reasoning as `onOpenCapture`.

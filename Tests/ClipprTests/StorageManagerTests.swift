@@ -174,6 +174,52 @@ final class StorageManagerTests: XCTestCase {
 
     /// A save-folder change in Preferences re-points the existing (long-lived) StorageManager rather
     /// than rebuilding it, so writes must follow the new folder immediately.
+    // MARK: - Deleting a Recent
+
+    func testDeleteCaptureMovesTheCaptureAndItsCompanionsToTheTrash() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let editedURL = try manager.saveEditedCapture(makeTestImage(), rawURL: rawURL)
+        let annotation = AnnotationObject(
+            id: UUID(), kind: .rectangle, frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+            color: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1), strokeWidth: 1
+        )
+        try manager.saveAnnotations([annotation], rawURL: rawURL)
+        let trash = tempDir.appendingPathComponent("FakeTrash")
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        var trashed: [String] = []
+        manager.trashItem = { url in
+            trashed.append(url.lastPathComponent)
+            try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(url.lastPathComponent))
+        }
+
+        try manager.deleteCapture(rawURL: rawURL)
+
+        XCTAssertEqual(trashed.first, rawURL.lastPathComponent)
+        XCTAssertTrue(trashed.contains(editedURL.lastPathComponent))
+        XCTAssertEqual(trashed.count, 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rawURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: trash.appendingPathComponent(rawURL.lastPathComponent).path),
+                      "the capture is recoverable, not destroyed")
+    }
+
+    func testDeleteCaptureReportsAFailureAndLeavesCompanionsAlone() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let editedURL = try manager.saveEditedCapture(makeTestImage(), rawURL: rawURL)
+        manager.trashItem = { _ in throw CocoaError(.fileWriteNoPermission) }
+
+        XCTAssertThrowsError(try manager.deleteCapture(rawURL: rawURL))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rawURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: editedURL.path))
+    }
+
+    func testDeleteCaptureOfANeverEditedCaptureOnlyTrashesTheRawFile() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        var trashed: [URL] = []
+        manager.trashItem = { trashed.append($0); try FileManager.default.removeItem(at: $0) }
+        try manager.deleteCapture(rawURL: rawURL)
+        XCTAssertEqual(trashed, [rawURL])
+    }
+
     func testReassigningBaseFolderRedirectsSubsequentWrites() throws {
         let newFolder = tempDir.appendingPathComponent("Relocated")
         manager.baseFolder = newFolder

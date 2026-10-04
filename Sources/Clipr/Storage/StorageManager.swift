@@ -155,14 +155,33 @@ final class StorageManager {
         try? FileManager.default.removeItem(at: annotationsURL(forRaw: rawURL))
     }
 
-    /// Deletes a capture entirely: its raw file, `_edited` preview, and annotations sidecar, if
-    /// any of those exist. Used when the user deletes a Recent capture from the editor sidebar.
-    func deleteCapture(rawURL: URL) {
-        try? FileManager.default.removeItem(at: rawURL)
-        let editedURL = rawURL.deletingLastPathComponent()
-            .appendingPathComponent(FilenameGenerator.editedName(fromRaw: rawURL.lastPathComponent))
-        try? FileManager.default.removeItem(at: editedURL)
-        deleteAnnotations(rawURL: rawURL)
+    /// Moves a file to the Trash. A seam so tests don't fill the real Trash.
+    var trashItem: (URL) throws -> Void = { url in
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
+    /// Moves a capture to the Trash: its raw file, then its `_edited` preview and annotations
+    /// sidecar, if they exist. Used when the user deletes a Recent capture from the editor
+    /// sidebar.
+    ///
+    /// Trash rather than `removeItem`, so a mis-click on the small delete button can be recovered
+    /// in Finder (and to match how Review deletes steps). Throws if the raw file couldn't be
+    /// moved — the sidebar used to hide the tile anyway, so a failed delete looked like it worked.
+    /// The companions are only attempted once the raw file is gone.
+    func deleteCapture(rawURL: URL) throws {
+        try trashItem(rawURL)
+        let folder = rawURL.deletingLastPathComponent()
+        let companions = [
+            folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: rawURL.lastPathComponent)),
+            annotationsURL(forRaw: rawURL)
+        ]
+        for url in companions where FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try trashItem(url)
+            } catch {
+                NSLog("Clipr: couldn't move \(url.lastPathComponent) to the Trash: \(error)")
+            }
+        }
     }
 
     /// Renames a capture and the two files keyed off its name — the flattened `_edited.png` and
