@@ -118,7 +118,9 @@ extension AnnotationCanvasView {
         guard let final = liveResized,
               let index = annotations.firstIndex(where: { $0.id == final.id }),
               isUsableSize(final) else { return }
-        annotations[index] = final
+        // Narrowing a text box re-wraps it onto more lines; grow it so none are hidden. An
+        // unchanged result (a plain click on the handle) is a no-op in `mutateAnnotations`.
+        annotations[index] = final.fittedToText()
     }
 
     /// Rejects a resize that collapsed the shape to nothing. Arrows and freehand strokes are lines,

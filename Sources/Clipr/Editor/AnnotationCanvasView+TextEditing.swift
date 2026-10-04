@@ -19,20 +19,29 @@ extension AnnotationCanvasView {
         if let id = editingTextID, let annotation = annotations.first(where: { $0.id == id }),
            case .text(_, let style) = annotation.kind {
             let frame = swiftUIFrame(fromRendererFrame: annotation.frame, canvasHeight: canvasHeight)
+            let pad = Self.textEditorLinePadding
+            // The box grows to fit as the user types (see `editingTextBinding`), and the text
+            // wraps at exactly `frame.width` — the same width the static text and the renderer
+            // wrap at, so nothing re-flows when editing ends. NSTextView keeps a line-fragment
+            // padding on each side of its text, so the editor is widened by that much and shifted
+            // left to line its glyphs up with the frame.
             TextEditor(text: editingTextBinding)
                 .font(styledSwiftUIFont(style))
                 .foregroundColor(displayColor(for: annotation))
                 .multilineTextAlignment(swiftUITextAlignment(style.horizontalAlign))
                 .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
                 .background(Color.clear)
-                .frame(width: max(frame.width, 80), height: max(frame.height, 32))
-                .padding(style.border ? 4 : 0)
+                .frame(width: frame.width + pad * 2, height: frame.height)
                 .background(
                     style.border
-                        ? RoundedRectangle(cornerRadius: 4).stroke(displayColor(for: annotation), lineWidth: 1.5)
+                        ? RoundedRectangle(cornerRadius: 4)
+                            .stroke(displayColor(for: annotation), lineWidth: 1.5)
+                            .padding(.horizontal, pad - textBorderInset.width)
+                            .padding(.vertical, -textBorderInset.height)
                         : nil
                 )
-                .position(x: max(frame.width, 80) / 2 + frame.minX, y: frame.midY)
+                .position(x: frame.midX, y: frame.midY)
                 .focused($textFieldFocused)
                 .onExitCommand { finishTextEditing() }
                 .onAppear { textFieldFocused = true }
@@ -73,8 +82,16 @@ extension AnnotationCanvasView {
             set: { newValue in
                 guard let id = editingTextID, let index = annotations.firstIndex(where: { $0.id == id }),
                       case .text(_, let style) = annotations[index].kind else { return }
-                annotations[index].kind = .text(newValue, style)
+                var updated = annotations[index]
+                updated.kind = .text(newValue, style)
+                // Grow the box to fit, so text longer than it is wrapped and shown in full rather
+                // than truncated on the canvas and clipped in the export.
+                annotations[index] = updated.fittedToText()
             }
         )
     }
+
+    /// `NSTextView`'s default `lineFragmentPadding`, which SwiftUI's `TextEditor` keeps on each
+    /// side of its text.
+    static let textEditorLinePadding: CGFloat = 5
 }

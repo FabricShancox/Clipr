@@ -29,7 +29,10 @@ extension AnnotationCanvasView {
         let style = currentTextStyle
         let minHeight = style.fontSize + 10
         let swiftUIFrame = dragged.width >= 24 && dragged.height >= 16
-            ? CGRect(x: dragged.origin.x, y: dragged.origin.y, width: dragged.width, height: max(dragged.height, minHeight))
+            // At least 80pt wide: the box's width is the wrap width from here on (the editor,
+            // the on-canvas text and the export all wrap to exactly it), so a sliver would wrap
+            // every word onto its own line.
+            ? CGRect(x: dragged.origin.x, y: dragged.origin.y, width: max(dragged.width, 80), height: max(dragged.height, minHeight))
             : CGRect(x: start.x, y: start.y, width: 160, height: minHeight)
         let newAnnotation = AnnotationObject(
             id: UUID(), kind: .text("", style),
