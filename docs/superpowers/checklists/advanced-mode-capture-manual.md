@@ -19,11 +19,16 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] Typing on (Input Monitoring granted): type a name in a text field, click elsewhere → a "Type "…" in Name" step showing the filled field, before the click step.
 - [ ] Typing on: type in a password field → no typing step; `session.json` has no trace of it.
 - [ ] Typing on: typing in an app with no usable Accessibility data (or where focus moves to another field mid-typing) → no typing step; clicks still record.
+- [ ] Typing on: type in a field, press Tab to the next field → typing step recorded.
+- [ ] Typing on: type in a field, click the next field → typing step recorded, before the click step.
+- [ ] Typing on: pressing Clipr's own hotkeys (step / Advanced Mode) never creates a "Press …" step.
+- [ ] Typing on: typing in Terminal/iTerm → no typing step; clicks still record.
+- [ ] Typing on: type a few characters, Pause, Resume, Stop → no typing step for those characters.
 - [ ] Typing on without Input Monitoring: panel shows the warning; clicks still record.
 - [ ] Click captions: only quote visible text for labels, cells, buttons, links, headings; clicking a filled text field shows the field name, never its contents.
 - [ ] Shortcut: ⌘S in an app → "Press ⌘S" step.
 - [ ] Step hotkey: set one, start session, press it → manual step without caption/marker; after Stop the hotkey no longer fires.
-- [ ] Delay 1.5 s: open a menu by clicking → step shows the menu open.
+- [ ] Delay 1.5 s, Screen scope: open a menu by clicking → step shows the menu open (Window scope captures only the app window, not menus).
 - [ ] Double-click → one step.
 
 ## Session
