@@ -46,12 +46,22 @@ extension AppDelegate {
         return item
     }
 
-    /// Deliberately no Undo/Redo: the editor keeps its own annotation undo stack and already binds
-    /// ⌘Z / ⇧⌘Z in `EditorView+Toolbar.swift`. A menu item on the same keys would shadow those and
-    /// dispatch to `NSUndoManager`, which nothing here populates, so Undo would appear to break.
+    /// Undo/Redo here act only on text being typed — a text annotation, the rename field, any
+    /// Preferences field — and are disabled otherwise (see `TextUndoMenuTarget`). The editor keeps
+    /// its own annotation undo stack bound to ⌘Z / ⇧⌘Z in `EditorView+Toolbar.swift`; a disabled
+    /// menu item doesn't claim the key, so those still fire whenever no text is being edited. With
+    /// no Undo item at all, ⌘Z did nothing inside text fields (the editor's own button is off then).
     /// The rest route down the responder chain and are what make text fields editable.
     private func editMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Edit")
+        let undo = NSMenuItem(title: "Undo", action: #selector(TextUndoMenuTarget.undoText(_:)), keyEquivalent: "z")
+        undo.target = TextUndoMenuTarget.shared
+        menu.addItem(undo)
+        let redo = NSMenuItem(title: "Redo", action: #selector(TextUndoMenuTarget.redoText(_:)), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        redo.target = TextUndoMenuTarget.shared
+        menu.addItem(redo)
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
@@ -73,5 +83,29 @@ extension AppDelegate {
         item.title = "Window"
         item.submenu = menu
         return item
+    }
+}
+
+/// Target for the Edit menu's Undo/Redo: forwards to the undo manager of the text view being
+/// typed in, and validates as disabled when no text view has focus, so the editor's own ⌘Z
+/// shortcut (annotation undo) receives the key instead.
+final class TextUndoMenuTarget: NSObject, NSMenuItemValidation {
+    static let shared = TextUndoMenuTarget()
+
+    private var focusedTextUndoManager: UndoManager? {
+        guard let text = NSApp.keyWindow?.firstResponder as? NSText else { return nil }
+        return text.undoManager
+    }
+
+    @objc func undoText(_ sender: Any?) { focusedTextUndoManager?.undo() }
+    @objc func redoText(_ sender: Any?) { focusedTextUndoManager?.redo() }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let manager = focusedTextUndoManager else { return false }
+        switch menuItem.action {
+        case #selector(undoText(_:)): return manager.canUndo
+        case #selector(redoText(_:)): return manager.canRedo
+        default: return false
+        }
     }
 }
