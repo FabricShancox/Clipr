@@ -51,9 +51,19 @@ private struct KeyCatcherView: NSViewRepresentable {
         return view
     }
 
+    /// Focus moves on the next main-loop turn, never inside this view update: changing the first
+    /// responder here posts accessibility and focus notifications that re-enter SwiftUI's update
+    /// of the surrounding (List-backed) grouped Form — the same freeze family as Review. It also
+    /// only happens when recording starts, not on every update while it's on.
     func updateNSView(_ nsView: KeyCatcherNSView, context: Context) {
+        let startedRecording = isRecording && !nsView.isRecording
         nsView.isRecording = isRecording
-        if isRecording { nsView.window?.makeFirstResponder(nsView) }
+        guard startedRecording else { return }
+        DispatchQueue.main.async { [weak nsView] in
+            guard let nsView, nsView.isRecording, let window = nsView.window,
+                  window.firstResponder !== nsView else { return }
+            window.makeFirstResponder(nsView)
+        }
     }
 }
 

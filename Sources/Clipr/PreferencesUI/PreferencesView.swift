@@ -146,11 +146,12 @@ struct PreferencesView: View {
                     Text("Mark each click")
                     Text("Draws an editable marker where you clicked.")
                 }
-                Picker("Marker style", selection: advancedBinding(\.markerStyle)) {
-                    Text("Ring").tag(AdvancedModeSettings.MarkerStyle.ring)
-                    Text("Dot").tag(AdvancedModeSettings.MarkerStyle.dot)
-                }
-                .pickerStyle(.segmented)
+                // Drawn, not a native `.segmented` Picker — see `DrawnSegmentedPicker`.
+                DrawnSegmentedPicker(
+                    label: "Marker style",
+                    selection: advancedBinding(\.markerStyle),
+                    options: [(.ring, "Ring"), (.dot, "Dot")]
+                )
                 .disabled(!advanced.clickMarker)
                 Toggle(isOn: advancedBinding(\.cursorTrail)) {
                     Text("Show pointer trail")
