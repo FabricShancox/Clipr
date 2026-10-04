@@ -88,25 +88,17 @@ final class ExportFlowController {
     private func chooseDestination(for options: ExportOptions, title: String, completion: @escaping (URL?) -> Void) {
         guard let window else { return completion(nil) }
         if options.format == .markdown {
-            let panel = NSOpenPanel()
-            panel.title = "Export Markdown"
-            panel.message = "Choose a folder for guide.md and its images."
-            panel.prompt = "Export"
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.canCreateDirectories = true
-            panel.allowsMultipleSelection = false
+            let panel = Panels.chooseFolder(title: "Export Markdown", message: "Choose a folder for guide.md and its images.",
+                                            prompt: "Export", canCreateDirectories: true)
             panel.beginSheetModal(for: window) { [weak self] response in
                 guard response == .OK, let folder = panel.url else { return completion(nil) }
                 guard MarkdownGuideWriter.hasExistingGuide(in: folder) else { return completion(folder) }
                 DispatchQueue.main.async { self?.confirmReplace(in: folder, completion: completion) }
             }
         } else {
-            let panel = NSSavePanel()
-            panel.title = "Export \(options.format.title)"
-            panel.nameFieldStringValue = options.format.suggestedFileName(for: title)
-            panel.allowedContentTypes = [Self.contentType(for: options.format)]
-            panel.canCreateDirectories = true
+            let panel = Panels.saveFile(title: "Export \(options.format.title)",
+                                        name: options.format.suggestedFileName(for: title),
+                                        types: [Self.contentType(for: options.format)])
             panel.beginSheetModal(for: window) { response in
                 completion(response == .OK ? panel.url : nil)
             }

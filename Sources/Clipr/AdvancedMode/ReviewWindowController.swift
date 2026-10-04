@@ -99,11 +99,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func replaceWithFile(_ step: StepRecord) {
-        let panel = NSOpenPanel()
-        panel.title = "Replace Image"
-        panel.prompt = "Replace"
-        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
-        panel.allowsMultipleSelection = false
+        let panel = Panels.chooseFile(title: "Replace Image", prompt: "Replace", types: [.png, .jpeg, .heic, .tiff])
         guard let window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }

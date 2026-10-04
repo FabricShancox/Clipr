@@ -311,11 +311,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// folder, so this is for handing a copy to someone else, in a format they can use.
     private func saveAs(annotations: [AnnotationObject]) {
         guard let window else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = ExportFormat.allCases.map(\.contentType)
-        panel.nameFieldStringValue = rawURL.deletingPathExtension().lastPathComponent
-        panel.canCreateDirectories = true
-        panel.message = "Export a copy of this capture"
+        let panel = Panels.saveFile(message: "Export a copy of this capture",
+                                    name: rawURL.deletingPathExtension().lastPathComponent,
+                                    types: ExportFormat.allCases.map(\.contentType))
         // Snapshot the image now. The capture hotkey is global, so a new capture (or a Recent)
         // can replace `self.image` while this sheet is up; reading it at Save time exported the
         // new image with the old capture's annotations drawn on it.

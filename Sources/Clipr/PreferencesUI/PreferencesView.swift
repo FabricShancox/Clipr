@@ -304,10 +304,7 @@ struct PreferencesView: View {
     }
 
     private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.directoryURL = saveFolder
+        let panel = Panels.chooseFolder(startingAt: saveFolder)
         if panel.runModal() == .OK, let url = panel.url {
             saveFolder = url
             settings.saveFolder = url

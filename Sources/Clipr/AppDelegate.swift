@@ -100,11 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// name). Unless it's already a PNG in the capture folder, it's imported there as a new PNG
     /// first — see `StorageManager.importForEditing` — and the original is never written to.
     private func openImage() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.png, .jpeg, .tiff, .bmp, .gif, .heic]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.title = "Open Image in Clipr"
+        let panel = Panels.chooseFile(title: "Open Image in Clipr", types: [.png, .jpeg, .tiff, .bmp, .gif, .heic])
         // Chosen from the status menu while another app is frontmost: without activating, the
         // panel (and any alert after it) can open behind that app.
         WindowPresenter.activateApp()
