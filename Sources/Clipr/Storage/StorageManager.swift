@@ -68,16 +68,26 @@ final class StorageManager {
         if folder.path == base.path, url.pathExtension.lowercased() == "png" {
             return url
         }
-        let name = FilenameGenerator.sanitizedBaseName(url.deletingPathExtension().lastPathComponent) ?? "Image"
+        let name = Self.importedBaseName(FilenameGenerator.sanitizedBaseName(url.deletingPathExtension().lastPathComponent) ?? "Image")
         let target = baseFolder.appendingPathComponent("\(name).png")
         if url.pathExtension.lowercased() == "png" {
-            // Byte-for-byte, so the copy keeps the original's metadata and colour profile.
+            // Byte-for-byte, so the copy keeps the original's metadata and colour profile. Written as
+            // data rather than copied, so extended attributes (com.apple.quarantine, Finder tags,
+            // where-from URLs) don't come along.
             try FileManager.default.createDirectory(at: baseFolder, withIntermediateDirectories: true)
             let destination = uniqueURL(for: target)
-            try FileManager.default.copyItem(at: url, to: destination)
+            try Data(contentsOf: url).write(to: destination, options: .atomic)
             return destination
         }
         return try write(image, to: target)
+    }
+
+    /// An imported file named like one of a capture's companions (`X_edited`, `X_zoom`,
+    /// `X_annotations`) would be picked up as that capture's edited image, close-up or sidecar, so
+    /// it gets a suffix.
+    static func importedBaseName(_ name: String) -> String {
+        let lower = name.lowercased()
+        return ["_edited", "_zoom", "_annotations"].contains { lower.hasSuffix($0) } ? name + "-imported" : name
     }
 
     /// Persists the live, editable annotation objects for a capture as a JSON sidecar, so

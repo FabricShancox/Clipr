@@ -59,6 +59,23 @@ final class OpenImageImportTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: original), originalBytes)
     }
 
+    func testCompanionLookingNamesAreRenamedOnImport() throws {
+        for (name, expected) in [("shot_edited.png", "shot_edited-imported.png"), ("shot_zoom.png", "shot_zoom-imported.png"),
+                                 ("Shot_Annotations.png", "Shot_Annotations-imported.png"), ("plain.png", "plain.png")] {
+            let original = try writeFile(name, type: .png, in: outside)
+            XCTAssertEqual(try manager.importForEditing(original, image: image()).lastPathComponent, expected)
+        }
+        let jpeg = try writeFile("pic_edited.jpg", type: .jpeg, in: outside)
+        XCTAssertEqual(try manager.importForEditing(jpeg, image: image()).lastPathComponent, "pic_edited-imported.png")
+    }
+
+    func testImportedPNGDoesNotCarryQuarantine() throws {
+        let original = try writeFile("q.png", type: .png, in: outside)
+        XCTAssertEqual(setxattr(original.path, "com.apple.quarantine", "0081;00000000;Test;", 19, 0, 0), 0)
+        let imported = try manager.importForEditing(original, image: image())
+        XCTAssertEqual(getxattr(imported.path, "com.apple.quarantine", nil, 0, 0, 0), -1)
+    }
+
     func testCroppingAnImportedImageLeavesTheOriginalUntouched() throws {
         let original = try writeFile("photo.png", type: .png, in: outside)
         let originalBytes = try Data(contentsOf: original)
