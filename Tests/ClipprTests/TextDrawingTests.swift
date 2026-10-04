@@ -78,3 +78,32 @@ final class TextDrawingTests: XCTestCase {
         XCTAssertEqual(textBorderRect(for: CGRect(x: 10, y: 10, width: 100, height: 20)), CGRect(x: 6, y: 8, width: 108, height: 24))
     }
 }
+
+/// The live text editor sits where the static text and the renderer put the text, so it doesn't
+/// jump when editing ends.
+final class EditingTextRectTests: XCTestCase {
+    private let frame = CGRect(x: 10, y: 20, width: 200, height: 100)
+
+    func testEachVerticalAlignment() {
+        XCTAssertEqual(editingTextRect(in: frame, textHeight: 30, align: .top), CGRect(x: 10, y: 20, width: 200, height: 30))
+        XCTAssertEqual(editingTextRect(in: frame, textHeight: 30, align: .middle), CGRect(x: 10, y: 55, width: 200, height: 30))
+        XCTAssertEqual(editingTextRect(in: frame, textHeight: 30, align: .bottom), CGRect(x: 10, y: 90, width: 200, height: 30))
+    }
+
+    func testTextTallerThanTheBoxHangsFromItsTop() {
+        XCTAssertEqual(editingTextRect(in: frame, textHeight: 140, align: .bottom).minY, 20)
+    }
+
+    // Matches the renderer, which works in y-up space: its offset from the frame's bottom equals
+    // the editor's offset from the frame's top for the mirrored alignment.
+    func testAgreesWithTheRenderer() {
+        let attributed = NSAttributedString(string: "Hi", attributes: [.font: NSFont.systemFont(ofSize: 18)])
+        let rendererFrame = CGRect(x: 0, y: 0, width: 200, height: 100)
+        for align in [TextVerticalAlign.top, .middle, .bottom] {
+            let drawn = verticallyAlignedTextRect(attributed, in: rendererFrame, align: align)
+            let editing = editingTextRect(in: rendererFrame, textHeight: drawn.height, align: align)
+            // Flip the renderer's rect into top-left space for comparison.
+            XCTAssertEqual(editing.minY, rendererFrame.height - drawn.maxY, accuracy: 0.001, "\(align)")
+        }
+    }
+}

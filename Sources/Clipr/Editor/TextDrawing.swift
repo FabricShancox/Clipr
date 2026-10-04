@@ -58,6 +58,24 @@ func verticallyAlignedTextRect(_ attributed: NSAttributedString, in frame: CGRec
     return CGRect(x: frame.origin.x, y: frame.origin.y + yOffset, width: frame.width, height: height)
 }
 
+/// Where the live text editor sits inside a text annotation's `frame` (SwiftUI space: top-left
+/// origin, y down) so typing shows the text exactly where the static text and the renderer place
+/// it for `align` — otherwise middle- and bottom-aligned text jumped when editing ended. Text
+/// taller than the frame hangs from its top, as `verticallyAlignedTextRect` draws it.
+func editingTextRect(in frame: CGRect, textHeight: CGFloat, align: TextVerticalAlign) -> CGRect {
+    let y: CGFloat
+    if textHeight >= frame.height {
+        y = frame.minY
+    } else {
+        switch align {
+        case .top: y = frame.minY
+        case .middle: y = frame.minY + (frame.height - textHeight) / 2
+        case .bottom: y = frame.maxY - textHeight
+        }
+    }
+    return CGRect(x: frame.minX, y: y, width: frame.width, height: textHeight)
+}
+
 /// The border drawn around a bordered text annotation, the same in the editor (static and while
 /// typing) and in every export: a few points outside the text frame so it doesn't touch the
 /// glyphs.
