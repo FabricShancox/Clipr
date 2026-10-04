@@ -21,6 +21,8 @@ extension EditorView {
                     guard let index = list.firstIndex(where: { $0.id == selected.id }),
                           case .text(let string, _) = list[index].kind else { return }
                     list[index].kind = .text(string, newStyle)
+                    // A bigger or bold font needs more room; keep the whole text visible.
+                    list[index] = list[index].fittedToText()
                 }
             }
         )

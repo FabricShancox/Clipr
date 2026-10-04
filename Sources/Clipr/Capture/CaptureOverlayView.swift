@@ -11,13 +11,16 @@ struct CaptureOverlayView: View {
     @State private var dragStart: CGPoint?
     @State private var dragCurrent: CGPoint?
     @State private var hoveredWindow: WindowInfo?
+    /// The on-screen windows, listed once per capture on the first hover in Window mode rather than
+    /// with a `CGWindowListCopyWindowInfo` call on every mouse move. The screen is frozen for the
+    /// capture anyway.
+    @State private var windows: [WindowInfo]?
 
     var body: some View {
         ZStack(alignment: .top) {
             if let frozenImage {
                 Image(nsImage: frozenImage)
                     .resizable()
-                    .ignoresSafeArea()
             }
             Color.black.opacity(0.15)
 
@@ -54,8 +57,14 @@ struct CaptureOverlayView: View {
             }
             .padding(8)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .padding(.top, 24)
+            // Below the camera housing on a notched display, now that the whole overlay ignores
+            // the safe area.
+            .padding(.top, 24 + screen.safeAreaInsets.top)
         }
+        // The whole overlay, not just the frozen image, ignores the safe area: drags are measured
+        // in this stack's space and cropped in the screen's, so on a notched display a stack
+        // inset by the notch put every crop off by the notch height.
+        .ignoresSafeArea()
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 1)
@@ -91,9 +100,16 @@ struct CaptureOverlayView: View {
         }
         .onContinuousHover { phase in
             guard mode == .window else { hoveredWindow = nil; return }
-            if case .active(let location) = phase {
+            switch phase {
+            case .active(let location):
                 let screenPoint = CaptureOverlayView.globalDisplayPoint(forViewLocalPoint: location, on: screen)
-                hoveredWindow = WindowPicker.window(at: screenPoint, in: WindowPicker.onScreenWindows())
+                let list = windows ?? WindowPicker.onScreenWindows()
+                if windows == nil { windows = list }
+                hoveredWindow = WindowPicker.window(at: screenPoint, in: list)
+            case .ended:
+                // Each display has its own overlay; leaving this one must clear its highlight, or a
+                // stale outline stays on this screen while the pointer is on another.
+                hoveredWindow = nil
             }
         }
     }

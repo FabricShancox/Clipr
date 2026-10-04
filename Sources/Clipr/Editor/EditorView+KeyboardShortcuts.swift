@@ -26,6 +26,9 @@ extension EditorView {
         }
         .opacity(0)
         .frame(width: 0, height: 0)
+        // Invisible keyboard-shortcut carriers; opacity alone leaves them in VoiceOver as
+        // unlabeled buttons.
+        .accessibilityHidden(true)
     }
 
     /// Esc and Return finish with the capture: Esc closes the window, leaving whatever is on the
@@ -46,6 +49,12 @@ extension EditorView {
             .keyboardShortcut(.escape, modifiers: [])
             .disabled(editing)
             Button("") {
+                // With one text annotation selected, Return goes back into it to edit — the
+                // keyboard counterpart of double-clicking it.
+                if let text = selectedTextAnnotation {
+                    editingTextID = text.id
+                    return
+                }
                 onCopy(annotations)
                 onClose()
             }
@@ -54,6 +63,9 @@ extension EditorView {
         }
         .opacity(0)
         .frame(width: 0, height: 0)
+        // Invisible keyboard-shortcut carriers; opacity alone leaves them in VoiceOver as
+        // unlabeled buttons.
+        .accessibilityHidden(true)
     }
 
     func shortcutButton(_ key: Character, tool: AnnotationTool, editing: Bool) -> some View {

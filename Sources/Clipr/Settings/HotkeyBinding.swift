@@ -77,7 +77,20 @@ struct HotkeyBinding: Codable, Equatable {
     /// A global hotkey swallows its key in every app, so a bare letter, Return, Delete or Esc
     /// bound here would stop that key working system-wide. A binding therefore needs ⌘, ⌃ or ⌥
     /// (⇧ alone still types a character), except F1–F20, which may be bare.
-    static func recordingOutcome(keyCode: UInt32, modifiers: UInt32) -> RecordingOutcome {
+    ///
+    /// `takenBy` lists Clipr's other shortcuts with their names. Recording one of those is refused:
+    /// the second registration would fail, and the alert then blamed "another app or macOS".
+    static func recordingOutcome(
+        keyCode: UInt32, modifiers: UInt32, takenBy: [(binding: HotkeyBinding, name: String)] = []
+    ) -> RecordingOutcome {
+        let outcome = basicRecordingOutcome(keyCode: keyCode, modifiers: modifiers)
+        if case .accepted(let binding) = outcome, let owner = takenBy.first(where: { $0.binding == binding }) {
+            return .rejected("Already used for \(owner.name)")
+        }
+        return outcome
+    }
+
+    private static func basicRecordingOutcome(keyCode: UInt32, modifiers: UInt32) -> RecordingOutcome {
         let required = Modifier.command.rawValue | Modifier.control.rawValue | Modifier.option.rawValue
         let hasRequired = modifiers & required != 0
         if keyCode == escapeKeyCode, !hasRequired { return .cancelled }

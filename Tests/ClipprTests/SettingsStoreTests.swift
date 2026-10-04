@@ -9,7 +9,7 @@ final class SettingsStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         defaults = UserDefaults(suiteName: "ClipprTests.\(UUID().uuidString)")
-        store = SettingsStore(defaults: defaults)
+        store = SettingsStore(defaults: defaults, loginItem: FakeLoginItem())
     }
 
     func testDefaultsWhenUnset() {
@@ -17,6 +17,17 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.advancedModeHotkey, HotkeyBinding.defaultAdvancedMode)
         XCTAssertEqual(store.saveFolder, FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/Screenshots"))
         XCTAssertFalse(store.launchAtLogin)
+    }
+
+    /// Preferences and the editor each toggle one part; neither may overwrite the other's.
+    func testCopyStylePartsAreIndependentKeys() {
+        store.copyShadow = true
+        let editorSide = SettingsStore(defaults: defaults)
+        editorSide.copyBorder = true
+        XCTAssertEqual(store.copyStyle, CopyStyle(border: true, shadow: true))
+        editorSide.copyBorder = false
+        XCTAssertTrue(store.copyShadow)
+        XCTAssertTrue(defaults.bool(forKey: SettingsStore.copyShadowKey), "views bind @AppStorage to this key")
     }
 
     func testCaptureHotkeyPersists() {
@@ -33,10 +44,21 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.saveFolder, custom)
     }
 
-    func testLaunchAtLoginPersists() {
-        store.launchAtLogin = true
-        let reloaded = SettingsStore(defaults: defaults)
-        XCTAssertTrue(reloaded.launchAtLogin)
+    func testLaunchAtLoginReflectsTheSystemNotAStoredFlag() throws {
+        let item = FakeLoginItem()
+        let store = SettingsStore(defaults: defaults, loginItem: item)
+        try store.setLaunchAtLogin(true)
+        XCTAssertTrue(store.launchAtLogin)
+        item.isEnabled = false // switched off in System Settings
+        XCTAssertFalse(SettingsStore(defaults: defaults, loginItem: item).launchAtLogin)
+    }
+
+    func testAFailedRegistrationThrowsAndStaysOff() {
+        let item = FakeLoginItem()
+        item.failure = CocoaError(.featureUnsupported)
+        let store = SettingsStore(defaults: defaults, loginItem: item)
+        XCTAssertThrowsError(try store.setLaunchAtLogin(true))
+        XCTAssertFalse(store.launchAtLogin)
     }
 
     func testReviewLayoutDefaultsToListAndPersists() {
@@ -83,4 +105,11 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertNil(ThumbnailCache.shared.image(for: url))
         XCTAssertNil(ThumbnailCache.shared.image(for: url, maxPixelSize: ThumbnailCache.largePixelSize))
     }
+}
+
+private final class FakeLoginItem: LoginItem {
+    var isEnabled = false
+    var failure: Error?
+    func register() throws { if let failure { throw failure }; isEnabled = true }
+    func unregister() throws { if let failure { throw failure }; isEnabled = false }
 }

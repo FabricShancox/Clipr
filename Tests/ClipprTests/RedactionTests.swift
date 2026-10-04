@@ -192,4 +192,37 @@ final class RedactionTests: XCTestCase {
         let decoded = try JSONDecoder().decode([AnnotationObject].self, from: data)
         XCTAssertEqual(decoded.first?.redactionStyle, .solid)
     }
+
+    func testThePreviewIsCachedAndClippedToTheCanvas() throws {
+        let base = stripedImage(width: 120, height: 120)
+        let frame = CGRect(x: 80, y: 10, width: 100, height: 40)
+        let first = try XCTUnwrap(PixelatedPreviewCache.shared.preview(of: base, in: frame))
+        let second = try XCTUnwrap(PixelatedPreviewCache.shared.preview(of: base, in: frame))
+        XCTAssertTrue(first.0 === second.0, "the second evaluation reuses the first result")
+        XCTAssertEqual(first.1, CGRect(x: 80, y: 10, width: 40, height: 40))
+        let other = stripedImage(width: 120, height: 120)
+        let third = try XCTUnwrap(PixelatedPreviewCache.shared.preview(of: other, in: frame))
+        XCTAssertFalse(third.0 === first.0, "a different image never gets another's preview")
+    }
+
+    /// A redaction hanging off the canvas edge pixelates the visible part in place. It used to
+    /// pixelate the clipped region and stretch it across the whole (partly off-canvas) frame, so
+    /// the blocks no longer lined up with what was under them.
+    func testARedactionPastTheEdgeIsNotStretched() throws {
+        // Blue on the left, red in the right quarter.
+        let base = testImage(width: 400, height: 60) {
+            NSColor.blue.set()
+            NSRect(x: 0, y: 0, width: 400, height: 60).fill()
+            NSColor.red.set()
+            NSRect(x: 300, y: 0, width: 100, height: 60).fill()
+        }
+        let flattened = AnnotationRenderer.flatten(
+            base: base, annotations: [redaction(over: CGRect(x: 200, y: 0, width: 400, height: 60))]
+        )
+        let out = try bitmap(flattened)
+        let nearRightEdge = try XCTUnwrap(out.colorAt(x: 390, y: 30)).usingColorSpace(.deviceRGB)
+        XCTAssertGreaterThan(try XCTUnwrap(nearRightEdge).redComponent, 0.8, "red stays where the red was")
+        let leftOfRed = try XCTUnwrap(out.colorAt(x: 210, y: 30)).usingColorSpace(.deviceRGB)
+        XCTAssertGreaterThan(try XCTUnwrap(leftOfRed).blueComponent, 0.8)
+    }
 }

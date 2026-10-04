@@ -47,8 +47,7 @@ extension EditorView {
             // whole window (its image, its autosave target), so that one has no delete button.
             if url != currentURL {
                 Button {
-                    deletedRecentURLs.insert(url)
-                    onDeleteCapture(url)
+                    onDeleteCapture(url) { deletedRecentURLs.insert(url) }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
@@ -57,7 +56,7 @@ extension EditorView {
                 }
                 .buttonStyle(.plain)
                 .offset(x: 4, y: 2)
-                .help("Delete this capture")
+                .help("Move this capture to the Trash")
             }
         }
     }

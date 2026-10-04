@@ -18,6 +18,29 @@ final class StorageManager {
         self.baseFolder = baseFolder
     }
 
+    /// Captures can hold anything that was on screen, and session captions can hold typed text,
+    /// so what Clipr writes into its own folders is readable by the owner only. Under `~/Pictures`
+    /// that changes nothing (the home folder is already private), but a save folder in
+    /// `/Users/Shared`, on an external disk or in a synced folder otherwise left every screenshot
+    /// readable by other accounts. Save As… exports keep the default permissions — handing a copy
+    /// to someone is their point.
+    static let privateFilePermissions = 0o600
+    static let privateFolderPermissions = 0o700
+
+    /// Creates `folder` (and any missing parents) owner-only. An existing folder is left as is.
+    static func createPrivateFolder(_ folder: URL) throws {
+        try FileManager.default.createDirectory(
+            at: folder, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: privateFolderPermissions]
+        )
+    }
+
+    /// Makes a file Clipr just wrote owner-only. Best effort: a volume without POSIX permissions
+    /// (FAT, some network shares) can't do it, and that mustn't fail the save.
+    static func restrictToOwner(_ url: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: privateFilePermissions], ofItemAtPath: url.path)
+    }
+
     func saveRawCapture(_ image: NSImage, date: Date) throws -> URL {
         let name = FilenameGenerator.rawScreenshotName(date: date)
         return try write(image, to: baseFolder.appendingPathComponent(name))
@@ -74,9 +97,10 @@ final class StorageManager {
             // Byte-for-byte, so the copy keeps the original's metadata and colour profile. Written as
             // data rather than copied, so extended attributes (com.apple.quarantine, Finder tags,
             // where-from URLs) don't come along.
-            try FileManager.default.createDirectory(at: baseFolder, withIntermediateDirectories: true)
+            try Self.createPrivateFolder(baseFolder)
             let destination = uniqueURL(for: target)
             try Data(contentsOf: url).write(to: destination, options: .atomic)
+            Self.restrictToOwner(destination)
             return destination
         }
         return try write(image, to: target)
@@ -94,11 +118,23 @@ final class StorageManager {
     /// reopening it from Recents (or relaunching Clipr entirely) restores actual editable
     /// annotations rather than only a flattened preview image. Called alongside
     /// `saveEditedCapture` on every auto-save.
+    ///
+    /// No annotations means no sidecar. Writing `[]` put an `X_annotations.json` beside every
+    /// capture merely viewed in the editor — and beside images opened from elsewhere — and failed
+    /// (logged only) on read-only folders. An empty save instead removes any sidecar left over,
+    /// including stale `[]` files from earlier builds; a missing sidecar already loads as "none".
     func saveAnnotations(_ annotations: [AnnotationObject], rawURL: URL) throws {
         let url = annotationsURL(forRaw: rawURL)
+        guard !annotations.isEmpty else {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            return
+        }
         let data = try JSONEncoder().encode(annotations)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.createPrivateFolder(url.deletingLastPathComponent())
         try data.write(to: url, options: .atomic)
+        Self.restrictToOwner(url)
     }
 
     /// Outcome of reading a capture's annotation sidecar. `missing` and `corrupt` are deliberately
@@ -117,7 +153,12 @@ final class StorageManager {
         let url = annotationsURL(forRaw: rawURL)
         guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
         do {
-            return .loaded(try JSONDecoder().decode([AnnotationObject].self, from: Data(contentsOf: url)))
+            // Size-checked before reading and range-checked after decoding — see `DecodeLimits`.
+            let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard bytes <= DecodeLimits.maxSidecarBytes else { throw SidecarLimitError.tooLarge(bytes: bytes) }
+            let annotations = try JSONDecoder().decode([AnnotationObject].self, from: Data(contentsOf: url))
+            guard DecodeLimits.areAcceptable(annotations) else { throw SidecarLimitError.outOfRange }
+            return .loaded(annotations)
         } catch {
             return .corrupt(error)
         }
@@ -155,14 +196,33 @@ final class StorageManager {
         try? FileManager.default.removeItem(at: annotationsURL(forRaw: rawURL))
     }
 
-    /// Deletes a capture entirely: its raw file, `_edited` preview, and annotations sidecar, if
-    /// any of those exist. Used when the user deletes a Recent capture from the editor sidebar.
-    func deleteCapture(rawURL: URL) {
-        try? FileManager.default.removeItem(at: rawURL)
-        let editedURL = rawURL.deletingLastPathComponent()
-            .appendingPathComponent(FilenameGenerator.editedName(fromRaw: rawURL.lastPathComponent))
-        try? FileManager.default.removeItem(at: editedURL)
-        deleteAnnotations(rawURL: rawURL)
+    /// Moves a file to the Trash. A seam so tests don't fill the real Trash.
+    var trashItem: (URL) throws -> Void = { url in
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
+    /// Moves a capture to the Trash: its raw file, then its `_edited` preview and annotations
+    /// sidecar, if they exist. Used when the user deletes a Recent capture from the editor
+    /// sidebar.
+    ///
+    /// Trash rather than `removeItem`, so a mis-click on the small delete button can be recovered
+    /// in Finder (and to match how Review deletes steps). Throws if the raw file couldn't be
+    /// moved — the sidebar used to hide the tile anyway, so a failed delete looked like it worked.
+    /// The companions are only attempted once the raw file is gone.
+    func deleteCapture(rawURL: URL) throws {
+        try trashItem(rawURL)
+        let folder = rawURL.deletingLastPathComponent()
+        let companions = [
+            folder.appendingPathComponent(FilenameGenerator.editedName(fromRaw: rawURL.lastPathComponent)),
+            annotationsURL(forRaw: rawURL)
+        ]
+        for url in companions where FileManager.default.fileExists(atPath: url.path) {
+            do {
+                try trashItem(url)
+            } catch {
+                NSLog("Clipr: couldn't move \(url.lastPathComponent) to the Trash: \(error)")
+            }
+        }
     }
 
     /// Renames a capture and the two files keyed off its name — the flattened `_edited.png` and
@@ -237,7 +297,7 @@ final class StorageManager {
     func createSessionFolder(date: Date) throws -> URL {
         let folder = baseFolder.appendingPathComponent(FilenameGenerator.sessionFolderName(date: date))
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Self.createPrivateFolder(folder)
         } catch {
             throw StorageError.folderCreationFailed(folder)
         }
@@ -300,7 +360,7 @@ final class StorageManager {
         guard let pngData = Self.bitmapRep(of: image)?.representation(using: .png, properties: [:]) else {
             throw StorageError.pngEncodingFailed
         }
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.createPrivateFolder(url.deletingLastPathComponent())
 
         // `overwrite` writes to `url` exactly as given (replacing whatever's already there);
         // otherwise resolve a collision by appending a numeric suffix, for callers where a
@@ -311,6 +371,7 @@ final class StorageManager {
         // replaces atomically, so on failure the previous file is still there, untouched.
         let finalURL = overwrite ? url : uniqueURL(for: url)
         try writeData(pngData, finalURL)
+        Self.restrictToOwner(finalURL)
         return finalURL
     }
 

@@ -14,6 +14,14 @@ final class HotkeyRecordingTests: XCTestCase {
         HotkeyBinding.recordingOutcome(keyCode: keyCode, modifiers: modifiers)
     }
 
+    func testAComboAlreadyUsedByAnotherClipShortcutIsRejected() {
+        let advanced = HotkeyBinding(keyCode: 1, modifiers: cmd | shift | ctrl)
+        let result = HotkeyBinding.recordingOutcome(keyCode: 1, modifiers: cmd | shift | ctrl, takenBy: [(advanced, "Advanced Mode")])
+        XCTAssertEqual(result, .rejected("Already used for Advanced Mode"))
+        let other = HotkeyBinding.recordingOutcome(keyCode: 2, modifiers: cmd | shift | ctrl, takenBy: [(advanced, "Advanced Mode")])
+        XCTAssertEqual(other, .accepted(HotkeyBinding(keyCode: 2, modifiers: cmd | shift | ctrl)))
+    }
+
     func testBareLetterIsRejected() {
         guard case .rejected = outcome(0, 0) else { return XCTFail("bare A accepted") }
     }

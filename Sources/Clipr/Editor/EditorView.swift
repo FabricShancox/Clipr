@@ -28,8 +28,7 @@ struct EditorView: View {
     @State var currentTextStyle = TextStyle.default
     @State var selectedIDs: Set<UUID> = []
     @State var editingTextID: UUID?
-    @State var undoStack: [[AnnotationObject]] = []
-    @State var redoStack: [[AnnotationObject]] = []
+    @State var history = EditorHistory()
     @State var zoomPercent: Double = 100
     @State var viewportSize: CGSize = .zero
     /// Once the user manually changes zoom (the +/- buttons), auto-fit-on-resize stops —
@@ -52,6 +51,8 @@ struct EditorView: View {
     @State var showingRedactionStyles = false
     @State var showSavedConfirmation = false
     @State var deletedRecentURLs: Set<URL> = []
+    /// Where the header's Share button is — see `onShare`.
+    @State var shareButtonFrame: CGRect = .zero
     @State var pendingCanvasResize: CGRect?
     /// Header filename rename (see `EditorView+Header.swift`). These reset whenever the content
     /// view is rebuilt — after a rename it is, so the field correctly reverts to plain text
@@ -84,10 +85,8 @@ struct EditorView: View {
     /// them back when it rebuilds the content view for a rename — see `EditorHistory`.
     let onHistoryChanged: (EditorHistory) -> Void
     let onCopy: ([AnnotationObject]) -> Void
-    /// What Copy adds around the image — see `CopyStyle`. Held as state so the header menu
-    /// redraws; every change is written straight back through `onCopyStyleChanged`.
-    @State var copyStyle: CopyStyle
-    let onCopyStyleChanged: (CopyStyle) -> Void
+    /// Where the copy-style settings live — see `CopyStyleMenu`.
+    let settingsDefaults: UserDefaults
     /// Closes the editor window. The capture is already on the clipboard (`CaptureManager` copies
     /// it the moment it's taken) and auto-save keeps the files current, so nothing is lost.
     let onClose: () -> Void
@@ -95,7 +94,9 @@ struct EditorView: View {
     /// the capture itself up to date in the save folder.
     let onSaveAs: ([AnnotationObject]) -> Void
     let onRevealInFinder: (URL) -> Void
-    let onShare: ([AnnotationObject]) -> Void
+    /// The rect is the Share button's frame in the hosting view's (top-left origin) space, so the
+    /// share picker can point at the button rather than the window's corner.
+    let onShare: ([AnnotationObject], CGRect) -> Void
     /// Crop rect in renderer space (the same y-up-from-bottom space `AnnotationObject.frame`
     /// uses), plus the annotations at the moment the crop was requested — `EditorWindowController`
     /// owns the base `NSImage` and does the actual pixel crop and annotation remap, since this
@@ -105,7 +106,9 @@ struct EditorView: View {
     /// can extend beyond the image's own bounds (expand) or be smaller (shrink/crop) — plus the
     /// current annotations, for the same remap-not-discard treatment as crop.
     let onCanvasResize: (CGRect, [AnnotationObject]) -> Void
-    let onDeleteCapture: (URL) -> Void
+    /// Asks to move a Recent capture to the Trash. The controller confirms first and calls the
+    /// completion only once the file has actually gone, so a failed delete doesn't hide the tile.
+    let onDeleteCapture: (URL, @escaping () -> Void) -> Void
     /// Rename requested from the header: the capture being renamed, the new base name (no
     /// extension, unsanitised as typed), and the current annotations so the controller can flush
     /// them against the OLD name before any file moves — same reasoning as `onOpenCapture`.
@@ -128,7 +131,11 @@ struct EditorView: View {
     /// rename field. Every bare-key shortcut (the 1-0 tool keys, Delete, ⌘Z) must be disabled
     /// while this holds, or it fires instead of reaching the field: Backspace would delete the
     /// selected annotation rather than a character, and a digit would switch tools mid-word.
-    var isTextEntryActive: Bool { editingTextID != nil || isRenaming }
+    ///
+    /// The stamp popover counts too: its "Next" number field takes digits, Delete and Return, and
+    /// the editor's bare-key shortcuts (Return = copy and close) could otherwise still fire through
+    /// key-equivalent dispatch while it's being typed in.
+    var isTextEntryActive: Bool { editingTextID != nil || isRenaming || showingStampAlternatives }
 
     var numberTool: AnnotationTool { .stamp(stampKind(for: nextStampNumber)) }
     var visibleRecents: [URL] { recentCaptures.filter { !deletedRecentURLs.contains($0) } }
@@ -151,7 +158,9 @@ struct EditorView: View {
                 canvasArea
             }
         }
-        .frame(minWidth: 900, minHeight: 620)
+        // Small enough to fit the visible frame of a 1024×640 (scaled) display; the toolbar needs
+        // the width, the canvas scrolls.
+        .frame(minWidth: 900, minHeight: 520)
         .background(EditorColors.s0)
         .background(toolShortcuts)
         .background(annotationEditingShortcuts)

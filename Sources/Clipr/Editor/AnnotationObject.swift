@@ -28,8 +28,27 @@ struct AnnotationObject: Identifiable, Codable, Equatable {
     /// small shapes in general — stay easy to click without having to land exactly on the
     /// outline pixel. The canvas passes a zoom-adjusted `tolerance` so the target stays a
     /// usable size on screen when a large capture is zoomed out.
+    ///
+    /// Arrows and freehand strokes are lines, so for them the bounding box is only a cheap
+    /// pre-filter: a long diagonal's box is mostly empty canvas, and treating all of it as "on"
+    /// the arrow stole every click there from the drawing tools. They count as hit only within
+    /// reach of the drawn path itself.
     func contains(_ point: CGPoint, tolerance: CGFloat = 10) -> Bool {
-        hitRect(tolerance: tolerance).contains(point)
+        guard hitRect(tolerance: tolerance).contains(point) else { return false }
+        let reach = max(tolerance, strokeWidth / 2 + tolerance / 2)
+        switch kind {
+        case .arrow(let start, let end):
+            // The head is wider than the shaft and sticks out past the tip, so the whole line
+            // keeps the head's length as its reach — thin arrows stay easy to grab.
+            let head = arrowHeadLength(for: strokeWidth)
+            return distance(from: point, toSegment: start, end) <= max(reach, head)
+        case .freehand(let points):
+            guard let first = points.first else { return false }
+            guard points.count > 1 else { return hypot(point.x - first.x, point.y - first.y) <= reach }
+            return zip(points, points.dropFirst()).contains { distance(from: point, toSegment: $0, $1) <= reach }
+        default:
+            return true
+        }
     }
 
     /// The invisible area that counts as "on" this annotation. Arrows get extra room: their frame
@@ -70,6 +89,15 @@ struct AnnotationObject: Identifiable, Codable, Equatable {
     /// Used to pick between overlapping hits: the smaller annotation wins, so an arrow or stamp
     /// sitting inside a large box or highlight can still be grabbed.
     var hitArea: CGFloat { frame.width * frame.height }
+}
+
+/// Shortest distance from `point` to the segment `a`–`b`.
+func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+    let dx = b.x - a.x, dy = b.y - a.y
+    let lengthSquared = dx * dx + dy * dy
+    guard lengthSquared > 0 else { return hypot(point.x - a.x, point.y - a.y) }
+    let t = min(max(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared, 0), 1)
+    return hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy))
 }
 
 extension AnnotationObject {

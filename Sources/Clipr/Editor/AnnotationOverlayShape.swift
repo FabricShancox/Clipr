@@ -68,15 +68,27 @@ struct AnnotationOverlayShape: View {
             freehandPath
                 .stroke(color, style: StrokeStyle(lineWidth: annotation.strokeWidth, lineCap: .round, lineJoin: .round))
         case .text(let string, let style):
+            // Wraps at the frame's width and is never truncated: `fixedSize` lets text taller than
+            // an old, un-grown box hang below it (matching the renderer) instead of ending in "…".
+            // The border sits at `textBorderRect`, the same outset the export draws.
             Text(string)
                 .font(styledSwiftUIFont(style))
                 .foregroundColor(color)
                 .multilineTextAlignment(swiftUITextAlignment(style.horizontalAlign))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: displayFrame.width, alignment: swiftUIFrameAlignment(horizontal: style.horizontalAlign, vertical: .top))
                 .frame(
                     width: displayFrame.width, height: displayFrame.height,
                     alignment: swiftUIFrameAlignment(horizontal: style.horizontalAlign, vertical: style.verticalAlign)
                 )
-                .background(style.border ? RoundedRectangle(cornerRadius: 4).stroke(color, lineWidth: 1.5) : nil)
+                .background(
+                    style.border
+                        ? RoundedRectangle(cornerRadius: 4)
+                            .stroke(color, lineWidth: 1.5)
+                            .padding(.horizontal, -textBorderInset.width)
+                            .padding(.vertical, -textBorderInset.height)
+                        : nil
+                )
                 .position(x: displayFrame.midX, y: displayFrame.midY)
         case .highlighter:
             Rectangle()
@@ -133,13 +145,14 @@ struct AnnotationOverlayShape: View {
                 .fill(Color(white: 0.12))
                 .frame(width: displayFrame.width, height: displayFrame.height)
                 .position(x: displayFrame.midX, y: displayFrame.midY)
-        } else if let cg = baseImage.bitmap,
-           let pixelated = Pixelation.pixelatedRegion(of: cg, in: displayFrame.scaled(by: baseImage.pixelScale)) {
+        } else if let (pixelated, visible) = PixelatedPreviewCache.shared.preview(of: baseImage, in: displayFrame) {
+            // Drawn over the on-canvas part only, matching the renderer: a redaction hanging off
+            // the edge used to have its clipped region stretched across the whole frame.
             Image(decorative: pixelated, scale: 1)
                 .resizable()
                 .interpolation(.none)
-                .frame(width: displayFrame.width, height: displayFrame.height)
-                .position(x: displayFrame.midX, y: displayFrame.midY)
+                .frame(width: visible.width, height: visible.height)
+                .position(x: visible.midX, y: visible.midY)
         } else {
             Rectangle()
                 .fill(Color(white: 0.5))

@@ -12,13 +12,20 @@ struct PreferencesView: View {
     /// `captureCursor` copy (set once at launch) rather than reading `SettingsStore` live, so
     /// this callback re-syncs both the moment the toggle changes.
     let onCaptureCursorChanged: () -> Void
+    /// Recording a shortcut started (true) or ended (false) — see
+    /// `HotkeyRecorderView.onRecordingChanged`.
+    let onHotkeyRecording: (Bool) -> Void
 
     @State private var captureHotkey: HotkeyBinding
     @State private var advancedModeHotkey: HotkeyBinding
     @State private var saveFolder: URL
     @State private var launchAtLogin: Bool
     @State private var captureCursor: Bool
-    @State private var copyStyle: CopyStyle
+    /// Bound straight to the settings keys (see `SettingsStore.copyBorderKey`), so an open editor's
+    /// copy-style menu and these toggles always agree.
+    @AppStorage private var copyBorder: Bool
+    @AppStorage private var copyShadow: Bool
+    @AppStorage private var checkForUpdates: Bool
     @State private var advanced: AdvancedModeSettings
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
 
@@ -26,9 +33,11 @@ struct PreferencesView: View {
         settings: SettingsStore,
         onHotkeysChanged: @escaping () -> Void,
         onSaveFolderChanged: @escaping () -> Void,
-        onCaptureCursorChanged: @escaping () -> Void
+        onCaptureCursorChanged: @escaping () -> Void,
+        onHotkeyRecording: @escaping (Bool) -> Void = { _ in }
     ) {
         self.settings = settings
+        self.onHotkeyRecording = onHotkeyRecording
         self.onHotkeysChanged = onHotkeysChanged
         self.onSaveFolderChanged = onSaveFolderChanged
         self.onCaptureCursorChanged = onCaptureCursorChanged
@@ -37,7 +46,9 @@ struct PreferencesView: View {
         _saveFolder = State(initialValue: settings.saveFolder)
         _launchAtLogin = State(initialValue: settings.launchAtLogin)
         _captureCursor = State(initialValue: settings.captureCursor)
-        _copyStyle = State(initialValue: settings.copyStyle)
+        _copyBorder = AppStorage(wrappedValue: false, SettingsStore.copyBorderKey, store: settings.defaults)
+        _copyShadow = AppStorage(wrappedValue: false, SettingsStore.copyShadowKey, store: settings.defaults)
+        _checkForUpdates = AppStorage(wrappedValue: true, SettingsStore.checkForUpdatesAutomaticallyKey, store: settings.defaults)
         _advanced = State(initialValue: settings.advancedMode)
     }
 
@@ -67,13 +78,13 @@ struct PreferencesView: View {
                     HotkeyRecorderView(binding: Binding(
                         get: { captureHotkey },
                         set: { captureHotkey = $0; settings.captureHotkey = $0; onHotkeysChanged() }
-                    ))
+                    ), otherBindings: otherHotkeys(except: .capture), onRecordingChanged: onHotkeyRecording)
                 }
                 LabeledContent("Start / stop Advanced Mode") {
                     HotkeyRecorderView(binding: Binding(
                         get: { advancedModeHotkey },
                         set: { advancedModeHotkey = $0; settings.advancedModeHotkey = $0; onHotkeysChanged() }
-                    ))
+                    ), otherBindings: otherHotkeys(except: .advancedMode), onRecordingChanged: onHotkeyRecording)
                 }
             } header: {
                 sectionHeader("Shortcuts")
@@ -109,17 +120,11 @@ struct PreferencesView: View {
             }
 
             Section {
-                Toggle(isOn: Binding(
-                    get: { copyStyle.border },
-                    set: { copyStyle.border = $0; settings.copyStyle = copyStyle }
-                )) {
+                Toggle(isOn: $copyBorder) {
                     Text("Add a border")
                     Text("A thin outline around copied images.")
                 }
-                Toggle(isOn: Binding(
-                    get: { copyStyle.shadow },
-                    set: { copyStyle.shadow = $0; settings.copyStyle = copyStyle }
-                )) {
+                Toggle(isOn: $copyShadow) {
                     Text("Add a drop shadow")
                     Text("Makes copied images stand out when pasted into documents.")
                 }
@@ -130,8 +135,12 @@ struct PreferencesView: View {
             Section {
                 Toggle("Open Clipr at login", isOn: Binding(
                     get: { launchAtLogin },
-                    set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
+                    set: { setLaunchAtLogin($0) }
                 ))
+                Toggle(isOn: $checkForUpdates) {
+                    Text("Check for updates automatically")
+                    Text("Asks GitHub for a newer release at most once a day.")
+                }
             } header: {
                 sectionHeader("Startup")
             }
@@ -148,11 +157,12 @@ struct PreferencesView: View {
                     Text("Mark each click")
                     Text("Draws an editable marker where you clicked.")
                 }
-                Picker("Marker style", selection: advancedBinding(\.markerStyle)) {
-                    Text("Ring").tag(AdvancedModeSettings.MarkerStyle.ring)
-                    Text("Dot").tag(AdvancedModeSettings.MarkerStyle.dot)
-                }
-                .pickerStyle(.segmented)
+                // Drawn, not a native `.segmented` Picker — see `DrawnSegmentedPicker`.
+                DrawnSegmentedPicker(
+                    label: "Marker style",
+                    selection: advancedBinding(\.markerStyle),
+                    options: [(.ring, "Ring"), (.dot, "Dot")]
+                )
                 .disabled(!advanced.clickMarker)
                 Toggle(isOn: advancedBinding(\.cursorTrail)) {
                     Text("Show pointer trail")
@@ -202,7 +212,8 @@ struct PreferencesView: View {
                     HStack {
                         Slider(value: advancedBinding(\.captureDelay), in: 0.2...2, step: 0.1)
                             .frame(width: 180)
-                        Text(String(format: "%.1f s", advanced.captureDelay))
+                        // Locale-aware decimal separator (0,5 s in many locales).
+                        Text("\(advanced.captureDelay.formatted(.number.precision(.fractionLength(1)))) s")
                             .monospacedDigit()
                             .frame(width: 40, alignment: .trailing)
                     }
@@ -216,7 +227,7 @@ struct PreferencesView: View {
                             HotkeyRecorderView(binding: Binding(
                                 get: { hotkey },
                                 set: { advanced.stepHotkey = $0; settings.advancedMode = advanced }
-                            ))
+                            ), otherBindings: otherHotkeys(except: .step), onRecordingChanged: onHotkeyRecording)
                             Button("Clear") { advanced.stepHotkey = nil; settings.advancedMode = advanced }
                         }
                     } else {
@@ -266,6 +277,33 @@ struct PreferencesView: View {
 
     private static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+
+    /// A refused registration is reported and the toggle reverts to what the system actually has,
+    /// rather than showing On for a login item that doesn't exist.
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try settings.setLaunchAtLogin(enabled)
+        } catch {
+            NSLog("Clipr: failed to update login item registration: \(error)")
+            let alert = NSAlert()
+            alert.messageText = enabled ? "Couldn't add Clipr to your login items" : "Couldn't remove Clipr from your login items"
+            alert.informativeText = "\(error.localizedDescription)\n\nYou can change this in System Settings › General › Login Items."
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+        launchAtLogin = settings.launchAtLogin
+    }
+
+    private enum HotkeySlot { case capture, advancedMode, step }
+
+    /// Clipr's shortcuts other than `slot`, with the names the recorder shows on a clash.
+    private func otherHotkeys(except slot: HotkeySlot) -> [(binding: HotkeyBinding, name: String)] {
+        var others: [(binding: HotkeyBinding, name: String)] = []
+        if slot != .capture { others.append((captureHotkey, "Capture")) }
+        if slot != .advancedMode { others.append((advancedModeHotkey, "Advanced Mode")) }
+        if slot != .step, let step = advanced.stepHotkey { others.append((step, "taking a step")) }
+        return others
     }
 
     private func chooseFolder() {

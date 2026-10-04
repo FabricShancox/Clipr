@@ -105,7 +105,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.title = "Open Image in Clipr"
-        guard panel.runModal() == .OK, let url = panel.url, let image = NSImage(contentsOf: url) else { return }
+        // Chosen from the status menu while another app is frontmost: without activating, the
+        // panel (and any alert after it) can open behind that app.
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let image: NSImage
+        switch DecodeLimits.loadImage(at: url) {
+        case .loaded(let loaded):
+            image = loaded
+        case .unreadable:
+            showOpenImageFailure(url, reason: "It isn't an image Clipr can read.")
+            return
+        case .tooLarge(let width, let height):
+            showOpenImageFailure(url, reason: "It is \(width) × \(height) pixels, which is too large to edit.")
+            return
+        }
         do {
             let editable = try storage.importForEditing(url, image: image)
             openEditor(image: image, rawURL: editable)
@@ -117,6 +131,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.alertStyle = .warning
             alert.runModal()
         }
+    }
+
+    private func showOpenImageFailure(_ url: URL, reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't open \(url.lastPathComponent)"
+        alert.informativeText = reason
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     private func registerHotkeys() {
@@ -167,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = "Capture failed"
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
+        // A capture is started from a hotkey while another app is frontmost.
+        NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
 
@@ -303,6 +327,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + [advancedModePanel])
     }
 
+    /// Clicking the Dock icon with no windows open used to do nothing. Bring back an editor that's
+    /// still around (e.g. miniaturized), otherwise open Preferences — the one window Clipr can
+    /// always show, and the place to find the capture shortcut.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else { return true }
+        if let editor = frontmostEditor() {
+            editor.window?.deminiaturize(nil)
+            bringToFront(editor)
+        } else {
+            openPreferences()
+        }
+        return false
+    }
+
     /// Quitting abandons every editor's pending 800ms auto-save debounce (and each Review's 0.5s
     /// caption debounce), so the last edit in each open window would be lost silently. Flushing
     /// here writes them synchronously first.
@@ -347,7 +385,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.storage.baseFolder = self.settings.saveFolder
             },
-            onCaptureCursorChanged: { [weak self] in self?.applyCaptureCursorSetting() }
+            onCaptureCursorChanged: { [weak self] in self?.applyCaptureCursorSetting() },
+            // Clipr's own hotkeys are off while a shortcut is being recorded, so pressing the
+            // current capture combo records it instead of taking a screenshot.
+            onHotkeyRecording: { [weak self] recording in
+                guard let self else { return }
+                if recording {
+                    self.hotkeyManager.unregister(id: HotkeyID.capture.rawValue)
+                    self.hotkeyManager.unregister(id: HotkeyID.advancedMode.rawValue)
+                } else {
+                    self.registerHotkeys()
+                }
+            }
         )
         preferencesWindowController = controller
         // Cleared on close so the next Preferences request builds a fresh window rather than

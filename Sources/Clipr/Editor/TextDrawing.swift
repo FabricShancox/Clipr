@@ -15,7 +15,7 @@ func drawAnnotationText(_ string: String, style: TextStyle, in frame: CGRect, co
     NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
     if style.border {
         nsColor.setStroke()
-        NSBezierPath(roundedRect: frame.insetBy(dx: -4, dy: -2), xRadius: 4, yRadius: 4).stroke()
+        NSBezierPath(roundedRect: textBorderRect(for: frame), xRadius: 4, yRadius: 4).stroke()
     }
     attributed.draw(in: verticallyAlignedTextRect(attributed, in: frame, align: style.verticalAlign))
     NSGraphicsContext.restoreGraphicsState()
@@ -41,12 +41,59 @@ func verticallyAlignedTextRect(_ attributed: NSAttributedString, in frame: CGRec
         with: CGSize(width: frame.width, height: .greatestFiniteMagnitude),
         options: [.usesLineFragmentOrigin]
     )
-    let height = min(measured.height, frame.height)
+    // Text taller than its frame (a sidecar from before boxes grew to fit) is drawn in full,
+    // hanging down from the frame's top, rather than clipped to the frame — clipping silently
+    // dropped words the user typed from every export.
+    let height = ceil(measured.height)
     let yOffset: CGFloat
-    switch align {
-    case .top: yOffset = frame.height - height
-    case .middle: yOffset = (frame.height - height) / 2
-    case .bottom: yOffset = 0
+    if height > frame.height {
+        yOffset = frame.height - height
+    } else {
+        switch align {
+        case .top: yOffset = frame.height - height
+        case .middle: yOffset = (frame.height - height) / 2
+        case .bottom: yOffset = 0
+        }
     }
     return CGRect(x: frame.origin.x, y: frame.origin.y + yOffset, width: frame.width, height: height)
+}
+
+/// The border drawn around a bordered text annotation, the same in the editor (static and while
+/// typing) and in every export: a few points outside the text frame so it doesn't touch the
+/// glyphs.
+func textBorderRect(for frame: CGRect) -> CGRect {
+    frame.insetBy(dx: -textBorderInset.width, dy: -textBorderInset.height)
+}
+
+let textBorderInset = CGSize(width: 4, height: 2)
+
+/// The height `string` needs when wrapped to `width` in `style`'s font — the one measurement the
+/// editor's live box, its static display and the renderer all agree on.
+func measuredTextHeight(_ string: String, style: TextStyle, width: CGFloat) -> CGFloat {
+    // An empty string, or one ending in a newline, still occupies a line while the caret is on it.
+    let measuring = string.isEmpty || string.hasSuffix("\n") ? string + " " : string
+    let attributed = NSAttributedString(string: measuring, attributes: [
+        .font: styledFont(style),
+        .paragraphStyle: textParagraphStyle(for: style.horizontalAlign)
+    ])
+    let measured = attributed.boundingRect(
+        with: CGSize(width: max(width, 1), height: .greatestFiniteMagnitude),
+        options: [.usesLineFragmentOrigin]
+    )
+    return ceil(measured.height)
+}
+
+extension AnnotationObject {
+    /// A text annotation grown, if needed, to fit everything typed into it. The width stays what
+    /// the user placed or dragged and the text wraps within it; the box grows downward on screen,
+    /// keeping its top edge (renderer `maxY`) where it is. It never shrinks, so a deliberately tall
+    /// box keeps its size. Other kinds are returned unchanged.
+    func fittedToText() -> AnnotationObject {
+        guard case .text(let string, let style) = kind else { return self }
+        let needed = measuredTextHeight(string, style: style, width: frame.width)
+        guard needed > frame.height else { return self }
+        var copy = self
+        copy.frame = CGRect(x: frame.minX, y: frame.maxY - needed, width: frame.width, height: needed)
+        return copy
+    }
 }

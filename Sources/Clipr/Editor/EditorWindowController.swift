@@ -53,6 +53,12 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.title = "Clipr Editor"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // The editor is drawn in a fixed dark palette (`EditorColors`), which also keeps the
+        // annotation swatches — white among them — legible around the canvas. Following a Light
+        // system appearance put light bezels under white labels on the dark header (Reveal,
+        // Save As…, the menu, the rename field, popover steppers), so the window is pinned to
+        // dark; sheets and popovers attached to it inherit that.
+        window.appearance = NSAppearance(named: .darkAqua)
         super.init(window: window)
 
         // windowWillClose(_:) is the single place onFinished fires — Copy/Share leave the
@@ -62,8 +68,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = makeContentView()
         installKeyMonitor()
         // Opens maximized (screen's visible frame, not true fullscreen) so the capture is
-        // visible at its largest size on launch.
-        if let screen = NSScreen.main {
+        // visible at its largest size on launch — on the screen the pointer is on, which is the
+        // one just captured (or where Open Image… was chosen). `NSScreen.main` is the screen of
+        // whatever window was key, so the editor often opened on a different display.
+        if let screen = Self.screenUnderPointer() ?? NSScreen.main {
             window.setFrame(screen.visibleFrame, display: true)
         } else {
             window.center()
@@ -72,6 +80,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    private static func screenUnderPointer() -> NSScreen? {
+        let pointer = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) }
+    }
 
     /// See `EditorCommands`. Only for this window, only while it has no sheet up, and never while
     /// a text view (a text annotation, the rename field) is first responder — there the keys keep
@@ -111,7 +124,29 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// nothing shown to the user. Called from `windowWillClose` and from
     /// `AppDelegate.applicationShouldTerminate`.
     func flushPendingSave() {
-        persist(latestAnnotations)
+        guard !persist(latestAnnotations) else { return }
+        reportSaveFailureOnce()
+    }
+
+    /// Set once the user has been told this window's work couldn't be saved, so a folder that
+    /// stays unwritable (a read-only volume, a revoked permission) produces one alert, not one on
+    /// every focus change.
+    private var hasReportedSaveFailure = false
+
+    /// Flushes from closing, quitting or switching away used to fail with only an `NSLog`, so
+    /// annotations on a capture in an unwritable folder were lost on close with no warning.
+    private func reportSaveFailureOnce() {
+        guard !hasReportedSaveFailure else { return }
+        hasReportedSaveFailure = true
+        let alert = NSAlert()
+        alert.messageText = "Couldn't save your annotations"
+        alert.informativeText = "Changes to \(rawURL.lastPathComponent) couldn't be written to its folder. Use Save As… to keep a copy elsewhere."
+        alert.alertStyle = .warning
+        if let window, window.isVisible, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     /// `initialAnnotations`, when omitted, loads whatever was last saved for `rawURL` from its
@@ -136,8 +171,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             currentURL: rawURL,
             recentCaptures: recentCaptures(in: storage.baseFolder),
             annotations: resolved,
-            undoStack: history.undo,
-            redoStack: history.redo,
+            history: history,
             onOpenCapture: { [weak self] url, currentAnnotations in self?.loadCapture(url, previousAnnotations: currentAnnotations) },
             onAutoSave: { [weak self] forURL, annotations in
                 self?.autoSave(for: forURL, annotations: annotations, generation: generation)
@@ -152,15 +186,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 self.latestHistory = history
             },
             onCopy: { [weak self] annotations in self?.copy(annotations: annotations) },
-            copyStyle: settings.copyStyle,
-            onCopyStyleChanged: { [weak self] style in self?.settings.copyStyle = style },
+            settingsDefaults: settings.defaults,
             onClose: { [weak self] in self?.window?.performClose(nil) },
             onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
             onRevealInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },
-            onShare: { [weak self] annotations in self?.share(annotations: annotations) },
+            onShare: { [weak self] annotations, buttonFrame in self?.share(annotations: annotations, from: buttonFrame) },
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
-            onDeleteCapture: { [weak self] url in self?.storage.deleteCapture(rawURL: url) },
+            onDeleteCapture: { [weak self] url, deleted in self?.deleteRecent(url, then: deleted) },
             onRename: allowsRename ? { [weak self] url, newName, annotations in self?.rename(url, to: newName, annotations: annotations) } : nil,
             commands: commands
         ))
@@ -249,8 +282,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     /// Writes the flattened preview and the annotations sidecar for the CURRENT capture. Callers
     /// inside this class use it directly — they only ever run for the live view, so they need no
-    /// staleness check. Failures are logged, not alerted, since this can fire often.
-    private func persist(_ annotations: [AnnotationObject], flattened: FlattenedWrite = .now) {
+    /// staleness check. Failures are logged here, since this can fire often; `flushPendingSave`
+    /// tells the user (once) when a flush it depends on fails.
+    @discardableResult
+    private func persist(_ annotations: [AnnotationObject], flattened: FlattenedWrite = .now) -> Bool {
         do {
             // The sidecar is what actually preserves the user's work — it restores editable
             // annotations on reopen and costs well under a millisecond — so it is written every
@@ -261,7 +296,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
             let dueForWrite = flattened == .now
                 || Date().timeIntervalSince(lastFlattenedWrite) >= Self.flattenedWriteInterval
-            guard flattenedIsStale, dueForWrite else { return }
+            guard flattenedIsStale, dueForWrite else { return true }
 
             let rendered = AnnotationRenderer.flatten(base: image, annotations: annotations)
             _ = try storage.saveEditedCapture(rendered, rawURL: rawURL)
@@ -277,8 +312,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // restores them instead of showing a plain, no-longer-editable image. This is what
             // makes returning to a previously-edited capture not read as "losing" the edits.
             try storage.saveAnnotations(annotations, rawURL: rawURL)
+            return true
         } catch {
             NSLog("Clipr: auto-save failed: \(error)")
+            return false
         }
     }
 
@@ -293,6 +330,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         panel.nameFieldStringValue = rawURL.deletingPathExtension().lastPathComponent
         panel.canCreateDirectories = true
         panel.message = "Export a copy of this capture"
+        // Snapshot the image now. The capture hotkey is global, so a new capture (or a Recent)
+        // can replace `self.image` while this sheet is up; reading it at Save time exported the
+        // new image with the old capture's annotations drawn on it.
+        let image = self.image
 
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
@@ -300,7 +341,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // filter or typing ".jpg" both do what the user expects.
             let format = ExportFormat.allCases.first { $0.fileExtension == url.pathExtension.lowercased() }
                 ?? (url.pathExtension.lowercased() == "jpeg" ? .jpeg : .png)
-            let flattened = AnnotationRenderer.flatten(base: self.image, annotations: annotations)
+            let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
             do {
                 try self.storage.export(flattened, to: url, format: format)
             } catch {
@@ -310,6 +351,33 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
                 alert.beginSheetModal(for: window)
+            }
+        }
+    }
+
+    /// Confirms, then moves a Recent capture (and its edited copy and annotations) to the Trash.
+    /// The × on a thumbnail is small and sits on every tile, so one mis-click used to delete a
+    /// capture permanently with no warning; a failure was swallowed and the tile hidden anyway.
+    private func deleteRecent(_ url: URL, then deleted: @escaping () -> Void) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move “\(url.lastPathComponent)” to the Trash?"
+        alert.informativeText = "Its edited copy and annotations go too. You can put them back from the Trash in Finder."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            do {
+                try self.storage.deleteCapture(rawURL: url)
+                ThumbnailCache.shared.remove(url)
+                deleted()
+            } catch {
+                NSLog("Clipr: couldn't move \(url.lastPathComponent) to the Trash: \(error)")
+                let failure = NSAlert()
+                failure.messageText = "Couldn't move this capture to the Trash"
+                failure.informativeText = "\(url.lastPathComponent) was left where it is.\n\n\(error.localizedDescription)"
+                failure.alertStyle = .warning
+                failure.beginSheetModal(for: window)
             }
         }
     }
@@ -354,6 +422,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // The base image changed, so the flattened export is out of date even if no annotation
             // did — crop and canvas-resize both land here.
             flattenedIsStale = true
+            // The Recents tile seeds from this cache by URL, and the URL hasn't changed, so
+            // without this it kept showing the uncropped image for the rest of the session.
+            ThumbnailCache.shared.remove(rawURL)
             return true
         } catch {
             NSLog("Clipr: \(operation) failed to write \(rawURL.lastPathComponent): \(error)")
@@ -381,11 +452,19 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window?.contentView = makeContentView(initialAnnotations: remapped)
     }
 
-    private func share(annotations: [AnnotationObject]) {
+    /// `buttonFrame` is in SwiftUI's global (top-left origin) space for the hosting view; the
+    /// picker is anchored to it so it pops from the Share button, not the window's corner.
+    private func share(annotations: [AnnotationObject], from buttonFrame: CGRect) {
         guard let contentView = window?.contentView else { return }
         let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
         let picker = NSSharingServicePicker(items: [flattened])
-        picker.show(relativeTo: .zero, of: contentView, preferredEdge: .maxY)
+        var anchor = buttonFrame
+        if !contentView.isFlipped {
+            anchor.origin.y = contentView.bounds.height - buttonFrame.maxY
+        }
+        if anchor.isEmpty { anchor = CGRect(x: contentView.bounds.maxX - 60, y: 0, width: 1, height: 1) }
+        // Below the button: the bottom edge is maxY in a flipped view, minY otherwise.
+        picker.show(relativeTo: anchor, of: contentView, preferredEdge: contentView.isFlipped ? .maxY : .minY)
     }
 
     /// Shows an already-loaded image (a fresh capture, or a file picked via Open) in THIS window
@@ -416,7 +495,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// it's reassigned, so a very recent edit that hadn't reached its debounce yet isn't lost.
     private func loadCapture(_ url: URL, previousAnnotations: [AnnotationObject]) {
         persist(previousAnnotations)
-        guard let newImage = NSImage(contentsOf: url) else { return }
+        // Header-checked before the full decode — see `DecodeLimits`.
+        guard case .loaded(let newImage) = DecodeLimits.loadImage(at: url) else {
+            NSSound.beep()
+            return
+        }
         image = newImage
         rawURL = url
         window?.contentView = makeContentView()
