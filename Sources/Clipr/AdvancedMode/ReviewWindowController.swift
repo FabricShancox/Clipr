@@ -84,11 +84,12 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         MainActor.assumeIsolated { model.flush() }
     }
 
-    /// Exports what Review shows now: a caption typed in the last half-second is saved first, so
-    /// the guide has it. Read-only sessions export too — exporting never writes to the session.
+    /// Exports what Review shows now: a caption typed in the last half-second, and annotations
+    /// still inside an open editor's auto-save delay, are saved first, so the guide has them.
+    /// Read-only sessions export too — exporting never writes to the session.
     private func showExport() {
+        flush()
         MainActor.assumeIsolated {
-            model.flush()
             exportFlow?.begin(manifest: model.manifest, folder: model.folder, selection: model.selection)
         }
     }
@@ -125,7 +126,15 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// One editor per step: a second would load the same sidecar and each would save over the
+    /// other's annotations. Asking again brings the open one forward.
     private func openEditor(for step: StepRecord) {
+        if let open = openEditors.first(where: { $0.stepID == step.id }) {
+            NSApp.activate(ignoringOtherApps: true)
+            open.editor.showWindow(nil)
+            open.editor.window?.makeKeyAndOrderFront(nil)
+            return
+        }
         let url = model.url(for: step)
         guard let image = NSImage(contentsOf: url) else { return }
         // Rename disabled: session.json refers to steps by filename.
