@@ -79,7 +79,7 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 ## Export — clipboard spike
 
 Run on (date, macOS version): pending — to be done by the user (needs signed-in browsers)
-Script: `$TMPDIR/clipr-clipboard-spike.swift` (heading, bold text, one data-URI PNG as HTML + RTF).
+Script: copy it from Task 1 Step 1 of `docs/superpowers/plans/2026-10-04-advanced-mode-export.md` (heading, bold text, one data-URI PNG as HTML + RTF) into a scratch `.swift` file and run it with `swift`.
 
 | Target | Heading + bold | Image |
 |---|---|---|

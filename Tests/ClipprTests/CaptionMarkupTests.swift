@@ -66,4 +66,28 @@ final class CaptionMarkupTests: XCTestCase {
     func testPlainTextDropsEmphasis() {
         XCTAssertEqual(CaptionMarkup.plainText("Click **Save** in [Safari](https://x)", fallbackNumber: 1), "Click Save in Safari")
     }
+
+    func testEntityNewlinesCannotBreakOutOfHeading() {
+        for caption in ["a&#10;# Evil", "a&#13;&#10;- item", "a&#10;~~~", "a&#10;| x | y |"] {
+            let md = CaptionMarkup.markdown(caption, fallbackNumber: 1)
+            XCTAssertFalse(md.contains(where: \.isNewline), caption)
+            XCTAssertFalse(CaptionMarkup.html(caption, fallbackNumber: 1).contains(where: \.isNewline), caption)
+            XCTAssertFalse(CaptionMarkup.plainText(caption, fallbackNumber: 1).contains(where: \.isNewline), caption)
+        }
+        XCTAssertEqual(CaptionMarkup.markdown("a&#10;~~~", fallbackNumber: 1), "a \\~\\~\\~")
+        XCTAssertEqual(CaptionMarkup.markdown("a&#10;# Evil", fallbackNumber: 1), "a \\# Evil")
+    }
+
+    func testMarkdownEscapesAmpersandAndHash() {
+        XCTAssertEqual(CaptionMarkup.markdown("AT&amp;T #", fallbackNumber: 1), "AT\\&T \\#")
+        XCTAssertEqual(CaptionMarkup.escapeMarkdown("AT&amp;T #"), "AT\\&amp;T \\#")
+    }
+
+    func testBidiControlsAreStripped() {
+        let hostile = "a\u{202E}b\u{2066}c\u{2069}d"
+        XCTAssertEqual(CaptionMarkup.html(hostile, fallbackNumber: 1), "abcd")
+        XCTAssertEqual(CaptionMarkup.markdown(hostile, fallbackNumber: 1), "abcd")
+        XCTAssertEqual(CaptionMarkup.escapeHTML(hostile), "abcd")
+        XCTAssertEqual(CaptionMarkup.escapeMarkdown(hostile), "abcd")
+    }
 }

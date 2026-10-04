@@ -58,6 +58,13 @@ final class GuideDocumentTests: XCTestCase {
         XCTAssertEqual(doc.steps.count, 3)
     }
 
+    func testPartiallyStaleSelectionExportsOnlyLiveSteps() {
+        let ids = manifest.steps.map(\.id)
+        let doc = make(selection: [ids[1], UUID()])
+        XCTAssertEqual(doc.steps.map(\.number), [1])
+        XCTAssertEqual(doc.steps[0].image, .file(folder.appendingPathComponent("Step_02.png")))
+    }
+
     func testSizesWithNilMeaningFull() {
         XCTAssertEqual(make().steps.map(\.imageSize), [.full, .small, .large])
         XCTAssertEqual(ImageSize.allCases.map(\.widthPercent), [40, 60, 80, 100])
@@ -84,8 +91,10 @@ final class GuideDocumentTests: XCTestCase {
 
     func testSubtitle() {
         XCTAssertEqual(GuideDocument.dateText(created, timeZone: TimeZone(identifier: "UTC")!), "4 Oct 2026")
-        XCTAssertEqual(make().subtitle, "4 Oct 2026 · 3 steps")
-        XCTAssertEqual(make(selection: [manifest.steps[0].id]).subtitle, "4 Oct 2026 · 1 step")
+        // The subtitle uses the current time zone, so the expected date does too.
+        let day = GuideDocument.dateText(created)
+        XCTAssertEqual(make().subtitle, "\(day) · 3 steps")
+        XCTAssertEqual(make(selection: [manifest.steps[0].id]).subtitle, "\(day) · 1 step")
     }
 
     func testSuggestedFileNames() {

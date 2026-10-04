@@ -79,12 +79,12 @@ enum HTMLGuideWriter {
     :root { color-scheme: light; }
     body { margin: 0; background: #fff; color: #1d1d1f; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
     .guide { max-width: 860px; margin: 0 auto; padding: 32px 24px; }
-    h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
-    .meta { color: #6e6e73; margin: 0 0 28px; }
+    h1 { overflow-wrap: anywhere; font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
+    .meta { overflow-wrap: anywhere; color: #6e6e73; margin: 0 0 28px; }
     .step { break-inside: avoid; page-break-inside: avoid; margin: 0 0 32px; }
-    .step h2 { display: flex; align-items: baseline; gap: 10px; font-size: 18px; font-weight: 400; margin: 0 0 2px; }
+    .step h2 { overflow-wrap: anywhere; display: flex; align-items: baseline; gap: 10px; font-size: 18px; font-weight: 400; margin: 0 0 2px; }
     .num { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #0a84ff; color: #fff; font-size: 14px; font-weight: 600; }
-    .app { color: #8e8e93; font-size: 12px; margin: 0 0 8px 36px; }
+    .app { overflow-wrap: anywhere; color: #8e8e93; font-size: 12px; margin: 0 0 8px 36px; }
     .figure { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; margin-top: 8px; }
     .figure > * { flex: none; box-sizing: border-box; max-width: 100%; border: 1px solid #d2d2d7; border-radius: 6px; }
     .figure img { display: block; height: auto; }

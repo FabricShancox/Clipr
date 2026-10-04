@@ -29,7 +29,10 @@ enum CaptionMarkup {
         for run in parsed.runs {
             let intent = run.inlinePresentationIntent ?? []
             if intent.contains(.inlineHTML) { continue }
-            let text = String(parsed[run.range].characters)
+            // The parser decodes entities such as "&#10;" into real newlines after the flattening
+            // above, so line breaks are replaced again here, run by run; otherwise a caption could
+            // escape its heading line in Markdown.
+            let text = stripBidi(String(parsed[run.range].characters.map { $0.isNewline ? " " : $0 }))
             guard !text.isEmpty else { continue }
             let span = Span(text: text, bold: intent.contains(.stronglyEmphasized),
                             italic: intent.contains(.emphasized), code: intent.contains(.code))
@@ -75,10 +78,16 @@ enum CaptionMarkup {
         return parts.isEmpty ? "Step \(fallbackNumber)" : parts.map(\.text).joined()
     }
 
+    /// Bidirectional controls (U+202A-202E, U+2066-2069) can reorder the text around a caption or
+    /// title; they are removed from everything exported.
+    static func stripBidi(_ text: String) -> String {
+        String(text.unicodeScalars.filter { !(0x202A...0x202E).contains($0.value) && !(0x2066...0x2069).contains($0.value) })
+    }
+
     static func escapeHTML(_ text: String) -> String {
         var out = ""
         out.reserveCapacity(text.count)
-        for character in text {
+        for character in stripBidi(text) {
             switch character {
             case "&": out += "&amp;"
             case "<": out += "&lt;"
@@ -95,9 +104,9 @@ enum CaptionMarkup {
     /// `*` is included alongside the spec's list: captions carry literal asterisks (CaptionFormatter
     /// escapes them in UI labels) that would otherwise turn into emphasis.
     static func escapeMarkdown(_ text: String) -> String {
-        let special: Set<Character> = ["\\", "`", "*", "_", "[", "]", "<", ">"]
+        let special: Set<Character> = ["\\", "`", "*", "_", "[", "]", "<", ">", "~", "&", "#"]
         var out = ""
-        for character in text {
+        for character in stripBidi(text) {
             if special.contains(character) { out.append("\\") }
             out.append(character)
         }

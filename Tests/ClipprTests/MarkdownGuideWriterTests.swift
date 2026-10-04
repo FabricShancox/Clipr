@@ -51,7 +51,7 @@ final class MarkdownGuideWriterTests: XCTestCase {
             GuideStep(number: 1, caption: "Click **Save**\n# not a heading", appName: nil, imageSize: .full, image: somewhere, zoom: nil),
         ])
         let lines = MarkdownGuideWriter.write(multi, images: images).components(separatedBy: "\n")
-        XCTAssertEqual(lines[3], "## 1. Click **Save** # not a heading")
+        XCTAssertEqual(lines[3], "## 1. Click **Save** \\# not a heading")
         XCTAssertEqual(lines[4], "![Step 1](images/step-01.png)")
     }
 
