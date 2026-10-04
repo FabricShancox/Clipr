@@ -136,8 +136,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             currentURL: rawURL,
             recentCaptures: recentCaptures(in: storage.baseFolder),
             annotations: resolved,
-            undoStack: history.undo,
-            redoStack: history.redo,
+            history: history,
             onOpenCapture: { [weak self] url, currentAnnotations in self?.loadCapture(url, previousAnnotations: currentAnnotations) },
             onAutoSave: { [weak self] forURL, annotations in
                 self?.autoSave(for: forURL, annotations: annotations, generation: generation)

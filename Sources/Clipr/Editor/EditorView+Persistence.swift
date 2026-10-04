@@ -28,11 +28,16 @@ extension EditorView {
     /// an undo entry. A mutation made by directly assigning `annotations` elsewhere would
     /// silently skip the undo stack; routing everything through one function makes that
     /// impossible by construction.
+    ///
+    /// While a text annotation is being typed into, its changes share one undo group (see
+    /// `EditorHistory.record`), so the whole edit — placing the box and typing into it — undoes
+    /// in one step, and abandoning an empty box leaves nothing behind to undo back into.
     func mutateAnnotations(_ transform: (inout [AnnotationObject]) -> Void) {
-        undoStack.append(annotations)
-        redoStack.removeAll()
+        let before = annotations
         var copy = annotations
         transform(&copy)
+        guard copy != before else { return }
+        history.record(from: before, to: copy, group: editingTextID)
         annotations = copy
     }
 
@@ -44,15 +49,27 @@ extension EditorView {
     }
 
     func undo() {
-        guard let previous = undoStack.popLast() else { return }
-        redoStack.append(annotations)
+        guard let previous = history.popUndo(from: annotations) else { return }
         annotations = previous
+        afterHistoryJump()
     }
 
     func redo() {
-        guard let next = redoStack.popLast() else { return }
-        undoStack.append(annotations)
+        guard let next = history.popRedo(from: annotations) else { return }
         annotations = next
+        afterHistoryJump()
+    }
+
+    /// Undo and redo can remove whatever was selected or being edited. A selection left holding
+    /// vanished ids kept the color, stroke and nudge controls live, and each of those "edits" of
+    /// nothing used to wipe the redo stack. The numbered stamp also follows what's actually on
+    /// the canvas, so undoing stamp 3 offers 3 again rather than skipping to 4.
+    private func afterHistoryJump() {
+        selectedIDs = selectedIDs.pruned(to: annotations)
+        if let id = editingTextID, !annotations.contains(where: { $0.id == id }) {
+            editingTextID = nil
+        }
+        setNextStampNumber(Clipr.nextStampNumber(after: annotations))
     }
 
     func deleteSelected() {

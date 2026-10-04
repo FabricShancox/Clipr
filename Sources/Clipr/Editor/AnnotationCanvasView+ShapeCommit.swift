@@ -36,8 +36,11 @@ extension AnnotationCanvasView {
             frame: rendererFrame(fromSwiftUIFrame: swiftUIFrame, canvasHeight: canvasHeight),
             color: currentColor, strokeWidth: currentStrokeWidth
         )
-        commit(newAnnotation)
+        // Editing starts BEFORE the append, so the box's creation and the typing into it share
+        // one undo group (see `EditorHistory.record`): one ⌘Z removes the whole text, and
+        // abandoning it empty leaves no undo step that would bring an empty box back.
         editingTextID = newAnnotation.id
+        commit(newAnnotation)
         dragStart = nil
         dragCurrentLocation = nil
     }

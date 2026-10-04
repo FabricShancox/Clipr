@@ -114,11 +114,15 @@ extension EditorView {
             // needs the current annotations the moment they change so it can still save them if
             // the window closes before the debounce elapses.
             onAnnotationsChanged(newValue)
-            // Read here rather than from `mutateAnnotations`: undo/redo also reshape the stacks,
-            // and every one of those paths ends in an `annotations` change, so this one place
-            // sees them all already updated.
-            onHistoryChanged(EditorHistory(undo: undoStack, redo: redoStack))
             scheduleAutoSave()
+        }
+        // Its own observer rather than piggybacking on `annotations`: an abandoned empty text box
+        // changes the history (its entry is dropped) while the annotations end where they began.
+        .onChange(of: history) { _, newValue in onHistoryChanged(newValue) }
+        // Finishing a text edit ends its undo group, so editing the same box again later is a
+        // separate undo step rather than folding into the earlier one.
+        .onChange(of: editingTextID) { _, newValue in
+            if newValue == nil { history.closeGroup() }
         }
     }
 

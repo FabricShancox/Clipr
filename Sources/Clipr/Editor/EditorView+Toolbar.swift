@@ -10,11 +10,11 @@ extension EditorView {
                 // keyboard shortcuts — otherwise Backspace deletes the selected annotation instead
                 // of a character, and ⌘Z undoes an annotation instead of the typing.
                 Button { undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .disabled(undoStack.isEmpty || isTextEntryActive)
+                    .disabled(history.undo.isEmpty || isTextEntryActive)
                     .keyboardShortcut("z", modifiers: .command)
                     .help("Undo")
                 Button { redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 30, height: 30).contentShape(Rectangle()) }
-                    .disabled(redoStack.isEmpty || isTextEntryActive)
+                    .disabled(history.redo.isEmpty || isTextEntryActive)
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .help("Redo")
                 Button { deleteSelected() } label: { Image(systemName: "trash").frame(width: 30, height: 30).contentShape(Rectangle()) }

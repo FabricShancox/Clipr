@@ -28,8 +28,7 @@ struct EditorView: View {
     @State var currentTextStyle = TextStyle.default
     @State var selectedIDs: Set<UUID> = []
     @State var editingTextID: UUID?
-    @State var undoStack: [[AnnotationObject]] = []
-    @State var redoStack: [[AnnotationObject]] = []
+    @State var history = EditorHistory()
     @State var zoomPercent: Double = 100
     @State var viewportSize: CGSize = .zero
     /// Once the user manually changes zoom (the +/- buttons), auto-fit-on-resize stops —
