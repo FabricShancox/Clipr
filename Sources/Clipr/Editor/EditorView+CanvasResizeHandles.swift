@@ -42,11 +42,11 @@ extension EditorView {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        let current = CGPoint(x: point.x + value.translation.width, y: point.y + value.translation.height)
+                        let current = clampedCorner(point, value.translation, fixed: fixed)
                         pendingCanvasResize = rectBetween(fixed, current)
                     }
                     .onEnded { value in
-                        let current = CGPoint(x: point.x + value.translation.width, y: point.y + value.translation.height)
+                        let current = clampedCorner(point, value.translation, fixed: fixed)
                         let rect = rectBetween(fixed, current)
                         pendingCanvasResize = nil
                         guard rect.width > 4, rect.height > 4 else { return }
@@ -54,6 +54,15 @@ extension EditorView {
                     }
             )
             .help("Drag to resize the canvas — inward crops, outward adds transparent space")
+    }
+
+    /// Where the dragged corner is, held to a sane maximum canvas — see
+    /// `CaptureGeometry.clampedCanvasCorner`.
+    private func clampedCorner(_ start: CGPoint, _ translation: CGSize, fixed: CGPoint) -> CGPoint {
+        CaptureGeometry.clampedCanvasCorner(
+            CGPoint(x: start.x + translation.width, y: start.y + translation.height),
+            fixed: fixed, imageSize: image.size, pixelScale: image.pixelScale
+        )
     }
 
     func rectBetween(_ a: CGPoint, _ b: CGPoint) -> CGRect {

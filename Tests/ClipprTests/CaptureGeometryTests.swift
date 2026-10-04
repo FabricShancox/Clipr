@@ -11,6 +11,27 @@ final class CaptureGeometryTests: XCTestCase {
         return image
     }
 
+    // MARK: - Canvas resize bounds
+
+    func testACornerDraggedFarOutwardIsHeldToFourTimesTheImage() {
+        let corner = CaptureGeometry.clampedCanvasCorner(
+            CGPoint(x: 100_000, y: -50_000), fixed: .zero, imageSize: CGSize(width: 800, height: 600), pixelScale: 1
+        )
+        XCTAssertEqual(corner, CGPoint(x: 3200, y: -2400))
+    }
+
+    func testTheCanvasNeverExceedsTheMaximumPixelSize() {
+        let corner = CaptureGeometry.clampedCanvasCorner(
+            CGPoint(x: 100_000, y: 100_000), fixed: CGPoint(x: 10, y: 10), imageSize: CGSize(width: 6000, height: 6000), pixelScale: 2
+        )
+        XCTAssertEqual(corner, CGPoint(x: 10 + 8192, y: 10 + 8192))
+    }
+
+    func testAnOrdinaryDragIsUnchanged() {
+        let point = CGPoint(x: 900, y: 700)
+        XCTAssertEqual(CaptureGeometry.clampedCanvasCorner(point, fixed: .zero, imageSize: CGSize(width: 800, height: 600), pixelScale: 2), point)
+    }
+
     // MARK: - rendererDelta
 
     func testRendererDeltaIsZeroForANoOpResize() {

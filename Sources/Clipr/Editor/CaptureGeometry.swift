@@ -13,6 +13,21 @@ struct CaptureGeometry {
     /// translate existing `AnnotationObject`s (`remapAnnotations`) and, identically, to position
     /// the old image when compositing it into the resized canvas (`resizedCanvas`), since both
     /// are the same coordinate-space translation applied to different things.
+    /// The largest canvas, in pixels per side, a corner drag may grow to.
+    static let maxCanvasPixels: CGFloat = 16_384
+
+    /// A dragged canvas corner held within reach of the opposite (`fixed`) one: at most four times
+    /// the image's size, and never more than `maxCanvasPixels` on a side. Unbounded, a corner
+    /// dragged far outward at 5% zoom asked for a context many gigabytes large.
+    static func clampedCanvasCorner(_ point: CGPoint, fixed: CGPoint, imageSize: CGSize, pixelScale: CGFloat) -> CGPoint {
+        let limit = maxCanvasPixels / max(pixelScale, 1)
+        let maxWidth = min(imageSize.width * 4, limit)
+        let maxHeight = min(imageSize.height * 4, limit)
+        let dx = min(max(point.x - fixed.x, -maxWidth), maxWidth)
+        let dy = min(max(point.y - fixed.y, -maxHeight), maxHeight)
+        return CGPoint(x: fixed.x + dx, y: fixed.y + dy)
+    }
+
     static func rendererDelta(oldHeight: CGFloat, newTopLeftOrigin origin: CGPoint, newSize: CGSize) -> CGPoint {
         CGPoint(x: -origin.x, y: origin.y + newSize.height - oldHeight)
     }
