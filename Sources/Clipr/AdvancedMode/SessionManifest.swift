@@ -8,6 +8,13 @@ enum ImageSize: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// A size this build doesn't know (written by a newer Clipr) reads as Full rather than failing
+    /// the whole manifest — which would open the session read-only over one cosmetic field.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ImageSize(rawValue: raw) ?? .full
+    }
+
     var widthFraction: CGFloat {
         switch self {
         case .small: return 0.40

@@ -161,4 +161,16 @@ final class SessionManifestTests: XCTestCase {
         XCTAssertEqual(ImageSize.allCases, [.small, .medium, .large, .full])
         XCTAssertEqual(ImageSize.allCases.map(\.widthFraction), [0.40, 0.60, 0.80, 1.0])
     }
+
+    func testUnknownImageSizeDecodesAsFullInsteadOfFailing() throws {
+        touch("Step_01.png")
+        let json = """
+        {"version":1,"createdAt":"1970-01-01T00:00:00Z","steps":[{"id":"\(UUID().uuidString)","file":"Step_01.png","kind":"click","caption":"keep","capturedAt":"1970-01-01T00:00:00Z","imageSize":"huge"}]}
+        """
+        try Data(json.utf8).write(to: folder.appendingPathComponent(SessionManifestStore.fileName))
+        let loaded = SessionManifestStore.load(from: folder)
+        XCTAssertEqual(loaded.steps.first?.caption, "keep")
+        XCTAssertEqual(loaded.steps.first?.imageSize, .full)
+        XCTAssertNil(SessionManifestStore.loadForReview(from: folder).readOnly)
+    }
 }
