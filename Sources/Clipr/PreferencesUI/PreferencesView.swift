@@ -62,7 +62,7 @@ struct PreferencesView: View {
 
     private var generalTab: some View {
         Form {
-            Section("Shortcuts") {
+            Section {
                 LabeledContent("Capture") {
                     HotkeyRecorderView(binding: Binding(
                         get: { captureHotkey },
@@ -75,9 +75,11 @@ struct PreferencesView: View {
                         set: { advancedModeHotkey = $0; settings.advancedModeHotkey = $0; onHotkeysChanged() }
                     ))
                 }
+            } header: {
+                sectionHeader("Shortcuts")
             }
 
-            Section("Saving") {
+            Section {
                 LabeledContent {
                     HStack(spacing: 8) {
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([saveFolder]) }
@@ -90,9 +92,11 @@ struct PreferencesView: View {
                         .truncationMode(.head)
                         .help(saveFolder.path)
                 }
+            } header: {
+                sectionHeader("Saving")
             }
 
-            Section("Capturing") {
+            Section {
                 Toggle(isOn: Binding(
                     get: { captureCursor },
                     set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
@@ -100,9 +104,11 @@ struct PreferencesView: View {
                     Text("Include the mouse pointer")
                     Text("Shows the pointer in screenshots and Advanced Mode steps.")
                 }
+            } header: {
+                sectionHeader("Capturing")
             }
 
-            Section("Copying") {
+            Section {
                 Toggle(isOn: Binding(
                     get: { copyStyle.border },
                     set: { copyStyle.border = $0; settings.copyStyle = copyStyle }
@@ -117,13 +123,17 @@ struct PreferencesView: View {
                     Text("Add a drop shadow")
                     Text("Makes copied images stand out when pasted into documents.")
                 }
+            } header: {
+                sectionHeader("Copying")
             }
 
-            Section("Startup") {
+            Section {
                 Toggle("Open Clipr at login", isOn: Binding(
                     get: { launchAtLogin },
                     set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
                 ))
+            } header: {
+                sectionHeader("Startup")
             }
         }
         .formStyle(.grouped)
@@ -153,7 +163,7 @@ struct PreferencesView: View {
                     Text("Adds a zoomed-in image next to each step, centred on the click.")
                 }
             } header: {
-                Text("On each step")
+                sectionHeader("On each step")
             }
 
             Section {
@@ -176,7 +186,7 @@ struct PreferencesView: View {
                     }
                 }
             } header: {
-                Text("Captions")
+                sectionHeader("Captions")
             }
 
             Section {
@@ -220,13 +230,19 @@ struct PreferencesView: View {
                     Text("Shortcut that works only while recording.")
                 }
             } header: {
-                Text("Capture")
+                sectionHeader("Capture")
             } footer: {
                 Text("Changes apply the next time you start Advanced Mode.")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Grouped forms leave a tall gap above every section title; pulling the title up tightens
+    /// the page without changing the spacing inside each group.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title).padding(.top, -14)
     }
 
     private var scopeDescription: String {
