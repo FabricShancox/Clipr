@@ -288,6 +288,30 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertFalse(model.undoManager.canUndo)
     }
 
+    func testTypingBackToSavedCaptionDropsPendingEdit() async throws {
+        let model = makeModel(captionDelay: 0.05)
+        let id = model.manifest.steps[0].id
+        model.beginCaptionEdit(for: id)
+        model.editCaption("ab", for: id)
+        model.editCaption("a", for: id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        model.flush()
+        XCTAssertEqual(onDisk.steps[0].caption, "a")
+    }
+
+    func testTypingBackToEmptyDropsPendingEditForNilCaption() async throws {
+        let model = makeModel(captionDelay: 0.05)
+        let id = model.manifest.steps[0].id
+        model.commitCaption("", for: id)
+        XCTAssertNil(onDisk.steps[0].caption)
+        model.beginCaptionEdit(for: id)
+        model.editCaption("x", for: id)
+        model.editCaption("", for: id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        model.flush()
+        XCTAssertNil(onDisk.steps[0].caption)
+    }
+
     func testCancelCaptionEditRestoresOriginalWithoutUndo() async throws {
         let model = makeModel(captionDelay: 0.05)
         let id = model.manifest.steps[0].id

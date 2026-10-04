@@ -11,6 +11,7 @@ struct ReviewRow: View {
     let onOpenEditor: (StepRecord) -> Void
 
     @State private var draft = ""
+    @State private var suppressNextDraftChange = false
     @FocusState private var fieldFocused: Bool
 
     private var isEditing: Bool { editingID == step.id }
@@ -58,6 +59,9 @@ struct ReviewRow: View {
         .onChange(of: editingID) { _, newValue in
             if newValue == step.id {
                 model.beginCaptionEdit(for: step.id)
+                // Only when it will actually change: an equal value fires no onChange and would
+                // leave the flag set to swallow the first real keystroke.
+                suppressNextDraftChange = draft != (step.caption ?? "")
                 draft = step.caption ?? ""
                 // Next run loop: the field only exists once this state change has rendered.
                 DispatchQueue.main.async { fieldFocused = true }
@@ -74,7 +78,8 @@ struct ReviewRow: View {
                 .focused($fieldFocused)
                 .onChange(of: draft) { _, text in
                     // Setting the initial draft when editing begins isn't a user edit.
-                    if text != (step.caption ?? "") { model.editCaption(text, for: step.id) }
+                    if suppressNextDraftChange { suppressNextDraftChange = false; return }
+                    model.editCaption(text, for: step.id)
                 }
                 .onSubmit { finishEditing(commit: true) }
                 .onExitCommand { finishEditing(commit: false) }

@@ -106,8 +106,17 @@ final class ReviewModel: ObservableObject {
     /// Called on every keystroke; saves once typing pauses.
     func editCaption(_ text: String?, for id: UUID) {
         guard !isReadOnly else { return }
-        pendingCaption = (id, text)
         captionWork?.cancel()
+        // Typing back to what's already saved must drop an earlier pending value, or the debounce
+        // (or a window-close flush) would save text the user has since deleted.
+        let current = manifest.steps.first { $0.id == id }?.caption
+        let normalized = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (normalized?.isEmpty ?? true ? nil : normalized) == current {
+            if pendingCaption?.id == id { pendingCaption = nil }
+            captionWork = nil
+            return
+        }
+        pendingCaption = (id, text)
         let work = DispatchWorkItem { [weak self] in self?.flushPendingCaption() }
         captionWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + captionDelay, execute: work)
