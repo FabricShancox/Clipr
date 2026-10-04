@@ -12,6 +12,7 @@ final class ExportFlowController {
     private let settings: SettingsStore
     private let exporter: GuideExporter
     private var sheetWindow: NSWindow?
+    private var sheetCloseObserver: NSObjectProtocol?
     private var task: Task<Void, Never>?
     /// True while the save/folder panel or the Replace alert is up, between the two sheets.
     private var isChoosingDestination = false
@@ -37,15 +38,33 @@ final class ExportFlowController {
         present(NSHostingController(rootView: sheet), on: window)
     }
 
+    /// Not closable and not released on close: ⌘W (the main menu's Close) would otherwise close
+    /// the sheet without ending it, leaving the export looking active and taking Cancel away.
     private func present<Content: View>(_ controller: NSHostingController<Content>, on window: NSWindow) {
-        let sheet = NSWindow(contentViewController: controller)
+        let sheet = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        sheet.isReleasedWhenClosed = false
+        sheet.contentViewController = controller
+        sheet.setContentSize(controller.view.fittingSize)
         sheetWindow = sheet
+        // Should a sheet still close some other way, forget it so the next export can start.
+        sheetCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: sheet, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.forgetSheet(sheet) }
+        }
         window.beginSheet(sheet)
     }
 
     private func endSheet() {
         guard let sheet = sheetWindow else { return }
+        forgetSheet(sheet)
         window?.endSheet(sheet)
+    }
+
+    private func forgetSheet(_ sheet: NSWindow) {
+        guard sheetWindow === sheet else { return }
+        if let observer = sheetCloseObserver { NotificationCenter.default.removeObserver(observer) }
+        sheetCloseObserver = nil
         sheetWindow = nil
     }
 
@@ -144,14 +163,19 @@ final class ExportFlowController {
     private func finish(_ outcome: Result<[GuideWarning], Error>, options: ExportOptions, destination: URL?) {
         switch outcome {
         case .success(let warnings):
-            if let destination {
+            let reveal = {
+                guard let destination else { return }
                 let revealed = options.format == .markdown
                     ? destination.appendingPathComponent(MarkdownGuideWriter.fileName)
                     : destination
                 NSWorkspace.shared.activateFileViewerSelecting([revealed])
             }
+            // Finder comes forward when it reveals the file and would hide the alert, so the
+            // warnings are read first and the file revealed once they're dismissed.
             if let summary = GuideWarning.summary(warnings) {
-                showAlert("Exported with warnings", summary, style: .informational)
+                showAlert("Exported with warnings", summary, style: .informational, then: reveal)
+            } else {
+                reveal()
             }
         case .failure(let error):
             if (error as? GuideExportError) == .cancelled { return }
@@ -159,12 +183,12 @@ final class ExportFlowController {
         }
     }
 
-    private func showAlert(_ message: String, _ detail: String, style: NSAlert.Style) {
-        guard let window else { return }
+    private func showAlert(_ message: String, _ detail: String, style: NSAlert.Style, then done: @escaping () -> Void = {}) {
+        guard let window else { return done() }
         let alert = NSAlert()
         alert.messageText = message
         alert.informativeText = detail
         alert.alertStyle = style
-        alert.beginSheetModal(for: window)
+        alert.beginSheetModal(for: window) { _ in done() }
     }
 }
