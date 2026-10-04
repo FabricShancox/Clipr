@@ -6,7 +6,8 @@ final class PreferencesWindowController: NSWindowController {
         settings: SettingsStore,
         onHotkeysChanged: @escaping () -> Void,
         onSaveFolderChanged: @escaping () -> Void,
-        onCaptureCursorChanged: @escaping () -> Void
+        onCaptureCursorChanged: @escaping () -> Void,
+        onHotkeyRecording: @escaping (Bool) -> Void = { _ in }
     ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 540, height: 600),
@@ -20,7 +21,8 @@ final class PreferencesWindowController: NSWindowController {
             settings: settings,
             onHotkeysChanged: onHotkeysChanged,
             onSaveFolderChanged: onSaveFolderChanged,
-            onCaptureCursorChanged: onCaptureCursorChanged
+            onCaptureCursorChanged: onCaptureCursorChanged,
+            onHotkeyRecording: onHotkeyRecording
         ))
         window.center()
     }

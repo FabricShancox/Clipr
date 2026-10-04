@@ -385,7 +385,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.storage.baseFolder = self.settings.saveFolder
             },
-            onCaptureCursorChanged: { [weak self] in self?.applyCaptureCursorSetting() }
+            onCaptureCursorChanged: { [weak self] in self?.applyCaptureCursorSetting() },
+            // Clipr's own hotkeys are off while a shortcut is being recorded, so pressing the
+            // current capture combo records it instead of taking a screenshot.
+            onHotkeyRecording: { [weak self] recording in
+                guard let self else { return }
+                if recording {
+                    self.hotkeyManager.unregister(id: HotkeyID.capture.rawValue)
+                    self.hotkeyManager.unregister(id: HotkeyID.advancedMode.rawValue)
+                } else {
+                    self.registerHotkeys()
+                }
+            }
         )
         preferencesWindowController = controller
         // Cleared on close so the next Preferences request builds a fresh window rather than

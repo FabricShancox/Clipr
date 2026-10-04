@@ -12,6 +12,9 @@ struct PreferencesView: View {
     /// `captureCursor` copy (set once at launch) rather than reading `SettingsStore` live, so
     /// this callback re-syncs both the moment the toggle changes.
     let onCaptureCursorChanged: () -> Void
+    /// Recording a shortcut started (true) or ended (false) — see
+    /// `HotkeyRecorderView.onRecordingChanged`.
+    let onHotkeyRecording: (Bool) -> Void
 
     @State private var captureHotkey: HotkeyBinding
     @State private var advancedModeHotkey: HotkeyBinding
@@ -30,9 +33,11 @@ struct PreferencesView: View {
         settings: SettingsStore,
         onHotkeysChanged: @escaping () -> Void,
         onSaveFolderChanged: @escaping () -> Void,
-        onCaptureCursorChanged: @escaping () -> Void
+        onCaptureCursorChanged: @escaping () -> Void,
+        onHotkeyRecording: @escaping (Bool) -> Void = { _ in }
     ) {
         self.settings = settings
+        self.onHotkeyRecording = onHotkeyRecording
         self.onHotkeysChanged = onHotkeysChanged
         self.onSaveFolderChanged = onSaveFolderChanged
         self.onCaptureCursorChanged = onCaptureCursorChanged
@@ -73,13 +78,13 @@ struct PreferencesView: View {
                     HotkeyRecorderView(binding: Binding(
                         get: { captureHotkey },
                         set: { captureHotkey = $0; settings.captureHotkey = $0; onHotkeysChanged() }
-                    ))
+                    ), otherBindings: otherHotkeys(except: .capture), onRecordingChanged: onHotkeyRecording)
                 }
                 LabeledContent("Start / stop Advanced Mode") {
                     HotkeyRecorderView(binding: Binding(
                         get: { advancedModeHotkey },
                         set: { advancedModeHotkey = $0; settings.advancedModeHotkey = $0; onHotkeysChanged() }
-                    ))
+                    ), otherBindings: otherHotkeys(except: .advancedMode), onRecordingChanged: onHotkeyRecording)
                 }
             } header: {
                 sectionHeader("Shortcuts")
@@ -221,7 +226,7 @@ struct PreferencesView: View {
                             HotkeyRecorderView(binding: Binding(
                                 get: { hotkey },
                                 set: { advanced.stepHotkey = $0; settings.advancedMode = advanced }
-                            ))
+                            ), otherBindings: otherHotkeys(except: .step), onRecordingChanged: onHotkeyRecording)
                             Button("Clear") { advanced.stepHotkey = nil; settings.advancedMode = advanced }
                         }
                     } else {
@@ -287,6 +292,17 @@ struct PreferencesView: View {
             alert.runModal()
         }
         launchAtLogin = settings.launchAtLogin
+    }
+
+    private enum HotkeySlot { case capture, advancedMode, step }
+
+    /// Clipr's shortcuts other than `slot`, with the names the recorder shows on a clash.
+    private func otherHotkeys(except slot: HotkeySlot) -> [(binding: HotkeyBinding, name: String)] {
+        var others: [(binding: HotkeyBinding, name: String)] = []
+        if slot != .capture { others.append((captureHotkey, "Capture")) }
+        if slot != .advancedMode { others.append((advancedModeHotkey, "Advanced Mode")) }
+        if slot != .step, let step = advanced.stepHotkey { others.append((step, "taking a step")) }
+        return others
     }
 
     private func chooseFolder() {
