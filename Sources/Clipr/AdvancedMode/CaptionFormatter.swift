@@ -10,7 +10,8 @@ struct ClickTarget: Equatable {
 }
 
 /// Guide-style step captions. Bold uses Markdown `**` so the export sub-project can render it;
-/// `clean` escapes `*` and `"` in anything taken from the UI so a label can't break that markup.
+/// `clean` escapes Markdown punctuation in anything taken from the UI or typed, so it can't break
+/// that markup or be dropped as HTML.
 enum CaptionFormatter {
     static let maxLength = 60
 
@@ -47,6 +48,21 @@ enum CaptionFormatter {
         let collapsed = raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
         guard !collapsed.isEmpty else { return nil }
         let truncated = collapsed.count > maxLength ? String(collapsed.prefix(maxLength)) + "…" : collapsed
-        return truncated.replacingOccurrences(of: "*", with: "\\*").replacingOccurrences(of: "\"", with: "\\\"")
+        return escapeMarkdown(truncated)
+    }
+
+    /// Characters CommonMark could read as markup in inline text: emphasis, code, links, images,
+    /// raw HTML, entities, strikethrough, and the quote the typing caption wraps text in. Each is
+    /// backslash-escaped so the text stays literal (`<div>` typed in a code editor used to vanish).
+    private static let markdownPunctuation: Set<Character> = ["\\", "`", "*", "_", "[", "]", "<", ">", "&", "~", "!", "\""]
+
+    static func escapeMarkdown(_ text: String) -> String {
+        var escaped = ""
+        escaped.reserveCapacity(text.count)
+        for character in text {
+            if markdownPunctuation.contains(character) { escaped.append("\\") }
+            escaped.append(character)
+        }
+        return escaped
     }
 }

@@ -55,4 +55,16 @@ final class CaptionFormatterTests: XCTestCase {
     func testTypingTextIsCleanedToo() {
         XCTAssertEqual(CaptionFormatter.typing(#"say "hi""#, fieldLabel: nil), #"Type "say \"hi\"""#)
     }
+
+    // L6: literal text typed or read from the UI survives every renderer.
+    func testMarkdownAndHTMLInUIAndTypedTextStayLiteral() {
+        for typed in ["<div>", "a_b_c", "`code`", "[x](y)", "&#10;", "back\\slash", "~~gone~~", "**bold**"] {
+            let caption = CaptionFormatter.typing(typed, fieldLabel: "Editor")
+            let visible = CaptionMarkup.spans(caption).map(\.text).joined()
+            XCTAssertEqual(visible, "Type \"\(typed)\" in Editor", typed)
+            XCTAssertEqual(String(CaptionText.rendered(caption).characters), "Type \"\(typed)\" in Editor", typed)
+        }
+        let click = CaptionFormatter.click(ClickTarget(role: "AXButton", label: "<b>_Save_</b>"), appName: "App")
+        XCTAssertEqual(CaptionMarkup.spans(click).map(\.text).joined(), "Click <b>_Save_</b> in App")
+    }
 }
