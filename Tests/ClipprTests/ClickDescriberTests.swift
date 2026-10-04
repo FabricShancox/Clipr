@@ -46,6 +46,8 @@ final class ClickDescriberTests: XCTestCase {
             "com.citrix.receiver.icaviewer.mac", "com.parallels.desktop.console", "com.vmware.fusion",
             "com.utmapp.UTM", "org.virtualbox.app.VirtualBoxVM", "com.teamviewer.TeamViewer",
             "com.philandro.anydesk", "com.carriez.rustdesk",
+            "com.vandyke.SecureCRT", "com.lemonmojo.RoyalTSX.App", "com.sublimetext.3", "tv.parsec.www",
+            "com.moonlight-stream.Moonlight", "com.google.chromeremotedesktop.app", "org.vim.MacVim", "org.gnu.Emacs",
         ]
         for id in ids {
             XCTAssertEqual(security { $0.bundleID = id }, .unknown, id)
@@ -63,6 +65,12 @@ final class ClickDescriberTests: XCTestCase {
             XCTAssertFalse(TypingInputPolicy.isUntrustedApp(bundleID: id), id)
         }
         XCTAssertFalse(TypingInputPolicy.isUntrustedApp(bundleID: "com.jetbrainsx.thing"), "prefix is the whole component")
+    }
+
+    func testMoreWebTerminalMarkersAreUnknown() {
+        for cls in ["hterm-cursor", "Guacamole-display", "noVNC_canvas"] {
+            XCTAssertEqual(security { $0.role = "AXTextArea"; $0.domClassList = [cls] }, .unknown, cls)
+        }
     }
 
     func testWebTerminalsAreUnknown() {

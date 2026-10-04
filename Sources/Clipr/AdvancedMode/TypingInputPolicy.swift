@@ -35,10 +35,11 @@ enum TypingInputPolicy {
         // Editors and IDEs with integrated terminals or consoles
         "com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium", "com.visualstudio.code.oss",
         "com.todesktop.230313mzl4w4u92" /* Cursor */, "com.exafunction.windsurf", "com.google.android.studio",
-        "com.panic.Nova", "dev.zed.Zed", "dev.zed.Zed-Preview", "com.apple.dt.Xcode", "com.sublimetext.4",
+        "com.panic.Nova", "dev.zed.Zed", "dev.zed.Zed-Preview", "com.apple.dt.Xcode", "com.sublimetext.4", "com.sublimetext.3",
+        "org.vim.MacVim", "org.gnu.Emacs",
         // Screen sharing, remote desktop and virtual machines
         "com.apple.ScreenSharing", "com.apple.RemoteDesktop", "com.microsoft.rdc.macos", "com.microsoft.rdc.mac",
-        "com.utmapp.UTM", "com.philandro.anydesk", "com.carriez.rustdesk", "com.realvnc.vncviewer",
+        "com.utmapp.UTM", "com.philandro.anydesk", "com.carriez.rustdesk", "com.realvnc.vncviewer", "tv.parsec.www",
     ].map { $0.lowercased() })
 
     /// Whole families: every app whose bundle ID starts with one of these.
@@ -53,6 +54,10 @@ enum TypingInputPolicy {
         "com.teamviewer.",      // TeamViewer
         "com.nomachine.",       // NoMachine
         "com.edovia.screens",   // Screens
+        "com.vandyke.",         // SecureCRT, SecureFX
+        "com.lemonmojo.",       // Royal TSX
+        "com.moonlight-stream.", // Moonlight
+        "com.google.chromeremotedesktop.", // Chrome Remote Desktop host
     ].map { $0.lowercased() }
 
     /// The only roles whose text is recorded. Web areas, groups and custom controls can be
@@ -64,7 +69,7 @@ enum TypingInputPolicy {
     static let minimumFieldSide: CGFloat = 8
 
     /// Lower-cased substrings of a DOM class or label that mark a web terminal.
-    static let webTerminalMarkers = ["xterm", "terminal"]
+    static let webTerminalMarkers = ["xterm", "terminal", "hterm", "guac", "novnc"]
 
     static func isUntrustedApp(bundleID: String) -> Bool {
         let id = bundleID.lowercased()
