@@ -32,9 +32,14 @@ extension EditorView {
             // field or the rename box.
             .keyboardShortcut("c", modifiers: [.command, .shift])
             .help("Copy the annotated image to the clipboard (⇧⌘C)")
-            Button { onShare(annotations) } label: {
+            Button { onShare(annotations, shareButtonFrame) } label: {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
+            .background(GeometryReader { proxy in
+                Color.clear
+                    .onAppear { shareButtonFrame = proxy.frame(in: .global) }
+                    .onChange(of: proxy.frame(in: .global)) { _, frame in shareButtonFrame = frame }
+            })
             .buttonStyle(.borderedProminent)
             .help("Share the annotated image")
         }

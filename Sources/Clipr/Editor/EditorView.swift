@@ -51,6 +51,8 @@ struct EditorView: View {
     @State var showingRedactionStyles = false
     @State var showSavedConfirmation = false
     @State var deletedRecentURLs: Set<URL> = []
+    /// Where the header's Share button is — see `onShare`.
+    @State var shareButtonFrame: CGRect = .zero
     @State var pendingCanvasResize: CGRect?
     /// Header filename rename (see `EditorView+Header.swift`). These reset whenever the content
     /// view is rebuilt — after a rename it is, so the field correctly reverts to plain text
@@ -92,7 +94,9 @@ struct EditorView: View {
     /// the capture itself up to date in the save folder.
     let onSaveAs: ([AnnotationObject]) -> Void
     let onRevealInFinder: (URL) -> Void
-    let onShare: ([AnnotationObject]) -> Void
+    /// The rect is the Share button's frame in the hosting view's (top-left origin) space, so the
+    /// share picker can point at the button rather than the window's corner.
+    let onShare: ([AnnotationObject], CGRect) -> Void
     /// Crop rect in renderer space (the same y-up-from-bottom space `AnnotationObject.frame`
     /// uses), plus the annotations at the moment the crop was requested — `EditorWindowController`
     /// owns the base `NSImage` and does the actual pixel crop and annotation remap, since this

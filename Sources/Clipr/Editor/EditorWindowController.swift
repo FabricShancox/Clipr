@@ -190,7 +190,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             onClose: { [weak self] in self?.window?.performClose(nil) },
             onSaveAs: { [weak self] annotations in self?.saveAs(annotations: annotations) },
             onRevealInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },
-            onShare: { [weak self] annotations in self?.share(annotations: annotations) },
+            onShare: { [weak self] annotations, buttonFrame in self?.share(annotations: annotations, from: buttonFrame) },
             onCropApplied: { [weak self] rendererRect, annotations in self?.applyCrop(rendererRect: rendererRect, annotations: annotations) },
             onCanvasResize: { [weak self] topLeftRect, annotations in self?.applyCanvasResize(topLeftRect: topLeftRect, annotations: annotations) },
             onDeleteCapture: { [weak self] url, deleted in self?.deleteRecent(url, then: deleted) },
@@ -452,11 +452,19 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window?.contentView = makeContentView(initialAnnotations: remapped)
     }
 
-    private func share(annotations: [AnnotationObject]) {
+    /// `buttonFrame` is in SwiftUI's global (top-left origin) space for the hosting view; the
+    /// picker is anchored to it so it pops from the Share button, not the window's corner.
+    private func share(annotations: [AnnotationObject], from buttonFrame: CGRect) {
         guard let contentView = window?.contentView else { return }
         let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
         let picker = NSSharingServicePicker(items: [flattened])
-        picker.show(relativeTo: .zero, of: contentView, preferredEdge: .maxY)
+        var anchor = buttonFrame
+        if !contentView.isFlipped {
+            anchor.origin.y = contentView.bounds.height - buttonFrame.maxY
+        }
+        if anchor.isEmpty { anchor = CGRect(x: contentView.bounds.maxX - 60, y: 0, width: 1, height: 1) }
+        // Below the button: the bottom edge is maxY in a flipped view, minY otherwise.
+        picker.show(relativeTo: anchor, of: contentView, preferredEdge: contentView.isFlipped ? .maxY : .minY)
     }
 
     /// Shows an already-loaded image (a fresh capture, or a file picked via Open) in THIS window
