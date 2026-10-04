@@ -182,7 +182,7 @@ final class ClickCaptureManager {
             if settings.cursorTrail { trail.add(p) }
         case .ownClick:
             endTypingBurst()
-        case .click(let p, let clickCount):
+        case .click(let p, let clickCount, _):
             endTypingBurst()
             var points = trail.drain()
             if let previous = pending {
