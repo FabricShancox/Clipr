@@ -57,3 +57,18 @@ final class ClickedWindowTests: XCTestCase {
         XCTAssertEqual(hit, .other(ClickedWindow(windowID: 2, ownerPID: 50, layer: 0, appName: "Localized")))
     }
 }
+
+final class StepScreenExclusionTests: XCTestCase {
+    func testAllOwnWindowsButStatusItemAreExcluded() {
+        typealias W = LiveStepImageSource.ScreenWindow
+        let windows = [
+            W(windowID: 1, ownerPID: 99, layer: LiveStepImageSource.statusItemLayer),   // menu-bar icon
+            W(windowID: 2, ownerPID: 99, layer: 3),                                       // control panel (.floating)
+            W(windowID: 3, ownerPID: 99, layer: 0),                                       // Review
+            W(windowID: 4, ownerPID: 99, layer: 200),                                     // tooltip
+            W(windowID: 5, ownerPID: 50, layer: 3),                                       // another app's palette
+            W(windowID: 6, ownerPID: nil, layer: 0),
+        ]
+        XCTAssertEqual(LiveStepImageSource.ownWindowsToExclude(windows, ownPID: 99), [2, 3, 4])
+    }
+}

@@ -11,9 +11,10 @@ final class AdvancedModeControlState: ObservableObject {
 }
 
 /// The small floating Pause/Stop bar shown while Advanced Mode runs. It never appears in a
-/// step: steps capture only the clicked app's own window (`desktopIndependentWindow`), clicks on
-/// it are ignored by `ClickCaptureManager`, and `sharingType = .none` keeps it out of other
-/// screen recorders too.
+/// step: Window scope captures only the clicked window (`desktopIndependentWindow`), Screen and
+/// Fixed-area scopes leave every Clipr window but the menu-bar icon out of the capture
+/// (`LiveStepImageSource.captureScreen`), and clicks on it are never steps. `sharingType = .none`
+/// keeps it out of other screen recorders where macOS honours it.
 final class AdvancedModeControlPanel: NSPanel {
     let state = AdvancedModeControlState()
 

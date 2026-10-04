@@ -1,5 +1,6 @@
 // Sources/Clipr/AdvancedMode/StepImageSource.swift
 import Cocoa
+import ScreenCaptureKit
 
 enum CaptureTarget: Equatable {
     case frontmostWindow
@@ -48,13 +49,13 @@ final class LiveStepImageSource: StepImageSource {
         case .screenContaining(let point):
             guard let match = await MainActor.run(body: { Self.screen(containing: point) }) else { return nil }
             let (screen, frame) = match
-            let image = try await CaptureManager.captureFullScreen(screen, showsCursor: showsCursor)
+            let image = try await Self.captureScreen(screen, showsCursor: showsCursor)
             return CapturedFrame(image: image, origin: frame.origin, appName: appName)
         case .area(let area):
             let center = CGPoint(x: area.midX, y: area.midY)
             guard let match = await MainActor.run(body: { Self.screen(containing: center) }) else { return nil }
             let (screen, frame) = match
-            let full = try await CaptureManager.captureFullScreen(screen, showsCursor: showsCursor)
+            let full = try await Self.captureScreen(screen, showsCursor: showsCursor)
             let local = area.offsetBy(dx: -frame.minX, dy: -frame.minY)
             guard let cropped = CaptureGeometry.cropped(full, to: local) else { return nil }
             return CapturedFrame(image: cropped.image, origin: CGPoint(x: frame.minX + cropped.rect.minX, y: frame.minY + cropped.rect.minY), appName: appName)
@@ -69,6 +70,43 @@ final class LiveStepImageSource: StepImageSource {
         guard let window = WindowPicker.frontmostWindow(ownedBy: app.processIdentifier, in: WindowPicker.onScreenWindows()),
               !ownWindowIDs.contains(window.windowID) else { return nil }
         return window
+    }
+
+    /// One of the capture's on-screen windows, as far as deciding what to leave out goes.
+    struct ScreenWindow: Equatable {
+        let windowID: CGWindowID
+        let ownerPID: pid_t?
+        let layer: Int
+    }
+
+    static let statusItemLayer = Int(CGWindowLevelForKey(.statusWindow))
+
+    /// Every window Clipr owns except its menu-bar icon: the Pause/Stop panel, its tooltips,
+    /// Review, editors. Named explicitly rather than trusting `sharingType = .none`, which
+    /// ScreenCaptureKit is reported not to honour on recent macOS.
+    static func ownWindowsToExclude(_ windows: [ScreenWindow], ownPID: pid_t) -> Set<CGWindowID> {
+        Set(windows.filter { $0.ownerPID == ownPID && $0.layer != statusItemLayer }.map(\.windowID))
+    }
+
+    /// A full-display capture for Screen and Fixed-area steps, without Clipr's own windows.
+    static func captureScreen(_ screen: NSScreen, showsCursor: Bool) async throws -> NSImage {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
+            throw CaptureError.displayNotFound
+        }
+        let excluded = ownWindowsToExclude(
+            content.windows.map { ScreenWindow(windowID: $0.windowID, ownerPID: $0.owningApplication?.processID, layer: $0.windowLayer) },
+            ownPID: ProcessInfo.processInfo.processIdentifier
+        )
+        let filter = SCContentFilter(display: display, excludingWindows: content.windows.filter { excluded.contains($0.windowID) })
+        let config = SCStreamConfiguration()
+        config.showsCursor = showsCursor
+        // SCDisplay is in points, the configuration in pixels (see `CaptureManager.captureFullScreen`).
+        let scale = screen.backingScaleFactor
+        config.width = Int((CGFloat(display.width) * scale).rounded())
+        config.height = Int((CGFloat(display.height) * scale).rounded())
+        let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        return NSImage(bitmap: cgImage, scale: scale)
     }
 
     /// The clicked window's current bounds, if it's still on screen and isn't Clipr's.
