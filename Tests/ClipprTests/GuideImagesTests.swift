@@ -158,4 +158,96 @@ final class GuideImagesTests: XCTestCase {
         XCTAssertNil(result.image)
         XCTAssertFalse(result.sidecarDamaged)
     }
+    // MARK: Close-ups
+
+    /// A step captured the way Advanced Mode does it: white, with a green square under the click at
+    /// (400, 300) (top-left points), and the close-up cropped from the raw frame beside it.
+    private func captureStep(scale: CGFloat = 1, click: CGPoint = CGPoint(x: 400, y: 300)) throws -> CloseUpSource {
+        let image = testImage(width: 800, height: 600, scale: scale) {
+            NSColor.white.set()
+            NSRect(x: 0, y: 0, width: 800, height: 600).fill()
+            NSColor.green.set()
+            NSRect(x: 380, y: 280, width: 40, height: 40).fill()
+        }
+        let storage = StorageManager(baseFolder: folder)
+        let step = try storage.saveStep(image, index: 1, in: folder)
+        let zoom = try storage.saveStepZoom(try XCTUnwrap(StepZoom.image(from: image, centeredOn: click)), stepURL: step)
+        return CloseUpSource(step: step, capturedZoom: zoom, clickPoint: click)
+    }
+
+    private func isGreen(_ color: NSColor) -> Bool {
+        color.greenComponent > 0.8 && color.redComponent < 0.2 && color.blueComponent < 0.2
+    }
+
+    func testCloseUpIsCutFromStepImage() throws {
+        let source = try captureStep()
+        let image = try XCTUnwrap(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+        XCTAssertEqual(image.pixelWidth, 400, "never enlarged")
+        XCTAssertEqual(image.pixelHeight, 300)
+        let bitmap = try decode(image)
+        XCTAssertTrue(isGreen(try XCTUnwrap(bitmap.colorAt(x: 200, y: 150))), "the clicked control")
+        XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: 20, y: 20)).brightnessComponent, 0.9)
+    }
+
+    /// The privacy bug: a redaction over the clicked area must be in the close-up too.
+    func testCloseUpShowsRedactionOverClickArea() throws {
+        let source = try captureStep()
+        // Bottom-left origin: the green square is at y 280...320 either way (600 - 300 = 300 centre).
+        try StorageManager(baseFolder: folder).saveAnnotations([redaction(CGRect(x: 360, y: 260, width: 80, height: 80))], rawURL: source.step)
+        let bitmap = try decode(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+        for (x, y) in [(200, 150), (185, 135), (215, 165)] {
+            let color = try XCTUnwrap(bitmap.colorAt(x: x, y: y))
+            XCTAssertFalse(isGreen(color), "redacted pixel at \(x),\(y) leaked")
+            XCTAssertLessThan(color.brightnessComponent, 0.3)
+        }
+    }
+
+    func testRetinaCloseUpRedactedAndCappedToZoomWidth() throws {
+        let source = try captureStep(scale: 2)
+        try StorageManager(baseFolder: folder).saveAnnotations([redaction(CGRect(x: 360, y: 260, width: 80, height: 80))], rawURL: source.step)
+        let image = try XCTUnwrap(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+        XCTAssertEqual(image.pixelWidth, 480)
+        XCTAssertFalse(isGreen(try XCTUnwrap(try decode(image).colorAt(x: 240, y: 180))))
+    }
+
+    func testCloseUpOmittedWhenCropMovedTheClickPoint() throws {
+        let source = try captureStep()
+        let base = try XCTUnwrap(NSImage(contentsOf: source.step))
+        let cropped = try XCTUnwrap(CaptureGeometry.cropped(base, to: CGRect(x: 100, y: 0, width: 700, height: 600))).image
+        try StorageManager(baseFolder: folder).overwriteRawCapture(cropped, rawURL: source.step)
+        XCTAssertNil(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+    }
+
+    func testCloseUpKeptWhenCropLeftTheClickAreaInPlace() throws {
+        let source = try captureStep()
+        let base = try XCTUnwrap(NSImage(contentsOf: source.step))
+        let cropped = try XCTUnwrap(CaptureGeometry.cropped(base, to: CGRect(x: 0, y: 0, width: 700, height: 600))).image
+        try StorageManager(baseFolder: folder).overwriteRawCapture(cropped, rawURL: source.step)
+        let image = try XCTUnwrap(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+        XCTAssertTrue(isGreen(try XCTUnwrap(try decode(image).colorAt(x: 200, y: 150))))
+    }
+
+    func testCloseUpOmittedWhenClickOutsideImage() throws {
+        let source = try captureStep()
+        let outside = CloseUpSource(step: source.step, capturedZoom: source.capturedZoom, clickPoint: CGPoint(x: 900, y: 300))
+        XCTAssertNil(GuideImages.render(.closeUp(outside), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+    }
+
+    func testCloseUpOmittedWhenImageNoLongerMatchesCapture() throws {
+        let source = try captureStep()
+        try StorageManager(baseFolder: folder).overwriteRawCapture(white(width: 800, height: 600), rawURL: source.step)
+        XCTAssertNil(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+    }
+
+    func testCloseUpOmittedWhenSidecarDamaged() throws {
+        let source = try captureStep()
+        try Data("not json".utf8).write(to: folder.appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: "Step_01.png")))
+        XCTAssertNil(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+    }
+
+    func testCloseUpOmittedWhenCapturedCloseUpMissing() throws {
+        let source = try captureStep()
+        try FileManager.default.removeItem(at: source.capturedZoom)
+        XCTAssertNil(GuideImages.render(.closeUp(source), maxPixelWidth: GuideImages.zoomPixelWidth).image)
+    }
 }

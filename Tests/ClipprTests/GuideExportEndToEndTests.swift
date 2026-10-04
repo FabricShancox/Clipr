@@ -37,10 +37,13 @@ final class GuideExportEndToEndTests: XCTestCase {
         try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
         try writePNG(width: 1400, height: 1000, noisy: true, to: session.appendingPathComponent("Step_01.png"))
         try writePNG(width: 400, height: 300, noisy: false, to: session.appendingPathComponent("Step_02.png"))
-        try writePNG(width: 200, height: 200, noisy: false, to: session.appendingPathComponent("Step_02_zoom.png"))
+        let step2 = session.appendingPathComponent("Step_02.png")
+        let click = CGPoint(x: 200, y: 150)
+        _ = try StorageManager(baseFolder: session).saveStepZoom(
+            try XCTUnwrap(StepZoom.image(from: try XCTUnwrap(NSImage(contentsOf: step2)), centeredOn: click)), stepURL: step2)
         let created = Date()
         func record(_ file: String, zoom: String? = nil, size: ImageSize? = nil) -> StepRecord {
-            StepRecord(id: UUID(), file: file, kind: .click, caption: "Do \(file)", clickPoint: nil,
+            StepRecord(id: UUID(), file: file, kind: .click, caption: "Do \(file)", clickPoint: zoom == nil ? nil : click,
                        zoomFile: zoom, appName: nil, capturedAt: created, imageSize: size)
         }
         try SessionManifestStore.save(SessionManifest(createdAt: created, steps: [

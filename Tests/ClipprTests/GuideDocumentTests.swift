@@ -27,8 +27,9 @@ final class GuideDocumentTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder.deletingLastPathComponent())
     }
 
-    private func step(_ file: String, caption: String?, app: String?, size: ImageSize?, zoom: String? = nil) -> StepRecord {
-        StepRecord(id: UUID(), file: file, kind: .click, caption: caption, clickPoint: nil,
+    private func step(_ file: String, caption: String?, app: String?, size: ImageSize?, zoom: String? = nil,
+                      click: CGPoint? = CGPoint(x: 5, y: 6)) -> StepRecord {
+        StepRecord(id: UUID(), file: file, kind: .click, caption: caption, clickPoint: click,
                    zoomFile: zoom, appName: app, capturedAt: created, imageSize: size)
     }
 
@@ -74,8 +75,20 @@ final class GuideDocumentTests: XCTestCase {
         XCTAssertEqual(make().steps.map(\.zoom), [nil, nil, nil])
         let zoomed = make(includeZoom: true)
         XCTAssertEqual(zoomed.steps[0].zoom, nil)
-        XCTAssertEqual(zoomed.steps[1].zoom, .file(folder.appendingPathComponent("Step_02_zoom.png")))
+        XCTAssertEqual(zoomed.steps[1].zoom, .closeUp(CloseUpSource(
+            step: folder.appendingPathComponent("Step_02.png"),
+            capturedZoom: folder.appendingPathComponent("Step_02_zoom.png"),
+            clickPoint: CGPoint(x: 5, y: 6))), "rebuilt from the step image at export, checked against the capture")
         XCTAssertEqual(zoomed.steps[2].zoom, nil, "a close-up whose file is gone is left out")
+    }
+
+    func testZoomNeedsClickPointAndIgnoresStoredPath() {
+        manifest.steps[1].clickPoint = nil
+        XCTAssertNil(make(includeZoom: true).steps[1].zoom, "no click point: nothing to centre on")
+        manifest.steps[1].clickPoint = CGPoint(x: 1, y: 1)
+        manifest.steps[1].zoomFile = "../../elsewhere.png"
+        guard case .closeUp(let source)? = make(includeZoom: true).steps[1].zoom else { return XCTFail("close-up expected") }
+        XCTAssertEqual(source.capturedZoom, folder.appendingPathComponent("Step_02_zoom.png"), "name derived from the step file")
     }
 
     func testMissingImageBecomesMissingRef() {

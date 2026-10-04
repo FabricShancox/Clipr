@@ -1,5 +1,6 @@
 // Sources/Clipr/AdvancedMode/Export/GuideDocument.swift
 import Foundation
+import CoreGraphics
 
 /// The five ways a reviewed session leaves Clipr. Not called `ExportFormat`: that name is the
 /// image editor's PNG/JPEG "Save As…" choice.
@@ -57,7 +58,21 @@ extension ImageSize {
 enum GuideImageRef: Equatable {
     /// A raw step PNG; its annotation sidecar sits next to it under the usual name.
     case file(URL)
+    /// A close-up, cut from the step's annotated image at export time — never the `_zoom.png`
+    /// saved at capture, which holds raw pixels that redactions and crops made since don't reach.
+    case closeUp(CloseUpSource)
     case missing
+}
+
+/// What a close-up is rebuilt from. `capturedZoom` is only a reference: it proves the click point
+/// still lands on the same pixels it did at capture, and is never exported itself.
+struct CloseUpSource: Equatable {
+    /// The raw step PNG; its annotation sidecar sits next to it under the usual name.
+    let step: URL
+    /// The `_zoom.png` written at capture.
+    let capturedZoom: URL
+    /// Image points, top-left origin, as recorded at capture.
+    let clickPoint: CGPoint
 }
 
 /// One encoded image ready to embed or write out.
@@ -92,7 +107,7 @@ struct GuideStep: Equatable {
     let appName: String?
     let imageSize: ImageSize
     let image: GuideImageRef
-    /// Nil unless close-ups were asked for and this step has one on disk.
+    /// Nil unless close-ups were asked for and this step had one captured (still on disk).
     let zoom: GuideImageRef?
 }
 
@@ -115,7 +130,7 @@ struct GuideDocument: Equatable {
                 appName: nonBlank(record.appName),
                 imageSize: record.imageSize ?? .full,
                 image: ref(folder.appendingPathComponent(record.file)),
-                zoom: options.includeZoom ? record.zoomFile.flatMap { zoomRef(folder.appendingPathComponent($0)) } : nil
+                zoom: options.includeZoom ? closeUpRef(record, folder: folder) : nil
             )
         }
         let title = nonBlank(options.title.split(whereSeparator: \.isNewline).joined(separator: " ")) ?? folder.lastPathComponent
@@ -145,8 +160,13 @@ struct GuideDocument: Equatable {
         FileManager.default.fileExists(atPath: url.path) ? .file(url) : .missing
     }
 
-    /// A close-up whose file is gone is simply left out: it's an extra, not the step itself.
-    private static func zoomRef(_ url: URL) -> GuideImageRef? {
-        FileManager.default.fileExists(atPath: url.path) ? .file(url) : nil
+    /// A close-up whose capture-time file is gone is simply left out: it's an extra, not the step
+    /// itself. The file name is derived from the step's, never taken from `zoomFile`, so a crafted
+    /// session.json can't point the export at a file outside the session.
+    private static func closeUpRef(_ record: StepRecord, folder: URL) -> GuideImageRef? {
+        guard record.zoomFile != nil, let clickPoint = record.clickPoint else { return nil }
+        let zoom = folder.appendingPathComponent(FilenameGenerator.zoomName(fromStep: record.file))
+        guard FileManager.default.fileExists(atPath: zoom.path) else { return nil }
+        return .closeUp(CloseUpSource(step: folder.appendingPathComponent(record.file), capturedZoom: zoom, clickPoint: clickPoint))
     }
 }

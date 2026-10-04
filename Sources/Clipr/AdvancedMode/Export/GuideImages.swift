@@ -31,6 +31,7 @@ enum GuideImages {
         // A guide renders dozens of full-size captures in a row; the pool frees each one's
         // bitmaps before the next instead of at the end of the whole export.
         autoreleasepool {
+            if case .closeUp(let source) = ref { return renderCloseUp(source, maxPixelWidth: maxPixelWidth, jpegThreshold: jpegThreshold) }
             guard case .file(let url) = ref, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                   CGImageSourceGetCount(source) > 0 else {
                 return GuideImageRender(image: nil, sidecarDamaged: false)
@@ -56,6 +57,25 @@ enum GuideImages {
             guard let scaled else { return GuideImageRender(image: nil, sidecarDamaged: damaged) }
             return GuideImageRender(image: encode(scaled, jpegThreshold: jpegThreshold), sidecarDamaged: damaged)
         }
+    }
+
+    /// The close-up cut from the step as the guide shows it (annotations flattened, crops applied),
+    /// with the same crop capture uses. Nil — so the export leaves it out and warns — whenever the
+    /// click point can't be trusted to still mark the same spot, or the annotations can't be read
+    /// (a redaction might be among them).
+    private static func renderCloseUp(_ source: CloseUpSource, maxPixelWidth: Int, jpegThreshold: Int) -> GuideImageRender {
+        let none = GuideImageRender(image: nil, sidecarDamaged: false)
+        guard let base = NSImage(contentsOf: source.step), base.bitmap != nil,
+              let captured = NSImage(contentsOf: source.capturedZoom) else { return none }
+        let annotations: [AnnotationObject]
+        switch StorageManager(baseFolder: source.step.deletingLastPathComponent()).readAnnotations(rawURL: source.step) {
+        case .loaded(let loaded): annotations = loaded
+        case .missing: annotations = []
+        case .corrupt: return none
+        }
+        guard let closeUp = StepZoom.closeUp(base: base, annotations: annotations, clickPoint: source.clickPoint, captured: captured),
+              let bitmap = closeUp.bitmap, let scaled = downsampled(bitmap, maxPixelWidth: maxPixelWidth) else { return none }
+        return GuideImageRender(image: encode(scaled, jpegThreshold: jpegThreshold), sidecarDamaged: false)
     }
 
     /// Decodes straight to the target size so a huge capture is never held at full resolution.
