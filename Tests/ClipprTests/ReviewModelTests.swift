@@ -157,6 +157,7 @@ final class ReviewModelTests: XCTestCase {
         model.selection = [model.manifest.steps[1].id, model.manifest.steps[2].id]
         model.deleteSelection()
         XCTAssertEqual(captions(onDisk), ["a", "c", "d"])
+        XCTAssertEqual(calls, 2)  // Step_02 moved, Step_03 refused
         XCTAssertEqual(model.banner, "Couldn't move Step_03.png to the Trash")
     }
 
@@ -188,6 +189,7 @@ final class ReviewModelTests: XCTestCase {
         var m = SessionManifestStore.load(from: folder)
         m.version = SessionManifestStore.currentVersion + 1
         try SessionManifestStore.save(m, in: folder)
+        let before = try Data(contentsOf: folder.appendingPathComponent("session.json"))
         let model = makeModel()
         XCTAssertTrue(model.isReadOnly)
         XCTAssertEqual(model.readOnlyNotice, "Made by a newer version of Clipr — read only")
@@ -197,6 +199,7 @@ final class ReviewModelTests: XCTestCase {
         model.deleteSelection()
         XCTAssertEqual(captions(model.manifest), ["a", "b", "c", "d"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Step_01.png").path))
+        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent("session.json")), before)
     }
 
     func testReloadPicksUpExternalChangesAndBumpsToken() throws {
@@ -208,5 +211,128 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertEqual(captions(model.manifest), ["a", "b", "c"])
         XCTAssertTrue(model.selection.isEmpty)
         XCTAssertEqual(model.refreshToken, before + 1)
+    }
+
+    private func emptyTrash() throws {
+        for item in try FileManager.default.contentsOfDirectory(at: trash, includingPropertiesForKeys: nil) {
+            try FileManager.default.removeItem(at: item)
+        }
+    }
+
+    func testUndoMoveDoesNotResurrectStepDeletedSinceWithTrashEmptied() throws {
+        let model = makeModel()
+        model.move(fromOffsets: [3], toOffset: 0)  // d a b c
+        model.selection = [model.manifest.steps[2].id]  // b
+        model.deleteSelection()
+        try emptyTrash()
+        model.undoManager.undo()  // restore fails, b stays deleted
+        model.undoManager.undo()  // undo the move
+        XCTAssertEqual(captions(onDisk), ["a", "c", "d"])
+        for step in onDisk.steps {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent(step.file).path))
+        }
+    }
+
+    func testUndoMoveKeepsStepAddedByReload() throws {
+        let model = makeModel()
+        model.move(fromOffsets: [3], toOffset: 0)  // d a b c
+        var m = SessionManifestStore.load(from: folder)
+        // load() drops entries without an image, so the orphan needs one (created after the load
+        // above, which would otherwise adopt it as a caption-less step).
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("Step_05.png").path, contents: Data([1]))
+        m.steps.append(StepRecord(id: UUID(), file: "Step_05.png", kind: .click, caption: "orphan", clickPoint: nil,
+                                  zoomFile: nil, appName: "Safari", capturedAt: Date(timeIntervalSince1970: 0)))
+        try SessionManifestStore.save(m, in: folder)
+        model.reload()
+        model.undoManager.undo()
+        XCTAssertEqual(captions(onDisk), ["a", "b", "c", "d", "orphan"])
+    }
+
+    final class Box { var fail = true }
+
+    func testReloadKeepsUnsavedEditsAndFlushRetries() {
+        let box = Box()
+        let model = makeModel(save: { m, f in if box.fail { throw CocoaError(.fileWriteUnknown) }; try SessionManifestStore.saveSafely(m, in: f) })
+        model.move(fromOffsets: [0], toOffset: 2)  // b a c d, unsaved
+        model.reload()
+        XCTAssertEqual(captions(model.manifest), ["b", "a", "c", "d"])
+        XCTAssertEqual(model.banner, "Couldn't save changes — will retry")
+        box.fail = false
+        model.flush()
+        XCTAssertEqual(captions(onDisk), ["b", "a", "c", "d"])
+        XCTAssertNil(model.banner)
+    }
+
+    func testCommitForOtherStepFlushesPendingCaption() {
+        let model = makeModel(captionDelay: 10)
+        model.editCaption("x", for: model.manifest.steps[0].id)
+        model.commitCaption("y", for: model.manifest.steps[1].id)
+        XCTAssertEqual(onDisk.steps[0].caption, "x")
+        XCTAssertEqual(onDisk.steps[1].caption, "y")
+    }
+
+    func testCaptionSessionIsOneUndo() async throws {
+        let model = makeModel(captionDelay: 0.05)
+        let id = model.manifest.steps[0].id
+        model.beginCaptionEdit(for: id)
+        for text in ["x", "xy", "xyz"] {
+            model.editCaption(text, for: id)
+            try await Task.sleep(nanoseconds: 200_000_000)
+            XCTAssertEqual(onDisk.steps[0].caption, text)
+            XCTAssertFalse(model.undoManager.canUndo)
+        }
+        model.commitCaption("xyz", for: id)
+        XCTAssertEqual(model.undoManager.undoActionName, "Edit Caption")
+        model.undoManager.undo()
+        XCTAssertEqual(onDisk.steps[0].caption, "a")
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    func testCancelCaptionEditRestoresOriginalWithoutUndo() async throws {
+        let model = makeModel(captionDelay: 0.05)
+        let id = model.manifest.steps[0].id
+        model.beginCaptionEdit(for: id)
+        model.editCaption("typed", for: id)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(onDisk.steps[0].caption, "typed")
+        model.cancelCaptionEdit(for: id)
+        XCTAssertEqual(onDisk.steps[0].caption, "a")
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
+    func testSaveFailureBannerSurvivesTrashFailureBanner() {
+        let box = Box()
+        let flaky = StepFiles(
+            trashItem: { [trash] url in
+                if url.lastPathComponent == "Step_03.png" { throw CocoaError(.fileWriteNoPermission) }
+                let dest = trash!.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.moveItem(at: url, to: dest)
+                return dest
+            },
+            moveItem: { try FileManager.default.moveItem(at: $0, to: $1) }
+        )
+        let model = ReviewModel(folder: folder, files: flaky,
+                                save: { _, _ in if box.fail { throw CocoaError(.fileWriteUnknown) } }, captionDelay: 0.05)
+        model.selection = [model.manifest.steps[1].id, model.manifest.steps[2].id]
+        model.deleteSelection()
+        XCTAssertEqual(model.banner, "Couldn't save changes — will retry")
+    }
+
+    func testDeleteOfUnknownIDsLeavesBannerAlone() {
+        let box = Box()
+        let model = makeModel(save: { _, _ in if box.fail { throw CocoaError(.fileWriteUnknown) } })
+        model.move(fromOffsets: [0], toOffset: 2)
+        model.delete(ids: [UUID()])
+        XCTAssertEqual(model.banner, "Couldn't save changes — will retry")
+    }
+
+    func testRestoreWithNothingRestoredSavesNothingAndRegistersNoRedo() throws {
+        let model = makeModel()
+        model.selection = [model.manifest.steps[0].id]
+        model.deleteSelection()
+        try emptyTrash()
+        model.undoManager.undo()
+        XCTAssertFalse(model.undoManager.canRedo)
+        XCTAssertEqual(captions(onDisk), ["b", "c", "d"])
     }
 }

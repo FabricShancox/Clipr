@@ -22,6 +22,12 @@ final class ReviewModel: ObservableObject {
     private let captionDelay: TimeInterval
     private var pendingCaption: (id: UUID, text: String?)?
     private var captionWork: DispatchWorkItem?
+    /// True after a failed save until a later save succeeds, so edits held only in memory are
+    /// retried (flush) and never overwritten by a reload.
+    private var isDirty = false
+    /// While a caption field is focused, its debounced saves are not individual undo steps: the
+    /// whole session becomes one "Edit Caption" undo when committed, and Esc restores `original`.
+    private var captionSession: (id: UUID, original: String?)?
 
     var readOnlyNotice: String? { isReadOnly ? "Made by a newer version of Clipr — read only" : nil }
 
@@ -68,6 +74,26 @@ final class ReviewModel: ObservableObject {
 
     // MARK: Captions
 
+    /// Call when a caption field gains focus; remembers the caption Esc and undo return to.
+    func beginCaptionEdit(for id: UUID) {
+        guard !isReadOnly, let step = manifest.steps.first(where: { $0.id == id }) else { return }
+        captionSession = (id, step.caption)
+    }
+
+    /// Esc: drop typing and put the original back on disk without leaving anything to undo.
+    func cancelCaptionEdit(for id: UUID) {
+        guard !isReadOnly else { return }
+        captionWork?.cancel()
+        captionWork = nil
+        pendingCaption = nil
+        guard let session = captionSession, session.id == id else { return }
+        captionSession = nil
+        let restored = ManifestEditor.settingCaption(session.original, forStep: id, in: manifest)
+        guard restored != manifest else { return }
+        manifest = restored
+        persist()
+    }
+
     /// Called on every keystroke; saves once typing pauses.
     func editCaption(_ text: String?, for id: UUID) {
         guard !isReadOnly else { return }
@@ -81,8 +107,22 @@ final class ReviewModel: ObservableObject {
     /// Return or focus loss: save now, superseding any pending typing save for this step.
     func commitCaption(_ text: String?, for id: UUID) {
         guard !isReadOnly else { return }
+        // A pending edit for another step would otherwise be dropped by the cancel below.
+        if let pending = pendingCaption, pending.id != id { flushPendingCaption() }
         captionWork?.cancel()
         pendingCaption = nil
+        if let session = captionSession, session.id == id {
+            captionSession = nil
+            let updated = ManifestEditor.settingCaption(text, forStep: id, in: manifest)
+            if updated != manifest { manifest = updated; persist() }
+            let final = manifest.steps.first { $0.id == id }?.caption
+            guard final != session.original else { return }
+            let original = session.original
+            registerUndo("Edit Caption") {
+                $0.replace(with: ManifestEditor.settingCaption(original, forStep: id, in: $0.manifest), actionName: "Edit Caption")
+            }
+            return
+        }
         applyCaption(text, for: id)
     }
 
@@ -92,7 +132,18 @@ final class ReviewModel: ObservableObject {
         captionWork = nil
         guard let pending = pendingCaption else { return }
         pendingCaption = nil
-        applyCaption(pending.text, for: pending.id)
+        if captionSession?.id == pending.id {
+            let updated = ManifestEditor.settingCaption(pending.text, forStep: pending.id, in: manifest)
+            if updated != manifest { manifest = updated; persist() }
+        } else {
+            applyCaption(pending.text, for: pending.id)
+        }
+    }
+
+    /// Saves any pending caption and retries a save that failed earlier. Window close calls this.
+    func flush() {
+        flushPendingCaption()
+        if isDirty { persist() }
     }
 
     private func applyCaption(_ text: String?, for id: UUID) {
@@ -108,9 +159,11 @@ final class ReviewModel: ObservableObject {
     func delete(ids: Set<UUID>) {
         guard !isReadOnly, !ids.isEmpty else { return }
         flushPendingCaption()
+        let targets = manifest.steps.filter { ids.contains($0.id) }
+        guard !targets.isEmpty else { return }
         var trashed: [UUID: TrashedStep] = [:]
         var failed: [String] = []
-        for step in manifest.steps where ids.contains(step.id) {
+        for step in targets {
             do { trashed[step.id] = try files.trash(step.file, in: folder) } catch { failed.append(step.file) }
         }
         guard !trashed.isEmpty else {
@@ -120,8 +173,8 @@ final class ReviewModel: ObservableObject {
         let firstIndex = manifest.steps.firstIndex { trashed[$0.id] != nil } ?? 0
         let (updated, removed) = ManifestEditor.removing(ids: Set(trashed.keys), from: manifest)
         manifest = updated
-        persist()
-        if let failure = failed.first { banner = "Couldn't move \(failure) to the Trash" }
+        let saved = persist()
+        if saved, let failure = failed.first { banner = "Couldn't move \(failure) to the Trash" }
         selection = manifest.steps.isEmpty ? [] : [manifest.steps[min(firstIndex, manifest.steps.count - 1)].id]
         let trashedSteps = removed.compactMap { item in trashed[item.record.id].map { (item, $0) } }
         registerUndo("Delete Steps") { $0.restore(trashedSteps) }
@@ -140,9 +193,13 @@ final class ReviewModel: ObservableObject {
                 missing.append(trashedStep.file)
             }
         }
+        guard !restored.isEmpty else {
+            if let first = missing.first { banner = "Couldn't restore \(first) — it's no longer in the Trash" }
+            return
+        }
         manifest = ManifestEditor.restoring(restored, into: manifest)
-        persist()
-        if let first = missing.first { banner = "Couldn't restore \(first) — it's no longer in the Trash" }
+        let saved = persist()
+        if saved, let first = missing.first { banner = "Couldn't restore \(first) — it's no longer in the Trash" }
         selection = Set(restored.map(\.record.id))
         let ids = Set(restored.map(\.record.id))
         registerUndo("Delete Steps") { $0.delete(ids: ids) }
@@ -153,7 +210,9 @@ final class ReviewModel: ObservableObject {
     /// After the image editor closes (it may have changed or deleted the step's image), re-read the
     /// session from disk and make rows decode their thumbnails again.
     func reload() {
-        flushPendingCaption()
+        flush()
+        // Unsaved edits live only in memory; reloading now would silently discard them.
+        guard !isDirty else { return }
         manifest = SessionManifestStore.load(from: folder)
         let ids = Set(manifest.steps.map(\.id))
         selection = selection.filter { ids.contains($0) }
@@ -166,9 +225,22 @@ final class ReviewModel: ObservableObject {
     private func replace(with new: SessionManifest, actionName: String) {
         guard new != manifest else { return }
         let old = manifest
-        manifest = new
+        manifest = reconciled(new)
         persist()
         registerUndo(actionName) { $0.replace(with: old, actionName: actionName) }
+    }
+
+    /// An undo snapshot may predate changes it must not undo: a step deleted since (whose files may
+    /// be gone from the Trash) must stay deleted, and a step added by reload must survive. So the
+    /// snapshot's order and records are kept only for steps that still exist, and steps it has never
+    /// heard of are appended.
+    private func reconciled(_ target: SessionManifest) -> SessionManifest {
+        let currentIDs = Set(manifest.steps.map(\.id))
+        let targetIDs = Set(target.steps.map(\.id))
+        var result = manifest
+        result.steps = target.steps.filter { currentIDs.contains($0.id) }
+            + manifest.steps.filter { !targetIDs.contains($0.id) }
+        return result
     }
 
     /// Opens a group only for a fresh user action; registrations made while undoing or redoing
@@ -181,13 +253,18 @@ final class ReviewModel: ObservableObject {
         if ownGroup { undoManager.endUndoGrouping() }
     }
 
-    private func persist() {
-        guard !isReadOnly else { return }
+    @discardableResult
+    private func persist() -> Bool {
+        guard !isReadOnly else { return true }
         do {
             try save(manifest, folder)
             banner = nil
+            isDirty = false
+            return true
         } catch {
             banner = "Couldn't save changes — will retry"
+            isDirty = true
+            return false
         }
     }
 }
