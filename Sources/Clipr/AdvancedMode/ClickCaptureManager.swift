@@ -67,6 +67,8 @@ final class ClickCaptureManager {
 
     private struct PendingClick {
         let point: CGPoint
+        /// What was under the click when it happened.
+        let window: ClickedWindow?
         let trail: [CGPoint]
         let describe: Task<ClickTarget?, Never>?
         let work: DispatchWorkItem
@@ -182,7 +184,7 @@ final class ClickCaptureManager {
             if settings.cursorTrail { trail.add(p) }
         case .ownClick:
             endTypingBurst()
-        case .click(let p, let clickCount, _):
+        case .click(let p, let clickCount, let window):
             endTypingBurst()
             var points = trail.drain()
             if let previous = pending {
@@ -209,7 +211,7 @@ final class ClickCaptureManager {
                 self.pending = nil
                 self.fire(pending)
             }
-            pending = PendingClick(point: p, trail: points, describe: describe, work: work, slot: slot)
+            pending = PendingClick(point: p, window: window, trail: points, describe: describe, work: work, slot: slot)
             DispatchQueue.main.asyncAfter(deadline: .now() + settings.effectiveDelay, execute: work)
         case .key(let key):
             guard settings.typingSteps, !typingUnavailable, !isFrontmostClipr(),
@@ -240,7 +242,11 @@ final class ClickCaptureManager {
             let target = await Self.value(of: describe, timeout: 0.5)
             return CaptionFormatter.click(target ?? nil, appName: appName)
         }
-        enqueue(kind: .click, target: scopeTarget(for: click.point), click: click.point, trail: click.trail,
+        // The clicked window's app, not whichever app is frontmost when the capture runs: a click
+        // on a non-activating panel or another app's palette doesn't change the frontmost app.
+        let appName = click.window?.isCapturable == true ? click.window?.appName : nil
+        enqueue(kind: .click, target: scopeTarget(for: click.point, window: click.window), click: click.point,
+                appName: appName, trail: click.trail,
                 slot: click.slot, caption: caption)
     }
 
@@ -314,9 +320,12 @@ final class ClickCaptureManager {
         }
     }
 
-    private func scopeTarget(for click: CGPoint?) -> CaptureTarget {
+    /// Window scope captures the window that was clicked, when it's an app window; a click on the
+    /// Dock, the menu bar, a pop-up menu or the desktop falls back to the frontmost app's window.
+    private func scopeTarget(for click: CGPoint?, window: ClickedWindow? = nil) -> CaptureTarget {
         switch settings.scope {
         case .window:
+            if let window, window.isCapturable { return .window(window) }
             return .frontmostWindow
         case .screen:
             return .screenContaining(click ?? NSEvent.mouseLocationQuartz)
@@ -340,7 +349,7 @@ final class ClickCaptureManager {
 
     /// `slot` is the click's reserved place in the chain; every other step joins at the end now.
     private func enqueue(
-        kind: StepRecord.Kind, target: CaptureTarget, click: CGPoint?, trail: [CGPoint],
+        kind: StepRecord.Kind, target: CaptureTarget, click: CGPoint?, appName: String? = nil, trail: [CGPoint],
         slot: WriteSlot? = nil,
         skipIf: @escaping () async -> Bool = { false }, caption: @escaping (_ appName: String?) async -> String?
     ) {
@@ -363,7 +372,7 @@ final class ClickCaptureManager {
             // bytes rather than full-resolution bitmaps.
             let prepared = await Self.captureAndPrepare(
                 target: target, imageSource: imageSource, showsCursor: showsCursor, skipIf: skipIf,
-                kind: kind, click: click, trail: trail, settings: settings, caption: caption
+                kind: kind, click: click, appName: appName, trail: trail, settings: settings, caption: caption
             )
             await predecessor?.value
             guard let self, let prepared else { return }
@@ -387,7 +396,7 @@ final class ClickCaptureManager {
     /// Captures, captions and encodes a step. The captured bitmap lives only inside this call.
     private static func captureAndPrepare(
         target: CaptureTarget, imageSource: StepImageSource, showsCursor: Bool, skipIf: () async -> Bool,
-        kind: StepRecord.Kind, click: CGPoint?, trail: [CGPoint], settings: AdvancedModeSettings,
+        kind: StepRecord.Kind, click: CGPoint?, appName: String?, trail: [CGPoint], settings: AdvancedModeSettings,
         caption: (_ appName: String?) async -> String?
     ) async -> PreparedStep? {
         guard await !skipIf() else { return nil }
@@ -398,7 +407,8 @@ final class ClickCaptureManager {
             NSLog("Clipr: advanced mode step capture failed: \(error)")
             return nil
         }
-        guard let frame else { return nil }
+        guard var frame else { return nil }
+        if let appName { frame.appName = appName }
         let text = await caption(frame.appName)
         return autoreleasepool {
             prepare(frame, kind: kind, click: click, trail: trail, caption: text, settings: settings)
@@ -413,6 +423,9 @@ final class ClickCaptureManager {
             NSLog("Clipr: advanced mode step encode failed")
             return nil
         }
+        // A capture that had to fall back to another window doesn't show the click: no marker,
+        // trail or close-up pointing at the wrong thing.
+        let click = frame.marksClick ? click : nil
         let size = frame.image.size
         let imagePoint = click.flatMap { StepGeometry.imagePoint(global: $0, captureOrigin: frame.origin, imageSize: size) }
         var annotations: [AnnotationObject] = []

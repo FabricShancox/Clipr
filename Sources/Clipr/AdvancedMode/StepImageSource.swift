@@ -3,6 +3,8 @@ import Cocoa
 
 enum CaptureTarget: Equatable {
     case frontmostWindow
+    /// The window that was clicked; the frontmost app's window if it has closed since.
+    case window(ClickedWindow)
     case screenContaining(CGPoint)
     case area(CGRect)
 }
@@ -11,7 +13,10 @@ struct CapturedFrame {
     let image: NSImage
     /// Quartz global position of the image's top-left corner — what `StepGeometry` subtracts.
     let origin: CGPoint
-    let appName: String?
+    var appName: String?
+    /// False when the image isn't of what was clicked (the clicked window closed before the
+    /// capture), so the click point means nothing in it.
+    var marksClick = true
 }
 
 protocol StepImageSource: AnyObject {
@@ -31,6 +36,15 @@ final class LiveStepImageSource: StepImageSource {
             guard let window = await MainActor.run(body: { frontmostWindow(of: app) }) else { return nil }
             let image = try await CaptureManager.captureWindow(window, showsCursor: showsCursor)
             return CapturedFrame(image: image, origin: window.bounds.origin, appName: appName)
+        case .window(let clicked):
+            if let window = await MainActor.run(body: { onScreenWindow(clicked) }),
+               let image = try? await CaptureManager.captureWindow(window, showsCursor: showsCursor) {
+                return CapturedFrame(image: image, origin: window.bounds.origin, appName: clicked.appName ?? appName)
+            }
+            // Gone (the click closed it): the frontmost window, without the click marked on it.
+            guard let window = await MainActor.run(body: { frontmostWindow(of: app) }) else { return nil }
+            let image = try await CaptureManager.captureWindow(window, showsCursor: showsCursor)
+            return CapturedFrame(image: image, origin: window.bounds.origin, appName: appName, marksClick: false)
         case .screenContaining(let point):
             guard let match = await MainActor.run(body: { Self.screen(containing: point) }) else { return nil }
             let (screen, frame) = match
@@ -55,6 +69,21 @@ final class LiveStepImageSource: StepImageSource {
         guard let window = WindowPicker.frontmostWindow(ownedBy: app.processIdentifier, in: WindowPicker.onScreenWindows()),
               !ownWindowIDs.contains(window.windowID) else { return nil }
         return window
+    }
+
+    /// The clicked window's current bounds, if it's still on screen and isn't Clipr's.
+    @MainActor
+    private func onScreenWindow(_ clicked: ClickedWindow) -> WindowInfo? {
+        guard clicked.ownerPID != ProcessInfo.processInfo.processIdentifier,
+              !ownWindowIDs.contains(clicked.windowID),
+              let list = CGWindowListCopyWindowInfo(.optionIncludingWindow, clicked.windowID) as? [[String: Any]],
+              let entry = list.first(where: { ($0[kCGWindowNumber as String] as? CGWindowID) == clicked.windowID }),
+              (entry[kCGWindowIsOnscreen as String] as? Bool) == true,
+              let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
+        let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+                            width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        return WindowInfo(windowID: clicked.windowID, ownerPID: clicked.ownerPID, bounds: bounds, layer: clicked.layer)
     }
 
     @MainActor

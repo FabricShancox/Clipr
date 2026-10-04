@@ -24,8 +24,9 @@ private final class FakeImages: StepImageSource {
         if seconds > 0 { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         await MainActor.run { self.targets.append(target) }
         let image = testImage(width: 400, height: 300) { NSColor.white.set(); NSRect(x: 0, y: 0, width: 400, height: 300).fill() }
-        return CapturedFrame(image: image, origin: origin, appName: "Safari")
+        return CapturedFrame(image: image, origin: origin, appName: "Safari", marksClick: marksClick)
     }
+    var marksClick = true
 }
 
 private final class FakeDescriber: ClickDescribing {
@@ -487,6 +488,40 @@ final class ClickCaptureManagerTests: XCTestCase {
         _ = try manager.start(settings: settings(), area: nil)
         manager.handle(.ownClick)
         XCTAssertTrue(stop().0.steps.isEmpty)
+    }
+
+    // M2: Window scope captures the window under the click, captioned with its app.
+    func testWindowScopeCapturesClickedWindow() throws {
+        let palette = ClickedWindow(windowID: 42, ownerPID: 7, layer: 3, appName: "Pixelmator")
+        _ = try manager.start(settings: settings { $0.scope = .window }, area: nil)
+        manager.handle(.click(CGPoint(x: 150, y: 160), window: palette))
+        waitForSteps(1)
+        let steps = stop().0.steps
+        XCTAssertEqual(images.targets, [.window(palette)])
+        XCTAssertEqual(steps.first?.caption, "Click **Save** in Pixelmator")
+        XCTAssertEqual(steps.first?.appName, "Pixelmator")
+    }
+
+    func testWindowScopeClickOnDockFallsBackToFrontmostWindow() throws {
+        let dock = ClickedWindow(windowID: 3, ownerPID: 9, layer: ClickedWindow.dockLayer, appName: "Dock")
+        _ = try manager.start(settings: settings { $0.scope = .window }, area: nil)
+        manager.handle(.click(CGPoint(x: 150, y: 160), window: dock))
+        waitForSteps(1)
+        let steps = stop().0.steps
+        XCTAssertEqual(images.targets, [.frontmostWindow])
+        XCTAssertEqual(steps.first?.appName, "Safari")
+    }
+
+    func testFallbackCaptureHasNoMarkerOrClickPoint() throws {
+        images.marksClick = false
+        _ = try manager.start(settings: settings { $0.zoomOnClick = true; $0.cursorTrail = true }, area: nil)
+        manager.handle(.mouseMoved(CGPoint(x: 120, y: 120)))
+        manager.handle(.click(CGPoint(x: 150, y: 160)))
+        waitForSteps(1)
+        let (manifest, sessionFolder) = stop()
+        XCTAssertNil(manifest.steps[0].clickPoint)
+        XCTAssertNil(manifest.steps[0].zoomFile)
+        XCTAssertTrue(StorageManager(baseFolder: folder).loadAnnotations(rawURL: sessionFolder.appendingPathComponent(manifest.steps[0].file)).isEmpty)
     }
 
     func testFixedAreaTargetsArea() throws {
