@@ -54,9 +54,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// Clipr is a menu-bar (accessory) app, so a plain `showWindow` can open the Review window
     /// behind whatever app the user was just recording — activate so it actually comes forward.
     func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        WindowPresenter.bringToFront(self)
     }
 
     /// Saves the session's pending caption (retrying a failed save) and any edits pending in
@@ -126,9 +124,7 @@ final class ReviewWindowController: NSWindowController, NSWindowDelegate {
     /// other's annotations. Asking again brings the open one forward.
     private func openEditor(for step: StepRecord) {
         if let open = openEditors.first(where: { $0.stepID == step.id }) {
-            NSApp.activate(ignoringOtherApps: true)
-            open.editor.showWindow(nil)
-            open.editor.window?.makeKeyAndOrderFront(nil)
+            WindowPresenter.bringToFront(open.editor)
             return
         }
         let url = model.url(for: step)

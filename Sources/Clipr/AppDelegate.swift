@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.title = "Open Image in Clipr"
         // Chosen from the status menu while another app is frontmost: without activating, the
         // panel (and any alert after it) can open behind that app.
-        NSApp.activate(ignoringOtherApps: true)
+        WindowPresenter.activateApp()
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let image: NSImage
         switch DecodeLimits.loadImage(at: url) {
@@ -211,7 +211,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let review {
                     review.present()
                 } else {
-                    NSApp.activate(ignoringOtherApps: true)
                     Alerts.noStepsCaptured()
                 }
             }
@@ -311,7 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !flag else { return true }
         if let editor = frontmostEditor() {
             editor.window?.deminiaturize(nil)
-            bringToFront(editor)
+            WindowPresenter.bringToFront(editor, regardless: true)
         } else {
             openPreferences()
         }
@@ -344,7 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the previous window on screen with its bindings still live, so two Preferences windows
         // could write to `SettingsStore` and re-register hotkeys independently.
         if let existing = preferencesWindowController {
-            bringToFront(existing)
+            WindowPresenter.bringToFront(existing, regardless: true)
             return
         }
         let controller = PreferencesWindowController(
@@ -387,17 +386,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let token = box.token { NotificationCenter.default.removeObserver(token) }
             }
         }
-        bringToFront(controller)
-    }
-
-    /// Clipr is a menu-bar app, so it usually isn't active when Preferences is chosen; showing the
-    /// window without activating first left it behind whatever app the user was in. Activate,
-    /// then order front explicitly — `showWindow` alone doesn't raise a window of an inactive app.
-    private func bringToFront(_ controller: NSWindowController) {
-        NSApp.activate(ignoringOtherApps: true)
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
-        controller.window?.orderFrontRegardless()
+        // Clipr is a menu-bar app, so it usually isn't active when Preferences is chosen; showing
+        // the window without activating first left it behind whatever app the user was in.
+        WindowPresenter.bringToFront(controller, regardless: true)
     }
 
     /// `CaptureManager`/`AdvancedModeCoordinator` each hold their own `captureCursor` copy rather

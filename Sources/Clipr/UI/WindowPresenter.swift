@@ -8,10 +8,13 @@ enum WindowPresenter {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Activates Clipr, shows the controller's window and makes it key.
-    static func bringToFront(_ controller: NSWindowController) {
+    /// Activates Clipr, shows the controller's window and makes it key. `regardless` also orders it
+    /// front explicitly, for a window that must come up even if activation hasn't landed yet
+    /// (`showWindow` alone doesn't raise a window of an inactive app).
+    static func bringToFront(_ controller: NSWindowController, regardless: Bool = false) {
         activateApp()
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
+        if regardless { controller.window?.orderFrontRegardless() }
     }
 }

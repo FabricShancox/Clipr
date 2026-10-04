@@ -51,6 +51,7 @@ enum Alerts {
     /// Desktop) captures nothing. Naming the actual interaction model here is cheaper than a UI
     /// redesign.
     static func noStepsCaptured() {
-        run("No Steps Captured", "Advanced Mode captures the frontmost app window each time you click it — not a dragged area. Click inside a real app window (not the empty Desktop) to record a step.")
+        run("No Steps Captured", "Advanced Mode captures the frontmost app window each time you click it — not a dragged area. Click inside a real app window (not the empty Desktop) to record a step.",
+            activate: true)
     }
 }

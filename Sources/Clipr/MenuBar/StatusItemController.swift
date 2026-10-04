@@ -81,7 +81,7 @@ final class StatusItemController {
     /// Activating first brings it in front: opened from the status menu, Clipr may not be the
     /// active app, and the panel would otherwise appear behind whatever is.
     @objc private func showAbout() {
-        NSApp.activate(ignoringOtherApps: true)
+        WindowPresenter.activateApp()
         NSApp.orderFrontStandardAboutPanel(nil)
     }
 }
