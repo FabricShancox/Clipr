@@ -35,8 +35,42 @@ final class StorageManager {
     /// the new geometry while `rawURL` kept the original pixels, so reopening the capture loaded
     /// the uncropped image and positioned annotations that had been remapped for the cropped one
     /// — the crop silently undone and every annotation misplaced.
+    ///
+    /// Capture storage is PNG-only, so this refuses anything that isn't a `.png`: writing PNG
+    /// bytes under a `.jpg`/`.heic` name would leave a mislabelled file and destroy the original
+    /// encoding. Files from outside Clipr reach the editor through `importForEditing`, so this is
+    /// a backstop, not the normal path.
     func overwriteRawCapture(_ image: NSImage, rawURL: URL) throws {
+        guard rawURL.pathExtension.lowercased() == "png" else {
+            throw StorageError.notAPNGCapture(rawURL)
+        }
         _ = try write(image, to: rawURL, overwrite: true)
+    }
+
+    /// The file the editor should work on for an image picked with "Open Image…".
+    ///
+    /// The editor writes to its "raw" file (crop and canvas-resize replace its pixels; auto-save
+    /// puts `_edited.png` and the sidecar beside it), so editing a user's own file in place would
+    /// overwrite their original — and give a JPEG/HEIC PNG bytes under its old extension. Only a
+    /// PNG sitting directly in the capture folder is edited in place; anything else is imported
+    /// as a new PNG there (named after the original, suffixed if taken) and the original is left
+    /// exactly as it was.
+    func importForEditing(_ url: URL, image: NSImage) throws -> URL {
+        let folder = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let base = baseFolder.resolvingSymlinksInPath().standardizedFileURL
+        if folder.path == base.path, url.pathExtension.lowercased() == "png" {
+            return url
+        }
+        let name = FilenameGenerator.sanitizedBaseName(url.deletingPathExtension().lastPathComponent) ?? "Image"
+        let target = baseFolder.appendingPathComponent("\(name).png")
+        if url.pathExtension.lowercased() == "png" {
+            // Byte-for-byte, so the copy keeps the original's metadata and colour profile.
+            try FileManager.default.createDirectory(at: baseFolder, withIntermediateDirectories: true)
+            let destination = uniqueURL(for: target)
+            try FileManager.default.copyItem(at: url, to: destination)
+            return destination
+        }
+        return try write(image, to: target)
     }
 
     /// Persists the live, editable annotation objects for a capture as a JSON sidecar, so

@@ -93,9 +93,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return openEditors.last
     }
 
-    /// Opens the editor on an existing image file instead of a fresh capture. The picked file
-    /// becomes this editor's "raw" file directly, so auto-save writes its `_edited` companion
-    /// right next to wherever the user chose to open it from.
+    /// Opens the editor on an existing image file instead of a fresh capture.
+    ///
+    /// The picked file is NOT edited in place: crop and canvas-resize rewrite the editor's raw
+    /// file, which used to destroy the user's original (and give a JPEG PNG bytes under its old
+    /// name). Unless it's already a PNG in the capture folder, it's imported there as a new PNG
+    /// first — see `StorageManager.importForEditing` — and the original is never written to.
     private func openImage() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.png, .jpeg, .tiff, .bmp, .gif, .heic]
@@ -103,7 +106,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.canChooseDirectories = false
         panel.title = "Open Image in Clipr"
         guard panel.runModal() == .OK, let url = panel.url, let image = NSImage(contentsOf: url) else { return }
-        openEditor(image: image, rawURL: url)
+        do {
+            let editable = try storage.importForEditing(url, image: image)
+            openEditor(image: image, rawURL: editable)
+        } catch {
+            NSLog("Clipr: could not import \(url.lastPathComponent): \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open this image"
+            alert.informativeText = "Clipr couldn't copy \(url.lastPathComponent) into your capture folder, so it wasn't opened. The original wasn't changed.\n\n\(error.localizedDescription)"
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
     }
 
     private func registerHotkeys() {
