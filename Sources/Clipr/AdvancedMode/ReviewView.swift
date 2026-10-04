@@ -61,6 +61,9 @@ struct ReviewView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 120)
+            // Switching layout rebuilds every row, and the caption field being edited with it: the
+            // new field never gets focus, so the row would be stuck in edit mode.
+            .disabled(editingID != nil)
             Button("Delete Selected", role: .destructive) { model.deleteSelection() }
                 .disabled(model.selection.isEmpty || model.isReadOnly)
             Button("Show in Finder", action: onShowInFinder)
@@ -109,6 +112,7 @@ struct ReviewView: View {
             ForEach(Array(ReviewLayout.allCases.enumerated()), id: \.element) { index, option in
                 Button("") { layout = option }
                     .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                    .disabled(editingID != nil)
             }
         }
         .opacity(0)
