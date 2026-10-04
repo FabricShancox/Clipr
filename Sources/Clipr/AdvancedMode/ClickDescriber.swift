@@ -11,8 +11,9 @@ protocol ClickDescribing: AnyObject {
 }
 
 /// Whether the focused element is a password field. `unknown` whenever Accessibility couldn't
-/// say for sure (no focused element, timeout, any other read error) — typing steps treat it
-/// like `secure`, so a failed read can never let a password through.
+/// say for sure (no focused element, timeout, any other read error, or anything
+/// `TypingInputPolicy` doesn't trust) — typing steps treat it like `secure`, so a failed read can
+/// never let a password through.
 enum FieldSecurity: Equatable {
     case secure, notSecure, unknown
 }
@@ -52,41 +53,29 @@ final class ClickDescriber: ClickDescribing {
                 guard let focused = Self.element(systemWide, kAXFocusedUIElementAttribute) else {
                     return continuation.resume(returning: FocusedField(label: nil, security: .unknown, element: nil))
                 }
-                // Terminals never mark a sudo/ssh/password prompt as an AX secure field, so the
-                // subrole check below can't protect them: any field in a terminal is `unknown`.
                 // The app comes from the focused element's own pid — the process that actually
                 // receives the keys — rather than the frontmost app, which needs the main thread
                 // and could already be a different app by the time this read runs.
                 var pid: pid_t = 0
-                guard AXUIElementGetPid(focused, &pid) == .success,
-                      !Self.isTerminal(bundleID: NSRunningApplication(processIdentifier: pid)?.bundleIdentifier) else {
-                    return continuation.resume(returning: FocusedField(label: nil, security: .unknown, element: focused))
-                }
+                let bundleID = AXUIElementGetPid(focused, &pid) == .success
+                    ? NSRunningApplication(processIdentifier: pid)?.bundleIdentifier : nil
                 let role = Self.read(focused, kAXRoleAttribute)
                 let subrole = Self.read(focused, kAXSubroleAttribute)
-                let security: FieldSecurity
-                if case .failed = role { security = .unknown }
-                else if case .failed = subrole { security = .unknown }
-                else if case .value("AXSecureTextField") = subrole { security = .secure }
-                else { security = .notSecure }
-                var roleString: String?
+                var roleString: String?, subroleString: String?
                 if case .value(let r) = role { roleString = r }
+                if case .value(let r) = subrole { subroleString = r }
+                let label = Self.label(of: focused, role: roleString, allowValue: false)
+                let facts = FocusedElementFacts(
+                    bundleID: bundleID, role: roleString, subrole: subroleString, size: Self.size(of: focused),
+                    domClassList: Self.strings(focused, "AXDOMClassList"), label: label,
+                    readFailed: role == .failed || subrole == .failed
+                )
+                let security = TypingInputPolicy.security(of: facts)
                 continuation.resume(returning: FocusedField(
-                    label: Self.label(of: focused, role: roleString, allowValue: false), security: security, element: focused
+                    label: security == .notSecure ? label : nil, security: security, element: focused
                 ))
             }
         }
-    }
-
-    static let terminalBundleIDs: Set<String> = [
-        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "net.kovidgoyal.kitty",
-        "org.alacritty", "com.mitchellh.ghostty", "com.github.wez.wezterm"
-    ]
-
-    /// An unknown app (`nil`) isn't treated as a terminal here; a failed pid lookup is already
-    /// `unknown` on its own path.
-    static func isTerminal(bundleID: String?) -> Bool {
-        bundleID.map(terminalBundleIDs.contains) ?? false
     }
 
     private enum AttributeRead: Equatable {
@@ -160,6 +149,21 @@ final class ClickDescriber: ClickDescribing {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, attribute as CFString, &value) == .success else { return nil }
         return value as? String
+    }
+
+    /// Nil when there's no readable size — the policy treats that as unknown.
+    private static func size(of el: AXUIElement) -> CGSize? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &value) == .success, let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var size = CGSize.zero
+        return AXValueGetValue(value as! AXValue, .cgSize, &size) ? size : nil
+    }
+
+    private static func strings(_ el: AXUIElement, _ attribute: String) -> [String] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, attribute as CFString, &value) == .success else { return [] }
+        return (value as? [String]) ?? []
     }
 
     private static func element(_ el: AXUIElement, _ attribute: String) -> AXUIElement? {
