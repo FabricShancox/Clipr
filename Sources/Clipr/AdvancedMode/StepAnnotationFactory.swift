@@ -6,7 +6,6 @@ import Foundation
 enum StepAnnotationFactory {
     static let ringDiameter: CGFloat = 36
     static let ringStroke: CGFloat = 3
-    static let dotDiameter: CGFloat = 14
     static let trailStroke: CGFloat = 2.5
     static let trailAlpha: CGFloat = 0.5
 

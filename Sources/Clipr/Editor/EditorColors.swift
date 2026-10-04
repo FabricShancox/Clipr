@@ -13,5 +13,4 @@ enum EditorColors {
     static let accent = Color(red: 0x33 / 255.0, green: 0x99 / 255.0, blue: 0xFF / 255.0)
     static let accent12 = Color(red: 0x33 / 255.0, green: 0x99 / 255.0, blue: 0xFF / 255.0).opacity(0.12)
     static let success = Color(red: 0x4C / 255.0, green: 0xAF / 255.0, blue: 0x50 / 255.0)
-    static let danger = Color(red: 0xF4 / 255.0, green: 0x43 / 255.0, blue: 0x36 / 255.0)
 }

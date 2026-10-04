@@ -183,19 +183,6 @@ final class StorageManager {
         }
     }
 
-    /// Convenience for callers that only care about the annotations themselves; treats a missing
-    /// and an unreadable sidecar alike. Prefer `readAnnotations` where the difference matters.
-    func loadAnnotations(rawURL: URL) -> [AnnotationObject] {
-        if case .loaded(let annotations) = readAnnotations(rawURL: rawURL) { return annotations }
-        return []
-    }
-
-    /// Removes a capture's annotation sidecar, if any — called alongside deleting the raw and
-    /// `_edited` files so no orphaned sidecar is left behind.
-    func deleteAnnotations(rawURL: URL) {
-        try? FileManager.default.removeItem(at: annotationsURL(forRaw: rawURL))
-    }
-
     /// Moves a file to the Trash. A seam so tests don't fill the real Trash.
     var trashItem: (URL) throws -> Void = { url in
         try FileManager.default.trashItem(at: url, resultingItemURL: nil)
@@ -292,27 +279,6 @@ final class StorageManager {
 
     private func annotationsURL(forRaw rawURL: URL) -> URL {
         rawURL.deletingLastPathComponent().appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent))
-    }
-
-    func createSessionFolder(date: Date) throws -> URL {
-        let folder = baseFolder.appendingPathComponent(FilenameGenerator.sessionFolderName(date: date))
-        do {
-            try Self.createPrivateFolder(folder)
-        } catch {
-            throw StorageError.folderCreationFailed(folder)
-        }
-        return folder
-    }
-
-    func saveStep(_ image: NSImage, index: Int, in sessionFolder: URL) throws -> URL {
-        let name = FilenameGenerator.stepName(index: index)
-        return try write(image, to: sessionFolder.appendingPathComponent(name))
-    }
-
-    /// Overwrites rather than suffixing: a zoom belongs to exactly one step file.
-    func saveStepZoom(_ image: NSImage, stepURL: URL) throws -> URL {
-        let name = FilenameGenerator.zoomName(fromStep: stepURL.lastPathComponent)
-        return try write(image, to: stepURL.deletingLastPathComponent().appendingPathComponent(name), overwrite: true)
     }
 
     func copyToClipboard(_ image: NSImage) {

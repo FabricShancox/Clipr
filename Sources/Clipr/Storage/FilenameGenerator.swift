@@ -10,7 +10,7 @@ struct FilenameGenerator {
     }
 
     /// Sidecar JSON filename storing a raw capture's live, editable `[AnnotationObject]` — see
-    /// `StorageManager.saveAnnotations`/`loadAnnotations`. Kept alongside `_edited.png` (which is
+    /// `StorageManager.saveAnnotations`/`readAnnotations`. Kept alongside `_edited.png` (which is
     /// only a flattened preview/export) so reopening a previously-edited capture from Recents
     /// restores the actual annotation objects, not just a static image.
     static func annotationsName(fromRaw rawFilename: String) -> String {

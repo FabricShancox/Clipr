@@ -145,7 +145,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     /// `initialAnnotations`, when omitted, loads whatever was last saved for `rawURL` from its
-    /// JSON sidecar (`StorageManager.loadAnnotations`) — empty for a capture that's never been
+    /// JSON sidecar (`StorageManager.readAnnotations`) — empty for a capture that's never been
     /// edited, or the exact set restored for one that has. `applyCrop`/`applyCanvasResize` pass
     /// an explicit (already-remapped) array instead, since loading from disk there would fetch
     /// the pre-crop/resize geometry.

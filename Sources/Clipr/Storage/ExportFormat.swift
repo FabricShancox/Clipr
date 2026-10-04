@@ -8,13 +8,6 @@ enum ExportFormat: String, CaseIterable {
     case png
     case jpeg
 
-    var displayName: String {
-        switch self {
-        case .png: return "PNG"
-        case .jpeg: return "JPEG"
-        }
-    }
-
     var fileExtension: String {
         switch self {
         case .png: return "png"
