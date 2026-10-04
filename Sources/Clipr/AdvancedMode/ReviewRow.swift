@@ -19,6 +19,11 @@ struct ReviewRow: View {
 
     private var isEditing: Bool { editingID == step.id }
 
+    private static let largeDetailsMinWidth: CGFloat = 180
+    /// What else shares a Large row with the image and caption: the number badge, the gaps
+    /// between the three, and the list's own row insets.
+    private static let largeChromeWidth: CGFloat = 26 + 16 * 2 + 40
+
     var body: some View {
         content
             .padding(.vertical, layout == .list ? 6 : 10)
@@ -50,12 +55,16 @@ struct ReviewRow: View {
             HStack(alignment: .top, spacing: 16) {
                 numberBadge
                 // About two-thirds of the row: big enough to read the step, leaving room for the
-                // caption beside it.
-                image.containerRelativeFrame(.horizontal) { width, _ in width * 0.62 }
+                // caption beside it. In a narrow window the image gives way first, so the caption
+                // column never drops below `largeDetailsMinWidth` and wraps a word per line.
+                image.containerRelativeFrame(.horizontal) { width, _ in
+                    max(120, min(width * 0.62, width - Self.largeDetailsMinWidth - Self.largeChromeWidth))
+                }
                 VStack(alignment: .leading, spacing: 10) {
                     details
                     editButton
                 }
+                .frame(minWidth: Self.largeDetailsMinWidth)
             }
         case .guide:
             VStack(alignment: .leading, spacing: 10) {
