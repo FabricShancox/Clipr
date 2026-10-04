@@ -68,8 +68,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = makeContentView()
         installKeyMonitor()
         // Opens maximized (screen's visible frame, not true fullscreen) so the capture is
-        // visible at its largest size on launch.
-        if let screen = NSScreen.main {
+        // visible at its largest size on launch — on the screen the pointer is on, which is the
+        // one just captured (or where Open Image… was chosen). `NSScreen.main` is the screen of
+        // whatever window was key, so the editor often opened on a different display.
+        if let screen = Self.screenUnderPointer() ?? NSScreen.main {
             window.setFrame(screen.visibleFrame, display: true)
         } else {
             window.center()
@@ -78,6 +80,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not supported") }
+
+    private static func screenUnderPointer() -> NSScreen? {
+        let pointer = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) }
+    }
 
     /// See `EditorCommands`. Only for this window, only while it has no sheet up, and never while
     /// a text view (a text annotation, the rename field) is first responder — there the keys keep

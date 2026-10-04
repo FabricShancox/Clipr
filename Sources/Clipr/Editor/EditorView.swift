@@ -154,7 +154,9 @@ struct EditorView: View {
                 canvasArea
             }
         }
-        .frame(minWidth: 900, minHeight: 620)
+        // Small enough to fit the visible frame of a 1024×640 (scaled) display; the toolbar needs
+        // the width, the canvas scrolls.
+        .frame(minWidth: 900, minHeight: 520)
         .background(EditorColors.s0)
         .background(toolShortcuts)
         .background(annotationEditingShortcuts)
