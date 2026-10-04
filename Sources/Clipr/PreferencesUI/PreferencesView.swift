@@ -212,7 +212,8 @@ struct PreferencesView: View {
                     HStack {
                         Slider(value: advancedBinding(\.captureDelay), in: 0.2...2, step: 0.1)
                             .frame(width: 180)
-                        Text(String(format: "%.1f s", advanced.captureDelay))
+                        // Locale-aware decimal separator (0,5 s in many locales).
+                        Text("\(advanced.captureDelay.formatted(.number.precision(.fractionLength(1)))) s")
                             .monospacedDigit()
                             .frame(width: 40, alignment: .trailing)
                     }
