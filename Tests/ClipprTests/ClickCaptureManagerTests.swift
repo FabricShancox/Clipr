@@ -159,7 +159,9 @@ final class ClickCaptureManagerTests: XCTestCase {
         let annotations = StorageManager(baseFolder: folder).loadAnnotations(rawURL: sessionFolder.appendingPathComponent(manifest.steps[0].file))
         let trail = annotations.first { if case .freehand = $0.kind { return true }; return false }
         guard case .freehand(let pts)? = trail?.kind else { return XCTFail("no trail") }
-        XCTAssertEqual(pts.count, 4)  // 2 moves + 1 move + final click point
+        // Starts at the first move (kept across the coalesced click) and ends on the final click.
+        XCTAssertEqual(pts.first, CGPoint(x: 10, y: 290))
+        XCTAssertEqual(pts.last, CGPoint(x: 70, y: 270))
     }
 
     func testClickOutsideImageHasNoMarkerOrZoom() throws {

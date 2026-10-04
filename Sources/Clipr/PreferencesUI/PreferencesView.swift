@@ -42,117 +42,210 @@ struct PreferencesView: View {
     }
 
     var body: some View {
+        TabView {
+            generalTab
+                .tabItem { Label("General", systemImage: "gearshape") }
+            advancedModeTab
+                .tabItem { Label("Advanced Mode", systemImage: "cursorarrow.click.2") }
+            aboutTab
+                .tabItem { Label("About", systemImage: "info.circle") }
+        }
+        .frame(width: 540, height: 600)
+        // Input Monitoring is granted in System Settings, outside this window, so re-check whenever
+        // the user comes back — otherwise "Grant…" lingers after it's no longer needed.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            inputMonitoringGranted = CGPreflightListenEventAccess()
+        }
+    }
+
+    // MARK: General
+
+    private var generalTab: some View {
         Form {
-            HotkeyRecorderView(binding: Binding(
-                get: { captureHotkey },
-                set: { captureHotkey = $0; settings.captureHotkey = $0; onHotkeysChanged() }
-            ))
-            .labeled("Capture Hotkey")
-
-            HotkeyRecorderView(binding: Binding(
-                get: { advancedModeHotkey },
-                set: { advancedModeHotkey = $0; settings.advancedModeHotkey = $0; onHotkeysChanged() }
-            ))
-            .labeled("Advanced Mode Hotkey")
-
-            HStack {
-                Text("Save Folder:")
-                Text(saveFolder.path).lineLimit(1).truncationMode(.head)
-                Button("Choose…") { chooseFolder() }
+            Section("Shortcuts") {
+                LabeledContent("Capture") {
+                    HotkeyRecorderView(binding: Binding(
+                        get: { captureHotkey },
+                        set: { captureHotkey = $0; settings.captureHotkey = $0; onHotkeysChanged() }
+                    ))
+                }
+                LabeledContent("Start / stop Advanced Mode") {
+                    HotkeyRecorderView(binding: Binding(
+                        get: { advancedModeHotkey },
+                        set: { advancedModeHotkey = $0; settings.advancedModeHotkey = $0; onHotkeysChanged() }
+                    ))
+                }
             }
 
-            Toggle("Launch at Login", isOn: Binding(
-                get: { launchAtLogin },
-                set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
-            ))
+            Section("Saving") {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([saveFolder]) }
+                        Button("Choose…") { chooseFolder() }
+                    }
+                } label: {
+                    Text("Save captures to")
+                    Text(saveFolder.path)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .help(saveFolder.path)
+                }
+            }
 
-            Toggle("Capture Mouse Cursor", isOn: Binding(
-                get: { captureCursor },
-                set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
-            ))
+            Section("Capturing") {
+                Toggle(isOn: Binding(
+                    get: { captureCursor },
+                    set: { captureCursor = $0; settings.captureCursor = $0; onCaptureCursorChanged() }
+                )) {
+                    Text("Include the mouse pointer")
+                    Text("Shows the pointer in screenshots and Advanced Mode steps.")
+                }
+            }
 
-            Toggle("Add Border When Copying", isOn: Binding(
-                get: { copyStyle.border },
-                set: { copyStyle.border = $0; settings.copyStyle = copyStyle }
-            ))
+            Section("Copying") {
+                Toggle(isOn: Binding(
+                    get: { copyStyle.border },
+                    set: { copyStyle.border = $0; settings.copyStyle = copyStyle }
+                )) {
+                    Text("Add a border")
+                    Text("A thin outline around copied images.")
+                }
+                Toggle(isOn: Binding(
+                    get: { copyStyle.shadow },
+                    set: { copyStyle.shadow = $0; settings.copyStyle = copyStyle }
+                )) {
+                    Text("Add a drop shadow")
+                    Text("Makes copied images stand out when pasted into documents.")
+                }
+            }
 
-            Toggle("Add Drop Shadow When Copying", isOn: Binding(
-                get: { copyStyle.shadow },
-                set: { copyStyle.shadow = $0; settings.copyStyle = copyStyle }
-            ))
+            Section("Startup") {
+                Toggle("Open Clipr at login", isOn: Binding(
+                    get: { launchAtLogin },
+                    set: { launchAtLogin = $0; settings.launchAtLogin = $0 }
+                ))
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: Advanced Mode
+
+    private var advancedModeTab: some View {
+        Form {
+            Section {
+                Toggle(isOn: advancedBinding(\.clickMarker)) {
+                    Text("Mark each click")
+                    Text("Draws an editable marker where you clicked.")
+                }
+                Picker("Marker style", selection: advancedBinding(\.markerStyle)) {
+                    Text("Ring").tag(AdvancedModeSettings.MarkerStyle.ring)
+                    Text("Dot").tag(AdvancedModeSettings.MarkerStyle.dot)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!advanced.clickMarker)
+                Toggle(isOn: advancedBinding(\.cursorTrail)) {
+                    Text("Show pointer trail")
+                    Text("A short curve showing where the pointer came from before each click.")
+                }
+                Toggle(isOn: advancedBinding(\.zoomOnClick)) {
+                    Text("Save a close-up of each click")
+                    Text("Adds a zoomed-in image next to each step, centred on the click.")
+                }
+            } header: {
+                Text("On each step")
+            }
 
             Section {
-                HStack {
-                    Toggle("Click marker", isOn: advancedBinding(\.clickMarker))
-                    Spacer()
-                    Picker("", selection: advancedBinding(\.markerStyle)) {
-                        Text("Ring").tag(AdvancedModeSettings.MarkerStyle.ring)
-                        Text("Dot").tag(AdvancedModeSettings.MarkerStyle.dot)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 110)
-                    .disabled(!advanced.clickMarker)
+                Toggle(isOn: advancedBinding(\.autoCaptions)) {
+                    Text("Write captions automatically")
+                    Text("For example \u{201C}Click Save in Safari\u{201D}.")
                 }
-                Toggle("Auto captions", isOn: advancedBinding(\.autoCaptions))
-                Toggle("Cursor trail", isOn: advancedBinding(\.cursorTrail))
-                Toggle("Zoom on click", isOn: advancedBinding(\.zoomOnClick))
-                HStack {
-                    Toggle("Typing steps", isOn: advancedBinding(\.typingSteps))
-                        .help("Not recorded in password fields, terminals, or apps that don't report their fields to Accessibility.")
-                    Spacer()
-                    if advanced.typingSteps && !inputMonitoringGranted {
-                        Button("Grant…") {
+                Toggle(isOn: advancedBinding(\.typingSteps)) {
+                    Text("Record typing as steps")
+                    Text("Not recorded in password fields, terminals, or apps that don\u{2019}t report their fields to Accessibility.")
+                }
+                if advanced.typingSteps && !inputMonitoringGranted {
+                    LabeledContent {
+                        Button("Open System Settings…") {
                             inputMonitoringGranted = CGRequestListenEventAccess()
                         }
-                        .help("Typing steps need Input Monitoring permission")
+                    } label: {
+                        Label("Needs Input Monitoring permission", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
                     }
                 }
-                Picker("Capture", selection: advancedBinding(\.scope)) {
-                    Text("Window").tag(AdvancedModeSettings.Scope.window)
-                    Text("Screen").tag(AdvancedModeSettings.Scope.screen)
+            } header: {
+                Text("Captions")
+            }
+
+            Section {
+                Picker(selection: advancedBinding(\.scope)) {
+                    Text("Clicked window").tag(AdvancedModeSettings.Scope.window)
+                    Text("Whole screen").tag(AdvancedModeSettings.Scope.screen)
                     Text("Fixed area").tag(AdvancedModeSettings.Scope.fixedArea)
+                } label: {
+                    Text("Capture")
+                    Text(scopeDescription)
                 }
-                HStack {
-                    Text("Capture delay")
-                    Slider(value: advancedBinding(\.captureDelay), in: 0.2...2, step: 0.1)
-                    Text(String(format: "%.1f s", advanced.captureDelay))
-                        .monospacedDigit()
-                        .frame(width: 40, alignment: .trailing)
+                LabeledContent {
+                    HStack {
+                        Slider(value: advancedBinding(\.captureDelay), in: 0.2...2, step: 0.1)
+                            .frame(width: 180)
+                        Text(String(format: "%.1f s", advanced.captureDelay))
+                            .monospacedDigit()
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                } label: {
+                    Text("Wait after click")
+                    Text("Lets menus and pop-ups finish opening before the screenshot.")
                 }
-                HStack {
-                    Text("Step hotkey")
-                    Spacer()
+                LabeledContent {
                     if let hotkey = advanced.stepHotkey {
-                        HotkeyRecorderView(binding: Binding(
-                            get: { hotkey },
-                            set: { advanced.stepHotkey = $0; settings.advancedMode = advanced }
-                        ))
-                        Button("Clear") { advanced.stepHotkey = nil; settings.advancedMode = advanced }
+                        HStack(spacing: 8) {
+                            HotkeyRecorderView(binding: Binding(
+                                get: { hotkey },
+                                set: { advanced.stepHotkey = $0; settings.advancedMode = advanced }
+                            ))
+                            Button("Clear") { advanced.stepHotkey = nil; settings.advancedMode = advanced }
+                        }
                     } else {
-                        Button("Set…") {
+                        Button("Add Shortcut") {
                             advanced.stepHotkey = HotkeyBinding(keyCode: 1, modifiers: HotkeyBinding.Modifier.control.rawValue | HotkeyBinding.Modifier.option.rawValue)
                             settings.advancedMode = advanced
                         }
-                        .help("Adds a hotkey (⌃⌥S) you can then re-record. Active only during a session.")
                     }
+                } label: {
+                    Text("Take a step without clicking")
+                    Text("Shortcut that works only while recording.")
                 }
             } header: {
-                Text("Advanced Mode")
+                Text("Capture")
             } footer: {
-                Text("Changes apply to the next Advanced Mode session.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Section {
-                LabeledContent("Version", value: Self.appVersion)
-            } header: {
-                Text("About")
+                Text("Changes apply the next time you start Advanced Mode.")
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .frame(width: 420)
+        .formStyle(.grouped)
+    }
+
+    private var scopeDescription: String {
+        switch advanced.scope {
+        case .window: return "Just the window you clicked in."
+        case .screen: return "The whole display you clicked on, including menus."
+        case .fixedArea: return "An area you choose when recording starts."
+        }
+    }
+
+    // MARK: About
+
+    private var aboutTab: some View {
+        Form {
+            Section {
+                LabeledContent("Version", value: Self.appVersion)
+            }
+        }
+        .formStyle(.grouped)
     }
 
     private static var appVersion: String {
@@ -178,15 +271,5 @@ struct PreferencesView: View {
             get: { advanced[keyPath: keyPath] },
             set: { advanced[keyPath: keyPath] = $0; settings.advancedMode = advanced }
         )
-    }
-}
-
-private extension View {
-    func labeled(_ title: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            self
-        }
     }
 }

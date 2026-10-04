@@ -34,15 +34,39 @@ final class StepAnnotationFactoryTests: XCTestCase {
         XCTAssertGreaterThan(outsideColor.greenComponent, 0.9)
     }
 
-    func testTrailMapsClipsAndFlips() throws {
+    func testTrailKeepsOnlyFinalInImageRunAndFlips() throws {
         let origin = CGPoint(x: 1000, y: 500)
-        let points = [CGPoint(x: 1010, y: 510), CGPoint(x: 900, y: 510), CGPoint(x: 1050, y: 560)]
+        // (900,510) is off-image: everything before it is dropped rather than joined by a chord.
+        let points = [CGPoint(x: 1010, y: 510), CGPoint(x: 900, y: 510), CGPoint(x: 1020, y: 520), CGPoint(x: 1050, y: 560)]
         let a = try XCTUnwrap(StepAnnotationFactory.trail(globalPoints: points, captureOrigin: origin, imageSize: size))
         guard case .freehand(let pts) = a.kind else { return XCTFail("not freehand") }
-        XCTAssertEqual(pts, [CGPoint(x: 10, y: 290), CGPoint(x: 50, y: 240)])  // off-image point dropped
-        XCTAssertEqual(a.frame, CGRect(x: 10, y: 240, width: 40, height: 50))
-        XCTAssertEqual(a.strokeWidth, 2)
-        XCTAssertEqual(a.color.alpha, 0.6, accuracy: 0.001)
+        XCTAssertEqual(pts.first, CGPoint(x: 20, y: 280))
+        XCTAssertEqual(pts.last, CGPoint(x: 50, y: 240))   // ends on the click, renderer space
+        XCTAssertEqual(a.frame, CGRect(x: 20, y: 240, width: 30, height: 40))
+        XCTAssertEqual(a.strokeWidth, 2.5)
+        XCTAssertEqual(a.color.alpha, 0.5, accuracy: 0.001)
+    }
+
+    func testTrailIsTrimmedToLastStretchBeforeClick() throws {
+        // 600pt straight path along y = 100 ending at the click (390, 100).
+        let points = stride(from: 0, through: 390, by: 30).map { CGPoint(x: CGFloat($0), y: 100) }
+        let a = try XCTUnwrap(StepAnnotationFactory.trail(globalPoints: points, captureOrigin: .zero, imageSize: size))
+        guard case .freehand(let pts) = a.kind else { return XCTFail("not freehand") }
+        XCTAssertEqual(pts.last, CGPoint(x: 390, y: 200))
+        XCTAssertEqual(StepAnnotationFactory.pathLength(pts), StepAnnotationFactory.trailMaxLength, accuracy: 0.5)
+    }
+
+    func testTrailTooShortIsDropped() {
+        XCTAssertNil(StepAnnotationFactory.trail(globalPoints: [CGPoint(x: 100, y: 100), CGPoint(x: 110, y: 100)],
+                                                 captureOrigin: .zero, imageSize: size))
+    }
+
+    func testSmoothingKeepsEndpointsAndRoundsCorners() {
+        let corner = [CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0), CGPoint(x: 100, y: 100)]
+        let s = StepAnnotationFactory.smoothed(corner)
+        XCTAssertEqual(s.first, corner.first)
+        XCTAssertEqual(s.last, corner.last)
+        XCTAssertFalse(s.contains(CGPoint(x: 100, y: 0)))   // the sharp corner is cut
     }
 
     func testTrailNeedsTwoPointsInside() {

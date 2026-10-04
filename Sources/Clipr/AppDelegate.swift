@@ -304,9 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the previous window on screen with its bindings still live, so two Preferences windows
         // could write to `SettingsStore` and re-register hotkeys independently.
         if let existing = preferencesWindowController {
-            existing.showWindow(nil)
-            existing.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            bringToFront(existing)
             return
         }
         let controller = PreferencesWindowController(
@@ -338,7 +336,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let token { NotificationCenter.default.removeObserver(token) }
             }
         }
+        bringToFront(controller)
+    }
+
+    /// Clipr is a menu-bar app, so it usually isn't active when Preferences is chosen; showing the
+    /// window without activating first left it behind whatever app the user was in. Activate,
+    /// then order front explicitly — `showWindow` alone doesn't raise a window of an inactive app.
+    private func bringToFront(_ controller: NSWindowController) {
+        NSApp.activate(ignoringOtherApps: true)
         controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        controller.window?.orderFrontRegardless()
     }
 
     /// `CaptureManager`/`AdvancedModeCoordinator` each hold their own `captureCursor` copy rather
