@@ -39,14 +39,15 @@ final class PDFGuideExporterTests: XCTestCase {
     }
 
     /// Runs one export and waits for it with an expectation, returning the file and any error.
-    private func export(_ html: String, timeout: TimeInterval = PDFGuideExporter.defaultTimeout) async -> (URL, Error?) {
+    private func export(_ html: String, timeout: TimeInterval = PDFGuideExporter.defaultTimeout,
+                        locale: Locale = .current) async -> (URL, Error?) {
         let url = folder.appendingPathComponent("guide.pdf")
         let exporter = PDFGuideExporter(timeout: timeout)
         let done = expectation(description: "PDF export finished")
         let task = Task { @MainActor () -> Error? in
             defer { done.fulfill() }
             do {
-                try await exporter.export(html: html, to: url)
+                try await exporter.export(html: html, to: url, locale: locale)
                 return nil
             } catch {
                 return error
@@ -84,5 +85,51 @@ final class PDFGuideExporterTests: XCTestCase {
         XCTAssertEqual(PDFGuideExporter.paperSize(for: Locale(identifier: "en_GB")), NSSize(width: 595.28, height: 841.89))
         XCTAssertEqual(PDFGuideExporter.paperSize(for: Locale(identifier: "de_DE")), NSSize(width: 595.28, height: 841.89))
         XCTAssertEqual(PDFGuideExporter.marginPoints, 51.02, accuracy: 0.01)
+    }
+
+    func testTimeoutLeavesNoDestinationFile() async throws {
+        let (url, error) = await export(try guideHTML(steps: 3), timeout: 0.001)
+        XCTAssertEqual(error as? PDFExportError, .timedOut)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testTimeoutLeavesExistingDestinationUnchanged() async throws {
+        let url = folder.appendingPathComponent("guide.pdf")
+        try Data("precious".utf8).write(to: url)
+        let (_, error) = await export(try guideHTML(steps: 3), timeout: 0.001)
+        XCTAssertEqual(error as? PDFExportError, .timedOut)
+        XCTAssertEqual(try Data(contentsOf: url), Data("precious".utf8))
+    }
+
+    func testSuccessReplacesExistingFile() async throws {
+        let url = folder.appendingPathComponent("guide.pdf")
+        try Data("old".utf8).write(to: url)
+        let (_, error) = await export(try guideHTML(steps: 3))
+        XCTAssertNil(error)
+        XCTAssertNotNil(PDFDocument(url: url))
+    }
+
+    func testSecondExportOnSameInstanceThrows() async throws {
+        let exporter = PDFGuideExporter()
+        let html = try guideHTML(steps: 1)
+        try await exporter.export(html: html, to: folder.appendingPathComponent("a.pdf"))
+        do {
+            try await exporter.export(html: html, to: folder.appendingPathComponent("b.pdf"))
+            XCTFail("expected alreadyUsed")
+        } catch {
+            XCTAssertEqual(error as? PDFExportError, .alreadyUsed)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("b.pdf").path))
+    }
+
+    func testPageSizeFollowsLocale() async throws {
+        for (id, expected) in [("en_GB", NSSize(width: 595.28, height: 841.89)), ("en_US", NSSize(width: 612, height: 792))] {
+            let (url, error) = await export(try guideHTML(steps: 1), locale: Locale(identifier: id))
+            XCTAssertNil(error)
+            let bounds = try XCTUnwrap(PDFDocument(url: url)?.page(at: 0)).bounds(for: .mediaBox)
+            XCTAssertEqual(bounds.width, expected.width, accuracy: 1, id)
+            XCTAssertEqual(bounds.height, expected.height, accuracy: 1, id)
+            try FileManager.default.removeItem(at: url)
+        }
     }
 }

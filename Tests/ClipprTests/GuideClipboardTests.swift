@@ -48,4 +48,25 @@ final class GuideClipboardTests: XCTestCase {
         // The pasteboard may derive plain text from the RTF, but the old string must be gone.
         XCTAssertNotEqual(pasteboard.string(forType: .string), "old")
     }
+
+    func testWritesRTFDWithTheStepImage() throws {
+        let picture = testImage(width: 40, height: 30) {
+            NSColor.systemTeal.set()
+            NSRect(x: 0, y: 0, width: 40, height: 30).fill()
+        }
+        let image = try XCTUnwrap(GuideImages.encode(try XCTUnwrap(picture.bitmap)))
+        let doc = GuideDocument(title: "Img", date: Date(), steps: [
+            GuideStep(number: 1, caption: "Look", appName: nil, imageSize: .full, image: .file(URL(fileURLWithPath: "/unused.png")), zoom: nil),
+        ])
+        var images = RenderedImages()
+        images.steps[1] = image
+        XCTAssertTrue(GuideClipboard.write(html: HTMLGuideWriter.write(doc, images: images, mode: .embedded), to: pasteboard))
+        let rtfd = try XCTUnwrap(pasteboard.data(forType: .rtfd))
+        let text = try XCTUnwrap(NSAttributedString(rtfd: rtfd, documentAttributes: nil))
+        var attachments = 0
+        text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            if value != nil { attachments += 1 }
+        }
+        XCTAssertGreaterThanOrEqual(attachments, 1)
+    }
 }
