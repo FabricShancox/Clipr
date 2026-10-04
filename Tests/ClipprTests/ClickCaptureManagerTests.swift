@@ -400,6 +400,35 @@ final class ClickCaptureManagerTests: XCTestCase {
         }
     }
 
+    // L4: a click made just before Pause is captured at Pause, not after the delay.
+    func testPauseCapturesPendingClickImmediately() throws {
+        images.delay = { _ in 0 }
+        _ = try manager.start(settings: settings { $0.captureDelay = 2 }, area: nil)
+        let captured = expectation(description: "captured at pause")
+        manager.onStepCaptured = { if $0 == 1 { captured.fulfill() } }
+        manager.handle(.click(CGPoint(x: 150, y: 160)))
+        manager.isPaused = true
+        wait(for: [captured], timeout: 1)   // well before the 2 s delay would have fired it
+        XCTAssertEqual(stop().0.steps.map(\.kind), [.click])
+    }
+
+    // L3: movement from before a pause doesn't lead into the first click after Resume.
+    func testPauseDropsCursorTrail() throws {
+        _ = try manager.start(settings: settings { $0.cursorTrail = true }, area: nil)
+        manager.handle(.mouseMoved(CGPoint(x: 110, y: 110)))
+        manager.handle(.mouseMoved(CGPoint(x: 120, y: 110)))
+        manager.isPaused = true
+        manager.isPaused = false
+        manager.handle(.mouseMoved(CGPoint(x: 300, y: 200)))
+        manager.handle(.click(CGPoint(x: 310, y: 210)))
+        waitForSteps(1)
+        let (manifest, sessionFolder) = stop()
+        let annotations = StorageManager(baseFolder: folder).loadAnnotations(rawURL: sessionFolder.appendingPathComponent(manifest.steps[0].file))
+        for annotation in annotations {
+            if case .freehand(let pts) = annotation.kind { XCTAssertFalse(pts.contains(CGPoint(x: 10, y: 290)), "pre-pause point in trail") }
+        }
+    }
+
     func testPausedIgnoresEverything() throws {
         _ = try manager.start(settings: settings(), area: nil)
         manager.isPaused = true

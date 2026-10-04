@@ -38,8 +38,21 @@ final class ClickCaptureManager {
     private static let stopFlushTimeout: TimeInterval = 10
 
     /// Pausing discards a half-typed burst rather than writing it, so nothing lands while paused.
+    /// A click still inside its delay is captured now, showing the screen it was made on rather
+    /// than whatever the user does while paused. The cursor trail is dropped both ways, so
+    /// movement from before a pause never leads into the first click after it.
     var isPaused = false {
-        didSet { if isPaused, !oldValue { discardTypingBurst() } }
+        didSet {
+            guard isPaused != oldValue else { return }
+            _ = trail.drain()
+            guard isPaused else { return }
+            discardTypingBurst()
+            if let pending {
+                pending.work.cancel()
+                self.pending = nil
+                fire(pending)
+            }
+        }
     }
     var captureCursor = false
     private(set) var typingUnavailable = false
