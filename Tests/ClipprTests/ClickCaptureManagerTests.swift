@@ -5,7 +5,11 @@ import XCTest
 private final class FakeSource: SessionEventSource {
     var onEvent: ((SessionEvent) -> Void)?
     var startedWith: SessionEventOptions?
-    func start(options: SessionEventOptions) throws { startedWith = options }
+    var startError: Error?
+    func start(options: SessionEventOptions) throws {
+        if let startError { throw startError }
+        startedWith = options
+    }
     func stop() {}
 }
 
@@ -112,6 +116,15 @@ final class ClickCaptureManagerTests: XCTestCase {
     func testTapOptionsFollowSettings() throws {
         _ = try manager.start(settings: settings { $0.cursorTrail = true; $0.typingSteps = true }, area: nil)
         XCTAssertEqual(source.startedWith, SessionEventOptions(mouseMoves: true, keys: true))
+    }
+
+    // L2: a tap that fails to start leaves no empty session folder behind.
+    func testFailedTapStartRemovesSessionFolder() throws {
+        source.startError = ClickCaptureError.eventTapCreationFailed
+        XCTAssertThrowsError(try manager.start(settings: settings(), area: nil))
+        XCTAssertFalse(manager.isActive)
+        let entries = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertFalse(entries.contains { $0.hasPrefix("Session_") }, "left behind: \(entries)")
     }
 
     func testTypingDisabledWithoutInputMonitoring() throws {

@@ -35,6 +35,14 @@ final class AdvancedModeCoordinatorTests: XCTestCase {
                        older.lastPathComponent)
     }
 
+    func testSameSecondSuffixesSortNumerically() throws {
+        try session("Session_2026-10-02_090000", steps: 1)
+        try session("Session_2026-10-02_090000_9", steps: 1)
+        let newest = try session("Session_2026-10-02_090000_10", steps: 1)
+        XCTAssertEqual(AdvancedModeCoordinator.latestSessionWithSteps(in: base, excluding: nil)?.lastPathComponent,
+                       newest.lastPathComponent)
+    }
+
     func testOnlyActiveSessionWithStepsMeansNone() throws {
         let active = try session("Session_2026-10-02_090000", steps: 3)
         XCTAssertNil(AdvancedModeCoordinator.latestSessionWithSteps(in: base, excluding: active))

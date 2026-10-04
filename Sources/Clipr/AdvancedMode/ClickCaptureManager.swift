@@ -106,7 +106,7 @@ final class ClickCaptureManager {
             throw ClickCaptureError.accessibilityNotGranted
         }
         let now = Date()
-        let folder = try storage.createSessionFolder(date: now)
+        let folder = try SessionFolder.create(in: storage.baseFolder, date: now)
         self.settings = settings
         self.area = area
         typingUnavailable = settings.typingSteps && !inputMonitoringGranted()
@@ -120,10 +120,17 @@ final class ClickCaptureManager {
         lastWrite = nil
         isPaused = false
         // Before `sessionFolder` is set, so a failure can't leave `isActive` true with no tap.
-        try eventSource.start(options: SessionEventOptions(
-            mouseMoves: settings.cursorTrail,
-            keys: settings.typingSteps && !typingUnavailable
-        ))
+        // The folder is still empty then; removed so "Review Last Session" never lands on it.
+        do {
+            try eventSource.start(options: SessionEventOptions(
+                mouseMoves: settings.cursorTrail,
+                keys: settings.typingSteps && !typingUnavailable
+            ))
+        } catch {
+            manifest = nil
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
         sessionFolder = folder
         return folder
     }

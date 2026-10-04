@@ -88,11 +88,12 @@ final class AdvancedModeCoordinator {
             at: base, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles
         ) else { return nil }
         // Session folder names embed a sortable `yyyy-MM-dd_HHmmss` timestamp, so name order is
-        // chronological order.
+        // chronological order. Compared numerically: a same-second session gets `_2`, `_3` … and
+        // `_10` must sort after `_9`.
         let sessions = entries
             .filter { $0.lastPathComponent.hasPrefix("Session_") }
             .filter { excluded == nil || !sameFolder($0, excluded!) }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
         return sessions.first { !SessionManifestStore.load(from: $0).steps.isEmpty }
     }
 
