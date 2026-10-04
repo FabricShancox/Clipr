@@ -7,6 +7,13 @@ final class StorageManager {
     /// `onSaveFolderChanged` callback; every path below reads it at call time.
     var baseFolder: URL
 
+    /// Writes encoded image data to disk. `.atomic` writes a temporary file beside the target and
+    /// renames it over the old one, so an overwrite either fully lands or leaves the previous file
+    /// intact — there is never a moment with no file. A seam so tests can inject a failed write.
+    var writeData: (Data, URL) throws -> Void = { data, url in
+        try data.write(to: url, options: .atomic)
+    }
+
     init(baseFolder: URL) {
         self.baseFolder = baseFolder
     }
@@ -288,11 +295,12 @@ final class StorageManager {
         // `overwrite` writes to `url` exactly as given (replacing whatever's already there);
         // otherwise resolve a collision by appending a numeric suffix, for callers where a
         // clash means two genuinely different captures landed on the same generated name.
+        //
+        // Never delete-then-write: that left no file at all when the write failed (disk full,
+        // volume ejected), while the editor reported the capture "left unchanged". `writeData`
+        // replaces atomically, so on failure the previous file is still there, untouched.
         let finalURL = overwrite ? url : uniqueURL(for: url)
-        if overwrite, FileManager.default.fileExists(atPath: finalURL.path) {
-            try FileManager.default.removeItem(at: finalURL)
-        }
-        try pngData.write(to: finalURL)
+        try writeData(pngData, finalURL)
         return finalURL
     }
 
