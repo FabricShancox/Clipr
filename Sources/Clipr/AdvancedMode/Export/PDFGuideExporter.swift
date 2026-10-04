@@ -9,6 +9,8 @@ enum PDFExportError: Error, Equatable {
     case printFailed
     /// `export` was called a second time on the same exporter.
     case alreadyUsed
+    /// `cancel()` was called.
+    case cancelled
 }
 
 /// Prints the guide's embedded HTML through WebKit straight to a PDF file, so pagination follows
@@ -35,6 +37,10 @@ final class PDFGuideExporter: NSObject, WKNavigationDelegate {
     private var timeoutItem: DispatchWorkItem?
     private var used = false
     private var printing = false
+    /// Holds the exporter (and so its window and web view) while a print runs: the operation keeps
+    /// only an unretained pointer to its delegate, and prints from the window's web view, so neither
+    /// may go away before it reports back — even after a timeout or cancel has already finished.
+    private var printKeepAlive: PDFGuideExporter?
     private var paperSize = NSSize(width: 595.28, height: 841.89)
     private var continuation: CheckedContinuation<Void, Error>?
 
@@ -77,6 +83,15 @@ final class PDFGuideExporter: NSObject, WKNavigationDelegate {
         }
     }
 
+    /// Stops the export now: halts the page load, ends the print run if it is modal for this
+    /// exporter's own window, deletes the temp file and throws `.cancelled` from `export`.
+    /// Does nothing once the export has finished.
+    func cancel() {
+        guard continuation != nil else { return }
+        webView?.stopLoading()
+        finish(.failure(PDFExportError.cancelled))
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         startPrinting()
     }
@@ -113,6 +128,7 @@ final class PDFGuideExporter: NSObject, WKNavigationDelegate {
         // The operation's view starts zero-sized; without a frame WebKit lays out nothing to print.
         operation.view?.frame = webView.bounds
         printing = true
+        printKeepAlive = self
         operation.runModal(for: window, delegate: self,
                            didRun: #selector(printOperationDidRun(_:success:contextInfo:)), contextInfo: nil)
     }
@@ -125,8 +141,15 @@ final class PDFGuideExporter: NSObject, WKNavigationDelegate {
 
     private func printDidFinish(success: Bool) {
         printing = false
-        // A late completion after the timeout finds no continuation and must not touch the destination.
-        guard continuation != nil else { return }
+        printKeepAlive = nil
+        // A late completion after a timeout or cancel finds no continuation and must not touch the
+        // destination; it only clears away whatever the print wrote and the window it printed from.
+        guard continuation != nil else {
+            if let tempURL { try? FileManager.default.removeItem(at: tempURL) }
+            tempURL = nil
+            tearDown()
+            return
+        }
         guard success, let tempURL, let destination, Self.isValidPDF(tempURL) else {
             finish(.failure(PDFExportError.printFailed))
             return
@@ -154,16 +177,30 @@ final class PDFGuideExporter: NSObject, WKNavigationDelegate {
         self.continuation = nil
         timeoutItem?.cancel()
         timeoutItem = nil
-        // End a print run the timeout interrupted, so its sheet doesn't outlive the window.
-        if printing, NSApp.modalWindow != nil { NSApp.abortModal() }
-        printing = false
+        // End a print run a timeout or cancel interrupted, so its sheet doesn't outlive the window —
+        // but only if it is this exporter's own modal run, never some other window's.
+        if printing, let window, NSApp.modalWindow === window { NSApp.abortModal() }
+        webView?.navigationDelegate = nil
+        // Whatever happened, the temp file is gone: on success it was already moved to the destination.
+        if let tempURL { try? FileManager.default.removeItem(at: tempURL) }
+        // A print still running keeps its window and the temp name until it reports back
+        // (`printDidFinish`), so it never prints from a freed view and its late file is deleted.
+        if !printing {
+            tempURL = nil
+            tearDown()
+        }
+        continuation.resume(with: result)
+    }
+
+    private func tearDown() {
         webView?.navigationDelegate = nil
         webView = nil
         window?.orderOut(nil)
         window = nil
-        // Whatever happened, the temp file is gone: on success it was already moved to the destination.
-        if let tempURL { try? FileManager.default.removeItem(at: tempURL) }
-        tempURL = nil
-        continuation.resume(with: result)
     }
+
+    /// Whether an export has started and not finished yet (for tests that cancel mid-way).
+    var isInFlight: Bool { continuation != nil }
+    /// Whether the print operation has been started and hasn't reported back.
+    var isPrinting: Bool { printing }
 }

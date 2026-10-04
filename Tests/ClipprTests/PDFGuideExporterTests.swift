@@ -101,6 +101,62 @@ final class PDFGuideExporterTests: XCTestCase {
         XCTAssertEqual(error as? PDFExportError, .timedOut)
     }
 
+    func testCancelStopsAThirtyStepExportQuicklyAndLeavesNothing() async throws {
+        let html = try guideHTML(steps: 30)
+        let url = folder.appendingPathComponent("guide.pdf")
+        let exporter = PDFGuideExporter()
+        let done = expectation(description: "PDF export finished")
+        let started = Date()
+        let task = Task { @MainActor () -> Error? in
+            defer { done.fulfill() }
+            do {
+                try await exporter.export(html: html, to: url)
+                return nil
+            } catch {
+                return error
+            }
+        }
+        while !exporter.isInFlight { await Task.yield() }
+        exporter.cancel()
+        await fulfillment(of: [done], timeout: 60)
+        let error = await task.value
+        XCTAssertEqual(error as? PDFExportError, .cancelled)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "well under the 30 s timeout")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        exporter.cancel() // a second cancel after finishing is harmless
+    }
+
+    func testCancelWhilePrintingFinishesCancelledAndLeavesNothing() async throws {
+        let html = try guideHTML(steps: 30)
+        let url = folder.appendingPathComponent("guide.pdf")
+        var exporter: PDFGuideExporter? = PDFGuideExporter()
+        let done = expectation(description: "PDF export finished")
+        let task = Task { @MainActor [exporter] () -> Error? in
+            defer { done.fulfill() }
+            do {
+                try await exporter?.export(html: html, to: url)
+                return nil
+            } catch {
+                return error
+            }
+        }
+        // Waits for the print to start; if this machine prints synchronously there's nothing to interrupt.
+        let deadline = Date().addingTimeInterval(20)
+        while exporter?.isInFlight == false { await Task.yield() }
+        while exporter?.isInFlight == true, exporter?.isPrinting == false, Date() < deadline {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let interruptedPrint = exporter?.isPrinting == true
+        exporter?.cancel()
+        exporter = nil // the caller lets go at once; a print still running must keep what it uses alive
+        await fulfillment(of: [done], timeout: 60)
+        let error = await task.value
+        if interruptedPrint { XCTAssertEqual(error as? PDFExportError, .cancelled) }
+        // Let a late print completion run, then nothing may be left behind.
+        try await Task.sleep(nanoseconds: 500_000_000)
+        if error != nil { XCTAssertFalse(FileManager.default.fileExists(atPath: url.path)) }
+    }
+
     func testPaperSizeFollowsLocale() {
         XCTAssertEqual(PDFGuideExporter.paperSize(for: Locale(identifier: "en_US")), NSSize(width: 612, height: 792))
         XCTAssertEqual(PDFGuideExporter.paperSize(for: Locale(identifier: "en_GB")), NSSize(width: 595.28, height: 841.89))
