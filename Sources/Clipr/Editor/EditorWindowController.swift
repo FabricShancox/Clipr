@@ -292,6 +292,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         panel.nameFieldStringValue = rawURL.deletingPathExtension().lastPathComponent
         panel.canCreateDirectories = true
         panel.message = "Export a copy of this capture"
+        // Snapshot the image now. The capture hotkey is global, so a new capture (or a Recent)
+        // can replace `self.image` while this sheet is up; reading it at Save time exported the
+        // new image with the old capture's annotations drawn on it.
+        let image = self.image
 
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
@@ -299,7 +303,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // filter or typing ".jpg" both do what the user expects.
             let format = ExportFormat.allCases.first { $0.fileExtension == url.pathExtension.lowercased() }
                 ?? (url.pathExtension.lowercased() == "jpeg" ? .jpeg : .png)
-            let flattened = AnnotationRenderer.flatten(base: self.image, annotations: annotations)
+            let flattened = AnnotationRenderer.flatten(base: image, annotations: annotations)
             do {
                 try self.storage.export(flattened, to: url, format: format)
             } catch {
