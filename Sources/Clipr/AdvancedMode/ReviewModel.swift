@@ -240,8 +240,12 @@ final class ReviewModel: ObservableObject {
 
     func deleteSelection() { delete(ids: selection) }
 
+    /// Refused, with nothing moved, if any of the steps has an image editor open: the editor's
+    /// next save would write the step's sidecar and edited preview back into the session as
+    /// orphans, and the delete's undo would then fail on them.
     func delete(ids: Set<UUID>) {
         guard !isReadOnly, !ids.isEmpty else { return }
+        guard ids.isDisjoint(with: stepsInEditor) else { banner = Self.editorOpenBanner; return }
         flushPendingCaption()
         let targets = manifest.steps.filter { ids.contains($0.id) }
         guard !targets.isEmpty else { return }

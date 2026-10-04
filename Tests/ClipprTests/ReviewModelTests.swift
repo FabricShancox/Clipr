@@ -132,6 +132,20 @@ final class ReviewModelTests: XCTestCase {
         XCTAssertEqual(captions(onDisk), ["a", "c", "d"])
     }
 
+    // M5: a step with its image editor open can't be deleted — the editor would write its
+    // sidecar and preview back into the session and break the delete's undo.
+    func testDeleteRefusedWhileStepIsInEditor() {
+        let model = makeModel()
+        let open = model.manifest.steps[1]
+        model.stepsInEditor = [open.id]
+        model.delete(ids: [open.id, model.manifest.steps[2].id])
+        XCTAssertEqual(model.manifest.steps.count, 4)
+        XCTAssertEqual(onDisk.steps.count, 4)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent(open.file).path))
+        XCTAssertEqual(model.banner, ReviewModel.editorOpenBanner)
+        XCTAssertFalse(model.undoManager.canUndo)
+    }
+
     func testDeleteAllThenUndoRestoresEverything() {
         let model = makeModel()
         model.selection = Set(model.manifest.steps.map(\.id))
