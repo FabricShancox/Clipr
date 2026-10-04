@@ -43,3 +43,22 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 ## Preferences
 - [ ] After granting Input Monitoring, 'Grant…' may remain until Preferences is reopened; reopening hides it.
 - [ ] Preferences window fits on the smallest display used.
+
+## Review
+- [ ] Steps are listed top to bottom, numbered 1…N, thumbnails the same size.
+- [ ] Drag a step to a new position → numbers update; reopen Review → order kept.
+- [ ] Select two non-adjacent steps (⌘-click) and drag them → both move, in order.
+- [ ] ⌥↑ / ⌥↓ move the selected step one place.
+- [ ] Click a caption → edit it; Return saves; reopen Review → new caption shown.
+- [ ] Type `**Save**` in a caption → shows bold after Return.
+- [ ] Esc while editing a caption → original caption back.
+- [ ] Empty a caption and press Return → "Add a caption" placeholder.
+- [ ] Select a step, press ⌫ → it disappears; its PNG, zoom and annotations files are in the Trash.
+- [ ] ⌘Z → the step is back in the same place with its files; ⇧⌘Z deletes it again.
+- [ ] ⌘A then ⌫ → "No steps — press ⌘Z to undo"; ⌘Z brings them all back.
+- [ ] Edit a step's image (Edit button) and close the editor → its thumbnail shows the changes.
+- [ ] In an editor opened from Review, clicking the filename does not start a rename.
+- [ ] Hand-edit `session.json` "version" to 2, open Review → read-only notice; no drag/edit/delete.
+- [ ] Click a caption, type one character, press Return → the character is saved (first keystroke not lost).
+- [ ] Type into a caption, delete back to the original text, close the window without pressing Return → reopen Review: the original caption is unchanged.
+- [ ] A caption whose text came from an app label containing a Markdown link (e.g. hand-edit session.json caption to `[Open](https://example.com)`) shows as plain text and is not clickable.
