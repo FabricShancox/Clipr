@@ -7,6 +7,8 @@ struct ReviewView: View {
     let onShowInFinder: () -> Void
 
     @State private var editingID: UUID?
+    /// Same key as `SettingsStore.reviewLayout`, so every Review window opens in the last choice.
+    @AppStorage(SettingsStore.reviewLayoutKey) private var layout: ReviewLayout = .list
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +49,16 @@ struct ReviewView: View {
                 Text("· \(model.selection.count) selected").foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("View", selection: $layout) {
+                ForEach(ReviewLayout.allCases) { option in
+                    Image(systemName: option.symbol)
+                        .help("\(option.title) (⌘\((ReviewLayout.allCases.firstIndex(of: option) ?? 0) + 1))")
+                        .tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 120)
             Button("Delete Selected", role: .destructive) { model.deleteSelection() }
                 .disabled(model.selection.isEmpty || model.isReadOnly)
             Button("Show in Finder", action: onShowInFinder)
@@ -58,7 +70,7 @@ struct ReviewView: View {
     private var list: some View {
         List(selection: $model.selection) {
             ForEach(Array(model.manifest.steps.enumerated()), id: \.element.id) { index, step in
-                ReviewRow(number: index + 1, step: step, model: model, editingID: $editingID, onOpenEditor: onOpenEditor)
+                ReviewRow(number: index + 1, step: step, layout: layout, model: model, editingID: $editingID, onOpenEditor: onOpenEditor)
                     .tag(step.id)
             }
             .onMove { model.move(fromOffsets: $0, toOffset: $1) }
@@ -90,6 +102,11 @@ struct ReviewView: View {
             Button("") { model.moveSelection(by: 1) }
                 .keyboardShortcut(.downArrow, modifiers: .option)
                 .disabled(editingID != nil || model.isReadOnly)
+            // ⌘1 / ⌘2 / ⌘3, as Finder does for its views.
+            ForEach(Array(ReviewLayout.allCases.enumerated()), id: \.element) { index, option in
+                Button("") { layout = option }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
         }
         .opacity(0)
         .allowsHitTesting(false)

@@ -6,6 +6,7 @@ import SwiftUI
 struct ReviewRow: View {
     let number: Int
     let step: StepRecord
+    let layout: ReviewLayout
     @ObservedObject var model: ReviewModel
     @Binding var editingID: UUID?
     let onOpenEditor: (StepRecord) -> Void
@@ -17,45 +18,8 @@ struct ReviewRow: View {
     private var isEditing: Bool { editingID == step.id }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Text("\(number)")
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Color.accentColor.opacity(0.18)))
-                .padding(.top, 4)
-
-            Color.black.opacity(0.25)
-                .aspectRatio(16.0 / 10.0, contentMode: .fit)
-                .frame(width: 200)
-                .overlay(
-                    ThumbnailView(url: model.thumbnailURL(for: step), contentMode: .fit)
-                        // New identity after the editor closes so the edited image is decoded.
-                        .id("\(step.id)-\(model.refreshToken)")
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .onTapGesture(count: 2) { onOpenEditor(step) }
-                .help("Double-click to edit the image")
-
-            VStack(alignment: .leading, spacing: 6) {
-                caption
-                HStack(spacing: 6) {
-                    if let app = step.appName {
-                        Text(app)
-                    }
-                    Text(kindLabel)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.secondary.opacity(0.18)))
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button("Edit") { onOpenEditor(step) }
-                .padding(.top, 2)
-        }
-        .padding(.vertical, 6)
+        content
+            .padding(.vertical, layout == .list ? 6 : 10)
         .onChange(of: editingID) { _, newValue in
             if newValue == step.id {
                 model.beginCaptionEdit(for: step.id)
@@ -67,6 +31,87 @@ struct ReviewRow: View {
                 DispatchQueue.main.async { fieldFocused = true }
             }
         }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch layout {
+        case .list:
+            HStack(alignment: .top, spacing: 14) {
+                numberBadge
+                image.frame(width: 200)
+                details
+                editButton
+            }
+        case .large:
+            HStack(alignment: .top, spacing: 16) {
+                numberBadge
+                // About two-thirds of the row: big enough to read the step, leaving room for the
+                // caption beside it.
+                image.containerRelativeFrame(.horizontal) { width, _ in width * 0.62 }
+                VStack(alignment: .leading, spacing: 10) {
+                    details
+                    editButton
+                }
+            }
+        case .guide:
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    numberBadge
+                    details
+                    editButton
+                }
+                image.frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var numberBadge: some View {
+        Text("\(number)")
+            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(Color.accentColor.opacity(0.18)))
+            .padding(.top, 4)
+    }
+
+    /// The step's image in a 16:10 box, fitted, so every row in a layout has the same shape.
+    private var image: some View {
+        Color.black.opacity(0.25)
+            .aspectRatio(16.0 / 10.0, contentMode: .fit)
+            .overlay(
+                ThumbnailView(
+                    url: model.thumbnailURL(for: step), contentMode: .fit,
+                    maxPixelSize: layout == .list ? ThumbnailCache.maxPixelSize : ThumbnailCache.largePixelSize
+                )
+                // New identity after the editor closes so the edited image is decoded.
+                .id("\(step.id)-\(model.refreshToken)-\(layout.rawValue)")
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .onTapGesture(count: 2) { onOpenEditor(step) }
+            .help("Double-click to edit the image")
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            caption
+            HStack(spacing: 6) {
+                if let app = step.appName {
+                    Text(app)
+                }
+                Text(kindLabel)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.18)))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var editButton: some View {
+        Button("Edit") { onOpenEditor(step) }
+            .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -94,7 +139,7 @@ struct ReviewRow: View {
                     Text("Add a caption").foregroundStyle(.tertiary)
                 }
             }
-            .font(.body)
+            .font(layout == .list ? .body : .title3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { if !model.isReadOnly { editingID = step.id } }

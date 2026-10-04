@@ -5,12 +5,14 @@ struct ThumbnailView: View {
     /// `.fill` crops to cover the tile (Recents); `.fit` shows the whole capture (Review, where the
     /// clicked spot can be anywhere in the image).
     var contentMode: ContentMode = .fill
+    var maxPixelSize: Int = ThumbnailCache.maxPixelSize
     @State private var image: NSImage?
 
-    init(url: URL, contentMode: ContentMode = .fill) {
+    init(url: URL, contentMode: ContentMode = .fill, maxPixelSize: Int = ThumbnailCache.maxPixelSize) {
         self.url = url
         self.contentMode = contentMode
-        _image = State(initialValue: ThumbnailCache.shared.image(for: url))
+        self.maxPixelSize = maxPixelSize
+        _image = State(initialValue: ThumbnailCache.shared.image(for: url, maxPixelSize: maxPixelSize))
     }
 
     var body: some View {
@@ -25,13 +27,13 @@ struct ThumbnailView: View {
             guard image == nil else { return }
             // Detached so the decode doesn't run on the main actor, which `.task` would otherwise
             // inherit — this used to be a full-resolution decode blocking the UI per tile.
-            let url = url
+            let url = url, size = maxPixelSize
             let loaded = await Task.detached(priority: .userInitiated) {
-                ThumbnailCache.decodeThumbnail(at: url)
+                ThumbnailCache.decodeThumbnail(at: url, maxPixelSize: size)
             }.value
             guard let loaded else { return }
             image = loaded
-            ThumbnailCache.shared.store(loaded, for: url)
+            ThumbnailCache.shared.store(loaded, for: url, maxPixelSize: size)
         }
     }
 }

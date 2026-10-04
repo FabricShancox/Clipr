@@ -16,6 +16,9 @@ final class SettingsStore {
         static let advancedMode = "advancedMode"
     }
 
+    /// Shared with `ReviewView`'s `@AppStorage`, which reads and writes the same key directly.
+    static let reviewLayoutKey = "reviewLayout"
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
@@ -76,6 +79,13 @@ final class SettingsStore {
     var advancedMode: AdvancedModeSettings {
         get { decoded(Key.advancedMode) ?? .default }
         set { encode(newValue, forKey: Key.advancedMode) }
+    }
+
+    /// How the Review window lays out steps. Unknown stored values (a newer build's layout) fall
+    /// back to the list rather than failing.
+    var reviewLayout: ReviewLayout {
+        get { defaults.string(forKey: Self.reviewLayoutKey).flatMap(ReviewLayout.init(rawValue:)) ?? .list }
+        set { defaults.set(newValue.rawValue, forKey: Self.reviewLayoutKey) }
     }
 
     private func decoded<T: Decodable>(_ key: String) -> T? {

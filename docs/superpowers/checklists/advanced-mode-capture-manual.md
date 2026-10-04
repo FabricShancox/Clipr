@@ -65,3 +65,6 @@ Accessibility / Screen Recording / Input Monitoring if prompted (ad-hoc rebuilds
 - [ ] Start recording, open Review Last Session → the session being recorded is not offered.
 - [ ] Stop recording while that session's Review is already open → the existing window comes forward (no second window).
 - [ ] Type a caption and press ⌘Q within half a second → reopen Review: caption saved.
+- [ ] View toggle (List / Large / Guide) and ⌘1 / ⌘2 / ⌘3 switch layouts; images in Large and Guide are sharp.
+- [ ] Drag-reorder, ⌫, ⌘Z and caption editing work the same in all three layouts.
+- [ ] Close and reopen Review → it opens in the last chosen layout.

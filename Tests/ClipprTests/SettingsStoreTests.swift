@@ -1,4 +1,5 @@
 import XCTest
+import Cocoa
 @testable import Clipr
 
 final class SettingsStoreTests: XCTestCase {
@@ -36,5 +37,28 @@ final class SettingsStoreTests: XCTestCase {
         store.launchAtLogin = true
         let reloaded = SettingsStore(defaults: defaults)
         XCTAssertTrue(reloaded.launchAtLogin)
+    }
+
+    func testReviewLayoutDefaultsToListAndPersists() {
+        XCTAssertEqual(store.reviewLayout, .list)
+        store.reviewLayout = .guide
+        XCTAssertEqual(SettingsStore(defaults: defaults).reviewLayout, .guide)
+    }
+
+    func testUnknownReviewLayoutFallsBackToList() {
+        defaults.set("carousel", forKey: SettingsStore.reviewLayoutKey)
+        XCTAssertEqual(store.reviewLayout, .list)
+    }
+
+    func testThumbnailCacheKeepsSizesApartAndRemovesAll() {
+        let url = URL(fileURLWithPath: "/tmp/\(UUID().uuidString).png")
+        let small = NSImage(size: CGSize(width: 1, height: 1)), big = NSImage(size: CGSize(width: 2, height: 2))
+        ThumbnailCache.shared.store(small, for: url)
+        ThumbnailCache.shared.store(big, for: url, maxPixelSize: ThumbnailCache.largePixelSize)
+        XCTAssertTrue(ThumbnailCache.shared.image(for: url) === small)
+        XCTAssertTrue(ThumbnailCache.shared.image(for: url, maxPixelSize: ThumbnailCache.largePixelSize) === big)
+        ThumbnailCache.shared.remove(url)
+        XCTAssertNil(ThumbnailCache.shared.image(for: url))
+        XCTAssertNil(ThumbnailCache.shared.image(for: url, maxPixelSize: ThumbnailCache.largePixelSize))
     }
 }
