@@ -94,8 +94,19 @@ final class StorageManager {
     /// reopening it from Recents (or relaunching Clipr entirely) restores actual editable
     /// annotations rather than only a flattened preview image. Called alongside
     /// `saveEditedCapture` on every auto-save.
+    ///
+    /// No annotations means no sidecar. Writing `[]` put an `X_annotations.json` beside every
+    /// capture merely viewed in the editor — and beside images opened from elsewhere — and failed
+    /// (logged only) on read-only folders. An empty save instead removes any sidecar left over,
+    /// including stale `[]` files from earlier builds; a missing sidecar already loads as "none".
     func saveAnnotations(_ annotations: [AnnotationObject], rawURL: URL) throws {
         let url = annotationsURL(forRaw: rawURL)
+        guard !annotations.isEmpty else {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            return
+        }
         let data = try JSONEncoder().encode(annotations)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)

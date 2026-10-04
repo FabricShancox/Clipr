@@ -174,6 +174,38 @@ final class StorageManagerTests: XCTestCase {
 
     /// A save-folder change in Preferences re-points the existing (long-lived) StorageManager rather
     /// than rebuilding it, so writes must follow the new folder immediately.
+    // MARK: - Empty sidecars
+
+    private func sidecarURL(for rawURL: URL) -> URL {
+        rawURL.deletingLastPathComponent().appendingPathComponent(FilenameGenerator.annotationsName(fromRaw: rawURL.lastPathComponent))
+    }
+
+    func testSavingNoAnnotationsWritesNoSidecar() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        try manager.saveAnnotations([], rawURL: rawURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecarURL(for: rawURL).path))
+        if case .missing = manager.readAnnotations(rawURL: rawURL) {} else { XCTFail("expected no sidecar") }
+    }
+
+    func testSavingNoAnnotationsRemovesAStaleEmptySidecar() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        try Data("[]".utf8).write(to: sidecarURL(for: rawURL))
+        try manager.saveAnnotations([], rawURL: rawURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecarURL(for: rawURL).path))
+    }
+
+    func testDeletingTheLastAnnotationRemovesTheSidecar() throws {
+        let rawURL = try manager.saveRawCapture(makeTestImage(), date: Date())
+        let annotation = AnnotationObject(
+            id: UUID(), kind: .rectangle, frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+            color: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1), strokeWidth: 1
+        )
+        try manager.saveAnnotations([annotation], rawURL: rawURL)
+        try manager.saveAnnotations([], rawURL: rawURL)
+        XCTAssertEqual(manager.loadAnnotations(rawURL: rawURL), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecarURL(for: rawURL).path))
+    }
+
     // MARK: - Deleting a Recent
 
     func testDeleteCaptureMovesTheCaptureAndItsCompanionsToTheTrash() throws {

@@ -117,7 +117,29 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     /// nothing shown to the user. Called from `windowWillClose` and from
     /// `AppDelegate.applicationShouldTerminate`.
     func flushPendingSave() {
-        persist(latestAnnotations)
+        guard !persist(latestAnnotations) else { return }
+        reportSaveFailureOnce()
+    }
+
+    /// Set once the user has been told this window's work couldn't be saved, so a folder that
+    /// stays unwritable (a read-only volume, a revoked permission) produces one alert, not one on
+    /// every focus change.
+    private var hasReportedSaveFailure = false
+
+    /// Flushes from closing, quitting or switching away used to fail with only an `NSLog`, so
+    /// annotations on a capture in an unwritable folder were lost on close with no warning.
+    private func reportSaveFailureOnce() {
+        guard !hasReportedSaveFailure else { return }
+        hasReportedSaveFailure = true
+        let alert = NSAlert()
+        alert.messageText = "Couldn't save your annotations"
+        alert.informativeText = "Changes to \(rawURL.lastPathComponent) couldn't be written to its folder. Use Save As… to keep a copy elsewhere."
+        alert.alertStyle = .warning
+        if let window, window.isVisible, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     /// `initialAnnotations`, when omitted, loads whatever was last saved for `rawURL` from its
@@ -253,8 +275,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     /// Writes the flattened preview and the annotations sidecar for the CURRENT capture. Callers
     /// inside this class use it directly — they only ever run for the live view, so they need no
-    /// staleness check. Failures are logged, not alerted, since this can fire often.
-    private func persist(_ annotations: [AnnotationObject], flattened: FlattenedWrite = .now) {
+    /// staleness check. Failures are logged here, since this can fire often; `flushPendingSave`
+    /// tells the user (once) when a flush it depends on fails.
+    @discardableResult
+    private func persist(_ annotations: [AnnotationObject], flattened: FlattenedWrite = .now) -> Bool {
         do {
             // The sidecar is what actually preserves the user's work — it restores editable
             // annotations on reopen and costs well under a millisecond — so it is written every
@@ -265,7 +289,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
             let dueForWrite = flattened == .now
                 || Date().timeIntervalSince(lastFlattenedWrite) >= Self.flattenedWriteInterval
-            guard flattenedIsStale, dueForWrite else { return }
+            guard flattenedIsStale, dueForWrite else { return true }
 
             let rendered = AnnotationRenderer.flatten(base: image, annotations: annotations)
             _ = try storage.saveEditedCapture(rendered, rawURL: rawURL)
@@ -281,8 +305,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             // restores them instead of showing a plain, no-longer-editable image. This is what
             // makes returning to a previously-edited capture not read as "losing" the edits.
             try storage.saveAnnotations(annotations, rawURL: rawURL)
+            return true
         } catch {
             NSLog("Clipr: auto-save failed: \(error)")
+            return false
         }
     }
 
